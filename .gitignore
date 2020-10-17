@@ -1,0 +1,10 @@
+*.sln
+*.suo
+*.filter
+*.user
+*.vcxproj
+*.db
+
+.vs
+[bB]uilds/
+[bB]in/
