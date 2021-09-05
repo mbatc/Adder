@@ -1,2 +1,3 @@
 # Adder
-A programming language (not yet)
+
+Simple virtual processor and custom assembly language.
