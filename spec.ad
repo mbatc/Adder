@@ -1,0 +1,79 @@
+
+// A function definition
+fn MyFn(a: foo, b: int32 c) => Bar {
+
+}
+
+// A class definition
+class foo {
+    bar: int32 = 0;
+    fib: int16 = 0;
+    str: String = "Default";
+
+    init create(a: int32, b: int16) {
+        this.bar = a;
+        this.dif = b;
+    }
+
+    
+    // fn Foo_init_create(self: & foo, a: int32, b: int32 b) => foo {
+    // 
+    // }
+
+    init new(a: string) {
+        this.bar = 10;
+        this.dif = 15;
+        this.str = a;
+    }
+
+
+    // fn Foo_init_new(self: & foo, a: string) => foo {
+    // 
+    // }
+}
+
+extern fn NativeMethod(a: int32) => void;
+
+// Assign a variable
+const a: uint8 = 5;
+
+// Construct a class using a named constructor
+const b: foo = create(10, 11);
+
+// Construct a class using a different named constructor
+let c = foo.new(12, 13);
+
+// Array
+let storage = uint8[sizeof(foo)];
+
+// Construct a foo in place in the specified memory
+const d: foo = init storage as foo.create(10, 11);
+
+// Construct a foo into manually allocated memory
+const e: foo = init System.allocate(sizeof(foo)) as foo.new("Init into system allocated memory");
+
+
+// Compiled Program Layout
+// header
+//  * public_symbol_count: uint64_t
+//  * extern_symbol_count: uint64_t
+//  * symbol_data_size:    uint64_t
+//  * program_data_size:   uint64_t
+//  * code_size:           uint64_t
+// public_symbol_table[]
+// extern_symbol_table[]
+// symbol_data
+// program_data
+// code
+//
+// public_symbols is a sequence of symbol address/data address pairs.
+//   * symbol address is the location of the symbol name. Symbol name is a c-string
+//   * data address is the location of the data. Format of the data depends on the type of symbol.
+//     For a function, this is code.
+//     For a variable, this is the value.
+//   * public_symbols is terminated by a [ 0, 0 ] pair.
+//
+// extern_symbols is a sequence of address/symbol pairs.
+//   * Same as public_symbols except data address is 0 at program load time.
+//   * When the program is loaded, the vm should try resolve external symbols.
+//   * The VM will query the host for the symbol addresses and write the resolved address to "data address" in the table.
