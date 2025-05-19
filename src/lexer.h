@@ -9,7 +9,7 @@ namespace adder {
       enum class token_class {
         unknown = -1,
         identifier,
-        literal,
+        literal_,
         operator_,
         keyword,
         grammar,
@@ -17,7 +17,14 @@ namespace adder {
       };
 
       enum class token_id {
-        none, // Identifier
+        unknown = -1,
+
+        identifier, // Identifier
+        string_literal,
+        true_,
+        false_,
+        integer,
+        decimal,
 
         // Keywords
         fn,
@@ -32,6 +39,8 @@ namespace adder {
         if_,
         else_,
         elseif,
+
+        return_,
 
         // Grammar
         colon,
@@ -63,7 +72,6 @@ namespace adder {
         add,
         minus,
         dot,
-        call,
 
         count
       };
@@ -81,6 +89,9 @@ namespace adder {
         token_id id;
         token_class cls;
         std::string_view name;
+
+        size_t line   = 1;
+        size_t column = 1;
       };
 
       class token_parser {
@@ -102,16 +113,23 @@ namespace adder {
         bool next();
 
         token_view const & current() const;
+        token_view const & previous() const;
         bool eof() const;
 
+        std::vector<std::string> const& errors() const;
+
       private:
+        bool _next();
+
         void raise(std::string const & error);
         bool parseLineComment();
         bool parseBlockComment();
 
         std::string      m_source;
         std::string_view m_remaining;
-        token_view       m_current;
+
+        token_view m_previous;
+        token_view m_current;
 
         std::vector<std::string> m_errors;
       };
@@ -119,7 +137,7 @@ namespace adder {
       template<typename Rule>
       token_parser& token_parser::parse(Rule const & rule, token_view * storage) {
         if (!rule(current())) {
-          raise("Unexpected token " + std::string(current().name));
+          raise("Unexpected token '" + std::string(current().name) + "' (line: " + std::to_string(current().line) + ", col: " + std::to_string(current().column) + ")");
           return *this;
         }
 
