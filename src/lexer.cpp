@@ -217,7 +217,17 @@ namespace adder {
           m_current.column += m_current.name.data() - m_previous.name.data();
         }
 
-        m_remaining = str::trim_start(m_remaining.substr(end), " \r\t\v"); // Skip whitespace (except \n as we tokenize new lines)
+        if (end == std::string::npos) {
+          m_current.id = token_id::eof;
+          m_current.name = "";
+          m_current.cls = token_class::grammar;
+          m_current.line   = 0;
+          m_current.column = 0;
+        }
+        else {
+          m_remaining = str::trim_start(m_remaining.substr(end), " \r\t\v"); // Skip whitespace (except \n as we tokenize new lines)
+        }
+
         return true;
       }
 

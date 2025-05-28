@@ -7,6 +7,7 @@ namespace adder {
   namespace vm {
     using register_value = uint64_t;
     using register_index = uint8_t;
+    using address_t      = uint64_t;
 
     enum class op_code : uint64_t {
       exit,             ///< Load a value from a memory address

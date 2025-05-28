@@ -9,7 +9,7 @@ int main(int argc, char ** argv) {
 
   std::string content;
   {
-    FILE * file = fopen("spec.ad", "r");
+    FILE * file = fopen("tests/simple-assign.ad", "r");
     while (!feof(file)) {
       char buffer[1024];
       size_t numRead = fread(buffer, 1, sizeof(buffer), file);

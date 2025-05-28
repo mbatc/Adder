@@ -4,33 +4,33 @@
 namespace adder {
   namespace vm {
     namespace detail {
-      inline static constexpr size_t instruction_size[op_code_count] = {
-        sizeof(op_code) + sizeof(op_code_args<op_code::exit>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::load>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::load_stack>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::load_addr>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::store>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::store_stack>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::set>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::add_i64>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::add_f64>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::mul_i64>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::mul_f64>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::div_i64>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::div_f64>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::push>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::pop>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::jump>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::move>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::compare_i64>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::compare_f64>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::conditional_jump>),
-        sizeof(op_code) + sizeof(op_code_args<op_code::conditional_move>)
-      };
+      // inline static constexpr size_t instruction_size[op_code_count] = {
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::exit>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::load>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::load_stack>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::load_addr>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::store>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::store_stack>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::set>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::add_i64>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::add_f64>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::mul_i64>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::mul_f64>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::div_i64>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::div_f64>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::push>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::pop>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::jump>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::move>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::compare_i64>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::compare_f64>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::conditional_jump>),
+      //   sizeof(op_code) + sizeof(op_code_args<op_code::conditional_move>)
+      // };
     }
 
     size_t instruction_size(op_code code) {
-      return detail::instruction_size[(int)code];
+      return sizeof(instruction)/*detail::instruction_size[(int)code]*/;
     }
 
     uint8_t const * allocator::read(uint64_t address) const {
