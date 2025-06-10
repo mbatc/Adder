@@ -47,13 +47,14 @@ namespace adder {
 
     template<> struct op_code_args<op_code::load_stack> {
       register_index dst;
-      uint8_t        size;
       uint16_t       offset; // [reg]
+      uint8_t        size;
     };
 
     template<> struct op_code_args<op_code::load_addr> {
       register_index dst;
       uint64_t       addr; // Constant address within the program. Must be relocated when the program is loaded.
+      uint8_t        size;
     };
 
     template<> struct op_code_args<op_code::store> {
@@ -160,9 +161,9 @@ namespace adder {
       std::list<block>     blocks; ///< Available blocks
       std::vector<uint8_t> data;   ///< Allocated data for this heap.
 
-      uint8_t const * read(uint64_t address) const;
-      uint8_t * read(uint64_t address);
-      size_t write(uint64_t address, uint8_t const * bytes, size_t count);
+      uint8_t const * read(uint64_t stack_address) const;
+      uint8_t * read(uint64_t stack_address);
+      size_t write(uint64_t stack_address, uint8_t const * bytes, size_t count);
       uint64_t allocate(size_t size);
       void free(uint64_t block);
     };
@@ -174,7 +175,7 @@ namespace adder {
       uint64_t allocate(size_t size);
 
       /// Free a heap allocation.
-      void free(uint64_t address);
+      void free(uint64_t stack_address);
 
       /// Push data to the stack
       uint64_t push(void const * data, size_t size);
@@ -183,17 +184,18 @@ namespace adder {
       void pop(size_t bytes);
 
       uint64_t  stack_bottom() const;
-      bool      is_stack(uint64_t address) const;
+      bool      is_stack(uint64_t stack_address) const;
 
-      uint8_t * read(uint64_t address);
-      uint8_t const * read(uint64_t address) const;
+      uint8_t * read(uint64_t stack_address);
+      uint8_t const * read(uint64_t stack_address) const;
 
-      size_t write(uint64_t address, uint8_t const * bytes, size_t count);
+      size_t write(uint64_t stack_address, uint8_t const * bytes, size_t count);
       uint8_t * read_stack(uint64_t offset);
       uint8_t const * read_stack(uint64_t offset) const;
       size_t write_stack(uint64_t offset, uint8_t const * bytes, size_t count);
 
       std::vector<uint8_t> stack; ///< Stack allocator
+      uint64_t             stack_size = 0;
       allocator            heap;  ///< Heap allocator
     };
 

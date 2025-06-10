@@ -33,16 +33,16 @@ namespace adder {
       return sizeof(instruction)/*detail::instruction_size[(int)code]*/;
     }
 
-    uint8_t const * allocator::read(uint64_t address) const {
-      return &data[address];
+    uint8_t const * allocator::read(uint64_t stack_address) const {
+      return &data[stack_address];
     }
 
-    uint8_t * allocator::read(uint64_t address) {
-      return &data[address];
+    uint8_t * allocator::read(uint64_t stack_address) {
+      return &data[stack_address];
     }
 
-    size_t allocator::write(uint64_t address, uint8_t const * bytes, size_t count) {
-      memcpy(&data[address], bytes, count);
+    size_t allocator::write(uint64_t stack_address, uint8_t const * bytes, size_t count) {
+      memcpy(&data[stack_address], bytes, count);
       return count;
     }
 
@@ -61,11 +61,20 @@ namespace adder {
       return heap.allocate(size);
     }
 
-    void memory::free(uint64_t address) {
-      return heap.free(address);
+    void memory::free(uint64_t stack_address) {
+      return heap.free(stack_address);
     }
 
     uint64_t memory::push(void const * data, size_t size) {
+      stack_size += size;
+
+      if (stack_size > stack.size()) {
+        // Grow the stack
+        size_t prevSize = stack.size();
+        stack.resize(stack.size() * 2);
+        std::memmove(stack.data() + stack.size() - prevSize, stack.data(), prevSize);
+      }
+
       const size_t start = stack_bottom();
       stack.insert(stack.end(), (uint8_t const *)data, (uint8_t const *)data + size);
       return stack_top - start;
@@ -76,44 +85,44 @@ namespace adder {
     }
 
     uint64_t memory::stack_bottom() const {
-      return stack_top - stack.size();
+      return stack_top - stack_size;
     }
 
-    bool memory::is_stack(uint64_t address) const {
-      return address >= stack_bottom() && address < stack_top;
+    bool memory::is_stack(uint64_t stack_address) const {
+      return stack_address >= stack_bottom() && stack_address < stack_top;
     }
 
-    uint8_t * memory::read(uint64_t address) {
-      if (!is_stack(address))
-        return heap.read(address);
+    uint8_t * memory::read(uint64_t stack_address) {
+      if (!is_stack(stack_address))
+        return heap.read(stack_address);
       else
-        return read_stack(address - stack_bottom());
+        return read_stack(stack_address - stack_bottom());
     }
 
-    uint8_t const * memory::read(uint64_t address) const {
-      if (!is_stack(address))
-        return heap.read(address);
+    uint8_t const * memory::read(uint64_t stack_address) const {
+      if (!is_stack(stack_address))
+        return heap.read(stack_address);
       else
-        return read_stack(address - stack_bottom());
+        return read_stack(stack_address - stack_bottom());
     }
 
-    size_t memory::write(uint64_t address, uint8_t const * bytes, size_t count) {
-      if (!is_stack(address))
-        return heap.write(address, bytes, count);
+    size_t memory::write(uint64_t stack_address, uint8_t const * bytes, size_t count) {
+      if (!is_stack(stack_address))
+        return heap.write(stack_address, bytes, count);
       else
-        return write_stack(address - stack_bottom(), bytes, count);
+        return write_stack(stack_address - stack_bottom(), bytes, count);
     }
 
     uint8_t * memory::read_stack(uint64_t offset) {
-      return &stack[offset];
+      return stack.data() + stack.size() - stack_size + offset;
     }
 
     uint8_t const * memory::read_stack(uint64_t offset) const {
-      return &stack[offset];
+      return stack.data() + stack.size() - stack_size + offset;
     }
 
     size_t memory::write_stack(uint64_t offset, uint8_t const * bytes, size_t count) {
-      memcpy(&stack[offset], bytes, count);
+      memcpy(read_stack(offset), bytes, count);
       return count;
     }
 
@@ -160,18 +169,23 @@ namespace adder {
       void load(machine * vm, op_code_args<op_code::load> const & args) {
         const uint64_t addr = vm->registers[args.src_addr];
         const uint8_t *mem  = vm->memory.read(addr);
+        vm->registers[args.dst] = 0;
 
         memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
       void load_stack(machine * vm, op_code_args<op_code::load_stack> const & args) {
+        const uint8_t *mem  = vm->memory.read_stack(args.offset);
         vm->registers[args.dst] = 0;
-
-        memcpy(&vm->registers[args.dst], vm->memory.read_stack(args.offset), args.size);
+        memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
       void load_addr(machine * vm, op_code_args<op_code::load_addr> const & args) {
-        vm->registers[args.dst] = args.addr;
+        const uint64_t addr = args.addr;
+        const uint8_t *mem  = vm->memory.read(addr);
+        vm->registers[args.dst] = 0;
+
+        memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
       void store(machine * vm, op_code_args<op_code::store> const & args) {

@@ -881,11 +881,32 @@ namespace adder {
       // };
 
       struct expression_result {
-        std::optional<uint64_t> address = 0; ///< Address of the value
-        type_desc * type = nullptr; ///< Type of the value
+        std::optional<vm::register_value> constant;
+        std::optional<uint64_t> stack_address; ///< Address of the value
+        std::string_view type_name; ///< Type of the value
       };
 
-      std::vector<vm::register_index> activeRegisters;
+      struct {
+        std::vector<vm::register_index> free;
+        vm::register_index next = 0;
+
+        vm::register_index pin() {
+          vm::register_index idx = 0;
+          if (free.size() == 0) {
+            idx = next++;
+          }
+          else {
+            idx = free.front();
+            free.erase(free.begin());
+          }
+          return idx;
+        }
+
+        void release(vm::register_index idx) {
+          free.push_back(idx);
+        }
+      } registers;
+
       std::vector<vm::instruction>    code;
       // std::vector<relocation>         relocations;
       std::vector<scope>              scopes;
@@ -905,7 +926,7 @@ namespace adder {
         { "bool",    { type_primitive::bool_ } }
       };
 
-      type_desc const * get_type(std::string const& name) const {
+      type_desc const * get_type(std::string_view const& name) const {
         auto it = types.find(name);
         if (it == types.end())
           return nullptr;
@@ -944,8 +965,10 @@ namespace adder {
           newSymbol.offset = block.stackSize;
           block.stackSize += newSymbol.size.value();
         }
+        newSymbol.identifier  = identifier;
         newSymbol.scope_index = scopes.size() - 1;
         block.symbols.push_back(newSymbol);
+        return true;
       }
 
       bool pop_symbol(size_t count = 1) {
@@ -968,11 +991,49 @@ namespace adder {
         symbol.type_name   = type_name;
         symbol.identifier  = identifier;
         symbol.size        = type_size(types[type_name]);
-        push_symbol(identifier, symbol);
+        return push_symbol(identifier, symbol);
       }
 
       void push_expression_result(expression_result result) {
         results.push_back(result);
+      }
+
+      vm::register_index pin_constant(vm::register_value value) {
+        vm::register_index idx = registers.pin();
+        vm::instruction op;
+        op.code = vm::op_code::set;
+        op.set.val = value;
+        op.set.dst = idx;
+        add_instruction(op);
+        return idx;
+      }
+
+      vm::register_index pin_address(uint64_t address, size_t size) {
+        vm::register_index idx = registers.pin();
+        vm::instruction op;
+        op.code = vm::op_code::load_addr;
+        op.load_addr.addr = address;
+        op.load_addr.size = size;
+        op.load_addr.dst  = idx;
+        op.set.dst = idx;
+        add_instruction(op);
+        return idx;
+      }
+
+      vm::register_index pin_result(expression_result value, size_t size) {
+        if (value.constant.has_value()) {
+          return pin_constant(value.constant.value());
+        }
+        else if (value.stack_address.has_value()) {
+          return pin_address(value.stack_address.value(), size);
+        }
+        else {
+          // src = program->load_relocated_address(value.symbol_name);
+        }
+        return registers.pin();
+      }
+
+      void release_register(vm::register_index reg) {
       }
 
       expression_result pop_expression_result() {
@@ -981,22 +1042,67 @@ namespace adder {
         return ret;
       }
 
+      uint64_t evaluate_stack_address(symbol_desc const & symbol) {
+        return scopes[symbol.scope_index].stackSize - symbol.offset.value();
+      }
+
       void add_instruction(vm::instruction inst) {
         code.push_back(inst);
       }
 
-      vm::register_index load_address(uint64_t address, uint64_t size) {
-
-      }
-
       /// Convert the program to a binary
       program binary() const {
-
+        return {};
       }
     };
 
-    bool generate_code(context const & ast, program_builder * program, literal_expression const & statement) {
+    bool generate_code(context const& ast, program_builder* program, size_t statementId);
 
+    bool generate_literal_code(context const& ast, program_builder* program, bool value) {
+      unused(ast);
+
+      program_builder::expression_result result;
+      result.constant.emplace(0);
+      std::memcpy(&result.constant.value(), &value, sizeof(value));
+      result.type_name = "bool";
+      program->push_expression_result(result);
+      return true;
+    }
+
+    bool generate_literal_code(context const& ast, program_builder* program, int64_t value) {
+      program_builder::expression_result result;
+      result.constant.emplace(0);
+      std::memcpy(&result.constant.value(), &value, sizeof(value));
+      result.type_name = "int64";
+      program->push_expression_result(result);
+      return true;
+    }
+
+    bool generate_literal_code(context const& ast, program_builder* program, double value) {
+      program_builder::expression_result result;
+      result.constant.emplace(0);
+      std::memcpy(&result.constant.value(), &value, sizeof(value));
+      result.type_name = "float64";
+      program->push_expression_result(result);
+      return true;
+    }
+
+    bool generate_literal_code(context const& ast, program_builder* program, std::string_view const & value) {
+      program_builder::expression_result result;
+      // result.constant.emplace(0);
+      // result.symbol = program->push_data_symbol(value.data(), value.length());
+      // std::memcpy(&result.constant.value(), &value, sizeof(value));
+      result.type_name = "char[]";
+      program->push_expression_result(result);
+      return true;
+    }
+
+    bool generate_code(context const & ast, program_builder * program, literal_expression const & statement) {
+      return std::visit(
+        [=](auto value) {
+          return generate_literal_code(ast, program, value);
+        },
+        statement.value);
     }
 
     bool generate_code(context const & ast, program_builder * program, identifier_expression const & statement) {
@@ -1006,15 +1112,14 @@ namespace adder {
       }
 
       program_builder::expression_result result;
-      if (symbol->stackAddress.has_value()) {
-        result.address = program->evaluate_stack_address(symbol);
-        program->push_expression_result();
+      if (symbol->offset.has_value()) {
+        result.stack_address = program->evaluate_stack_address(*symbol);
       }
       else {
         // Need a relocation to evaluate the address once we know where the symbol is actually stored.
       }
-
-      statement.name;
+      program->push_expression_result(result);
+      return true;
     }
 
     bool generate_code(context const & ast, program_builder * program, variable_declaration const & statement) {
@@ -1031,40 +1136,95 @@ namespace adder {
       program->add_instruction(clr);
       program->add_instruction(psh);
       program->push_variable(statement.name, statement.type_name, statement.flags);
+      return true;
+    }
+
+    bool generate_init_code(context const & ast, program_builder * program, program_builder::expression_result target, type_primitive targetType, program_builder::expression_result value, type_primitive valueType) {
+      switch (targetType) {
+      case type_primitive::int64: {
+        vm::register_index dst = program->pin_result(target, type_size(targetType));
+        vm::register_index src = program->pin_result(value, type_size(valueType));
+        vm::instruction str;
+        str.code = vm::op_code::store;
+        str.store.dst_addr = dst;
+        str.store.src = src;
+        program->add_instruction(str);
+        program->release_register(dst);
+        program->release_register(src);
+      } break;
+      }
+      return true;
+    }
+
+    bool generate_init_code(context const & ast, program_builder * program, program_builder::expression_result target, class_desc targetType, program_builder::expression_result value, class_desc valueType) {
+
+      return true;
+    }
+
+    bool generate_init_code(context const & ast, program_builder * program, program_builder::expression_result target, type_primitive targetType, program_builder::expression_result value, class_desc valueType) {
+
+      return true;
+    }
+
+    bool generate_init_code(context const & ast, program_builder * program, program_builder::expression_result target, class_desc targetType, program_builder::expression_result value, type_primitive valueType) {
+
+      return true;
     }
 
     bool generate_code(context const & ast, program_builder * program, init_expression const& statement) {
-      generate_code(ast, program, statement.target);
-      program->last_
       generate_code(ast, program, statement.expression);
+      auto value = program->pop_expression_result();
+
+      generate_code(ast, program, statement.target);
+      auto target = program->pop_expression_result();
+
+      type_desc const * targetType = program->get_type(target.type_name);
+      type_desc const * valueType = program->get_type(value.type_name);
+
+      if (targetType == nullptr || valueType == nullptr) {
+        return false;
+      }
+
+      return std::visit([&](const auto & a) {
+        return std::visit([&](const auto & b) {
+          return generate_init_code(ast, program, target, a, value, b);
+          }, *valueType);
+      }, *targetType);
     }
 
     bool generate_code(context const & ast, program_builder * program, return_expression const& statement) {
 
+      return true;
     }
 
     bool generate_code(context const & ast, program_builder * program, binary_operator const& statement) {
 
+      return true;
     }
 
     bool generate_code(context const & ast, program_builder * program, function_declaration const& statement) {
 
+      return true;
     }
 
     bool generate_code(context const & ast, program_builder * program, call_parameter const& statement) {
 
+      return true;
     }
 
     bool generate_code(context const & ast, program_builder * program, call_expression const& statement) {
 
+      return true;
     }
 
     bool generate_code(context const & ast, program_builder * program, type_conversion const & statement) {
 
+      return true;
     }
 
     bool generate_code(context const & ast, program_builder * program, class_decl const& statement) {
 
+      return true;
     }
 
     bool generate_code(context const & ast, program_builder * program, block const & scope) {
