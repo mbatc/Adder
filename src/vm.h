@@ -12,10 +12,11 @@ namespace adder {
     enum class op_code : uint64_t {
       exit,             ///< Load a value from a memory address
       load,             ///< Load a value from a memory address
-      load_stack,       ///< Load a value from the stack.
-      load_addr,        ///< Load constant address to a register.
+      load_stack,       ///< Load a value from the stack (offset from stack pointer)
+      load_addr,        ///< Load a value from a constant address
       store,            ///< Store a value to a memory address
-      store_stack,      ///< Store a value to the stack.
+      store_stack,      ///< Store a value to the stack (offset from stack pointer)
+      store_addr,       ///< Store a value to a constant address
       set,              ///< Set the value of a register
       add_i64,          ///< Add two registers as integers
       add_f64,          ///< Add two registers as floats
@@ -23,10 +24,12 @@ namespace adder {
       mul_f64,          ///< Multiply two registers as floats
       div_i64,          ///< Set the value of a register as integers
       div_f64,          ///< Divide two registers as floats
+      alloc_stack,      ///< Reserve space on the stack
+      free_stack,       ///< Free space on the stack
       push,             ///< Push a register to the stack
       pop,              ///< Pop a register value from the stack. Store in named register
       jump,             ///< Set the program counter.
-      move,             ///< Move a value from a new register
+      move,             ///< Move a value from a register
       compare_i64,      ///< Compare the values in two registers as integers
       compare_f64,      ///< Compare the values in two registers as floats
       conditional_jump, ///< Set the program counter if the specified comparison bits are set.
@@ -65,8 +68,14 @@ namespace adder {
 
     template<> struct op_code_args<op_code::store_stack> {
       register_index src;
-      uint8_t        size;
       uint16_t       offset; // [reg]
+      uint8_t        size;
+    };
+
+    template<> struct op_code_args<op_code::store_addr> {
+      register_index src;
+      register_value dst_addr;
+      uint8_t        size;
     };
 
     template<> struct op_code_args<op_code::set> {
@@ -86,6 +95,14 @@ namespace adder {
     template<> struct op_code_args<op_code::mul_f64> : op_code_binary_op_args {};
     template<> struct op_code_args<op_code::div_i64> : op_code_binary_op_args {};
     template<> struct op_code_args<op_code::div_f64> : op_code_binary_op_args {};
+
+    template<> struct op_code_args<op_code::alloc_stack> {
+      uint32_t bytes;
+    };
+
+    template<> struct op_code_args<op_code::free_stack> {
+      uint32_t bytes;
+    };
 
     template<> struct op_code_args<op_code::push> {
       register_index src;
@@ -138,10 +155,13 @@ namespace adder {
         op_code_args<op_code::load_addr> load_addr;
         op_code_args<op_code::store> store;
         op_code_args<op_code::store_stack> store_stack;
+        op_code_args<op_code::store_addr> store_addr;
         op_code_args<op_code::set> set;
         op_code_binary_op_args add;
         op_code_binary_op_args mul;
         op_code_binary_op_args div;
+        op_code_args<op_code::alloc_stack> alloc_stack;
+        op_code_args<op_code::free_stack> free_stack;
         op_code_args<op_code::push> push;
         op_code_args<op_code::pop> pop;
         op_code_args<op_code::jump> jump;
@@ -177,8 +197,10 @@ namespace adder {
       /// Free a heap allocation.
       void free(uint64_t stack_address);
 
+      uint64_t allocate_stack(size_t size);
+
       /// Push data to the stack
-      uint64_t push(void const * data, size_t size);
+      uint64_t push(uint8_t const * data, size_t size);
 
       /// Pop data from the stack
       void pop(size_t bytes);
@@ -190,6 +212,8 @@ namespace adder {
       uint8_t const * read(uint64_t stack_address) const;
 
       size_t write(uint64_t stack_address, uint8_t const * bytes, size_t count);
+      
+      uint64_t to_stack_offset(uint64_t address);
       uint8_t * read_stack(uint64_t offset);
       uint8_t const * read_stack(uint64_t offset) const;
       size_t write_stack(uint64_t offset, uint8_t const * bytes, size_t count);
@@ -200,14 +224,14 @@ namespace adder {
     };
 
     enum class register_names {
-      r0,
-      r1,
-      r2,
-      r3,
-      r4,
-      r5,
-      r6,
-      r7,
+      r0, ///< General IO 0
+      r1, ///< General IO 1
+      r2, ///< General IO 2
+      r3, ///< General IO 3
+      r4, ///< General IO 4
+      r5, ///< General IO 5
+      r6, ///< General IO 6
+      sp, ///< Stack pointer
       count
     };
     inline static constexpr size_t register_count = (size_t)register_names::count;
