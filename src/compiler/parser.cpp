@@ -1,5 +1,6 @@
 #include "parser.h"
 #include "ast.h"
+#include "ast/builtins.h"
 
 using namespace adder::compiler::expr;
 
@@ -318,13 +319,13 @@ namespace adder {
         }
       }
 
-      bool consume_function_parameter_list(ast * tree, block * body, lexer::token_parser * tokenizer) {
+      bool consume_function_parameter_list(ast * tree, std::vector<size_t> * arguments, lexer::token_parser * tokenizer) {
         while (tokenizer->current().id != lexer::token_id::close_paren) {
           auto paramId = consume_parameter(tree, tokenizer);
           if (!paramId.has_value())
             return false;
 
-          body->statements.push_back(paramId.value());
+          arguments->push_back(paramId.value());
 
           if (tokenizer->current().id == lexer::token_id::close_paren)
             break;
@@ -337,7 +338,7 @@ namespace adder {
         return true;
       }
 
-      bool consume_function_body(ast* tree, block* body, lexer::token_parser* tokenizer) {
+      bool consume_function_body(ast* tree, block * body, lexer::token_parser* tokenizer) {
         lexer::token_view token;
         if (!tokenizer->
           parse(rules::or(
@@ -361,39 +362,42 @@ namespace adder {
         return true;
       }
 
-      std::optional<size_t> add_function_declaration(ast* tree, std::string_view identifier, std::string_view returnType, size_t bodyId, symbol_flags flags) {
-        auto& body = tree->get<block>(bodyId);
-
+      std::optional<size_t> add_function_declaration(ast* tree, std::string_view identifier, std::string_view returnType, std::vector<size_t> &&arguments, size_t bodyId, symbol_flags flags) {
         std::string signature = "(";
         size_t numParams = 0;
-        for (auto & paramId : body.statements) {
-          if (!tree->is<variable_declaration>(paramId))
-            break;
+        for (auto & paramId : arguments) {
+          if (!tree->is<variable_declaration>(paramId)) {
+            // Push Error: Invalid statement in argument list.
+            return std::nullopt;
+          }
+
           auto &decl = tree->get<variable_declaration>(paramId);
-          if ((decl.flags & symbol_flags::fn_parameter) != symbol_flags::fn_parameter)
-            break;
           if (numParams != 0)
             signature += ",";
           signature += decl.type_name;
           ++numParams;
         }
-        signature += ")=>" + std::string(returnType);
+
+        if ((flags & symbol_flags::initializer) != symbol_flags::none) {
+          signature = "init:" + signature;
+        } else {
+          signature = "fn:" + signature + std::string(returnType);
+        }
 
         function_declaration function;
-        function.identifier  = identifier;
-        function.signature   = std::string(identifier) + signature;
+        function.identifier = identifier;
+        function.arguments = std::move(arguments);
+        function.signature = std::string(identifier) + signature;
         function.return_type_name = returnType;
-        function.flags       = flags;
-        function.body        = bodyId;
+        function.flags = flags;
+        function.body = bodyId;
 
         return tree->add(function);
       }
 
       std::optional<size_t> consume_function_declaration(ast* tree, lexer::token_parser* tokenizer, lexer::token_view const & name, symbol_flags flags) {
-        block body;
-        body.scope_name = std::string(name.name);
-
-        if (!consume_function_parameter_list(tree, &body, tokenizer))
+        std::vector<size_t> arguments;
+        if (!consume_function_parameter_list(tree, &arguments, tokenizer))
           return std::nullopt;
 
         lexer::token_view returnType;
@@ -403,10 +407,12 @@ namespace adder {
           ok())
           return std::nullopt;
 
+        block body;
+        body.scope_name = std::string(name.name);
         if (!consume_function_body(tree, &body, tokenizer))
           return std::nullopt;
 
-        return add_function_declaration(tree, name.name, returnType.name, tree->add(std::move(body)), flags);
+        return add_function_declaration(tree, name.name, returnType.name, std::move(arguments), tree->add(std::move(body)), flags);
       }
 
       std::optional<size_t> consume_fn(ast * tree, lexer::token_parser * tokenizer, symbol_flags flags) {
@@ -469,16 +475,16 @@ namespace adder {
           .ok())
           return std::nullopt;
 
-        block body;
-        body.scope_name = std::string(name.name);
-
-        if (!consume_function_parameter_list(tree, &body, tokenizer))
+        std::vector<size_t> arguments;
+        if (!consume_function_parameter_list(tree, &arguments, tokenizer))
           return std::nullopt;
 
+        block body;
+        body.scope_name = std::string(name.name);
         if (!consume_function_body(tree, &body, tokenizer))
           return std::nullopt;
 
-        return add_function_declaration(tree, name.name, "", tree->add(std::move(body)), flags | symbol_flags::initializer);
+        return add_function_declaration(tree, name.name, "", std::move(arguments), tree->add(std::move(body)), flags | symbol_flags::initializer);
       }
 
       std::optional<size_t> consume_class(ast * tree, lexer::token_parser * tokenizer) {
@@ -543,32 +549,33 @@ namespace adder {
 
         return tokenizer->next();
       }
+    }
 
-      ast parse(lexer::token_parser * tokenizer) {
-        ast ast;
-        block topScope;
+    ast parse(lexer::token_parser * tokenizer) {
+      ast ast;
+      block topScope;
+      compiler::define_builtins(&ast, &topScope);
 
-        while (!tokenizer->eof()) {
-          std::optional<size_t> nextStatement;
-          switch (tokenizer->current().id) {
-          case lexer::token_id::fn:       nextStatement = consume_fn(&ast, tokenizer); break;
-          case lexer::token_id::const_:   nextStatement = consume_const(&ast, tokenizer); break;
-          case lexer::token_id::let:      nextStatement = consume_let(&ast, tokenizer); break;
-          case lexer::token_id::class_:   nextStatement = consume_class(&ast, tokenizer); break;
-          case lexer::token_id::extern_:  nextStatement = consume_extern(&ast, tokenizer); break;
-          default:
-            break;
-          }
-
-          if (nextStatement.has_value())
-            topScope.statements.push_back(nextStatement.value());
-          else
-            break;
+      while (!tokenizer->eof()) {
+        std::optional<size_t> nextStatement;
+        switch (tokenizer->current().id) {
+        case lexer::token_id::fn:       nextStatement = parser::consume_fn(&ast, tokenizer); break;
+        case lexer::token_id::const_:   nextStatement = parser::consume_const(&ast, tokenizer); break;
+        case lexer::token_id::let:      nextStatement = parser::consume_let(&ast, tokenizer); break;
+        case lexer::token_id::class_:   nextStatement = parser::consume_class(&ast, tokenizer); break;
+        case lexer::token_id::extern_:  nextStatement = parser::consume_extern(&ast, tokenizer); break;
+        default:
+          break;
         }
 
-        ast.statements.push_back(std::move(topScope));
-        return ast;
+        if (nextStatement.has_value())
+          topScope.statements.push_back(nextStatement.value());
+        else
+          break;
       }
+
+      ast.statements.push_back(std::move(topScope));
+      return ast;
     }
   }
 }

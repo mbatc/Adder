@@ -47,9 +47,9 @@ namespace adder {
       bool is_callable(ast* tree, size_t expressionId);
       std::optional<size_t> consume_init_expression(ast* tree, lexer::token_parser* tokenizer);
       std::optional<size_t> consume_statement(ast* tree, lexer::token_parser* tokenizer);
-      bool consume_function_parameter_list(ast* tree, expr::block* body, lexer::token_parser* tokenizer);
+      bool consume_function_parameter_list(ast* tree, std::vector<size_t> * arguments, lexer::token_parser* tokenizer);
       bool consume_function_body(ast* tree, expr::block* body, lexer::token_parser* tokenizer);
-      std::optional<size_t> add_function_declaration(ast* tree, std::string_view identifier, std::string_view returnType, size_t bodyId, symbol_flags flags);
+      std::optional<size_t> add_function_declaration(ast* tree, std::string_view identifier, std::string_view returnType, std::vector<size_t> &&arguments, size_t bodyId, symbol_flags flags);
       std::optional<size_t> consume_function_declaration(ast* tree, lexer::token_parser* tokenizer, lexer::token_view const& name, symbol_flags flags);
       std::optional<size_t> consume_variable_decl(ast* tree, lexer::token_parser* tokenizer, symbol_flags flags, rules::token_rule const& terminator);
       std::optional<size_t> consume_init_fn(ast* tree, lexer::token_parser* tokenizer, symbol_flags flags = symbol_flags::none);

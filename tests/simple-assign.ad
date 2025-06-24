@@ -1,0 +1,16 @@
+
+const MyValue: int32 = 1234;
+
+// // Extend int32 API. Add Abs function.
+// // Equivalent to,
+// //
+// //   fn Abs(const self: [ref]int32) => void {}
+// //
+// fn int32.Abs() => void {
+//     if (self < 0)
+//         return -self;
+//     else
+//         return self;
+// }
+// 
+// const absValue: int32 = MyValue.Abs();

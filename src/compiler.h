@@ -65,7 +65,7 @@ namespace adder {
 
       std::vector<uint8_t> binary;
     };
-
-    program compile(std::string const & source);
   }
+
+  compiler::program compile(std::string const & source);
 }

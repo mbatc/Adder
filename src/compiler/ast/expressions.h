@@ -84,6 +84,7 @@ namespace adder {
         // Function bodies
         std::map<std::string, size_t> functions;
         // Statements in this scope in sequential order.
+        // TODO: If we restrict the ast datastructure a bit, perhaps this can be a body start index + count so we have additional allocations.
         std::vector<size_t> statements;
       };
 
@@ -96,9 +97,12 @@ namespace adder {
         std::string_view           identifier;
         std::string                signature;
         symbol_flags               flags = symbol_flags::none;
-        std::optional<size_t>      body;
+        /// Name of the function return type
         std::optional<std::string> return_type_name;
-        // type_desc *                return_type_desc = nullptr;
+        /// Arguments declarations.
+        std::vector<size_t> arguments;
+        /// ID of the expression that contains the function body.
+        std::optional<size_t> body;
       };
 
       struct call_parameter {

@@ -50,13 +50,13 @@ namespace adder {
 
     template<> struct op_code_args<op_code::load_stack> {
       register_index dst;
-      uint16_t       offset; // [reg]
+      register_value offset;
       uint8_t        size;
     };
 
     template<> struct op_code_args<op_code::load_addr> {
       register_index dst;
-      uint64_t       addr; // Constant address within the program. Must be relocated when the program is loaded.
+      register_value addr; // Constant address within the program. Must be relocated when the program is loaded.
       uint8_t        size;
     };
 
@@ -68,7 +68,7 @@ namespace adder {
 
     template<> struct op_code_args<op_code::store_stack> {
       register_index src;
-      uint16_t       offset; // [reg]
+      register_value offset;
       uint8_t        size;
     };
 

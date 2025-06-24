@@ -1,12 +1,7 @@
 #include "ast.h"
-#include "ast/builtins.h"
 
 namespace adder {
   namespace compiler {
-    ast::ast() {
-      define_builtins(this);
-    }
-
     size_t ast::get_precedence(size_t id) const
     {
       if (std::holds_alternative<expr::binary_operator>(statements[id]))

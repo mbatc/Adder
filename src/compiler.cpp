@@ -80,19 +80,14 @@ namespace adder {
 
     bool generate_code(ast const & ast, program_builder * program, expr::identifier const & statement) {
       unused(ast);
-
-      program_builder::symbol_desc const * symbol = program->find_symbol(statement.name);
-      if (symbol == nullptr) {
+      std::optional<size_t> symbolIndex = program->find_symbol_index(statement.name);
+      if (!symbolIndex.has_value()) {
+        // Push Error: Undeclared identifier `statement.name`
         return false;
       }
 
       program_builder::expression_result result;
-      if (symbol->address.has_value()) {
-        result.stack_address = program->evaluate_stack_address(*symbol);
-      }
-      else {
-        // Need a relocation to evaluate the address once we know where the symbol is actually stored.
-      }
+      result.symbol_index = symbolIndex;
       program->push_expression_result(result);
       return true;
     }
@@ -172,64 +167,66 @@ namespace adder {
       return true;
     }
 
-    bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, type_primitive targetType, program_builder::expression_result value, type_primitive valueType) {
-      unused(ast);
+    //bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, type_primitive targetType, program_builder::expression_result value, type_primitive valueType) {
+    //  unused(ast);
 
-      switch (targetType) {
-      case type_primitive::int64: {
-        vm::register_index dst = program->pin_result(target, type_size(targetType));
-        vm::register_index src = program->pin_result(value, type_size(valueType));
-        vm::instruction str;
-        str.code = vm::op_code::store;
-        str.store.dst_addr = dst;
-        str.store.src = src;
-        program->add_instruction(str);
-        program->release_register(dst);
-        program->release_register(src);
-      } break;
-      }
-      return true;
-    }
+    //  switch (targetType) {
+    //  case type_primitive::int64: {
+    //    vm::register_index dst = program->pin_result(target);
+    //    vm::register_index src = program->pin_result(value);
+    //    vm::instruction str;
+    //    str.code = vm::op_code::store;
+    //    str.store.dst_addr = dst;
+    //    str.store.src = src;
+    //    program->add_instruction(str);
+    //    program->release_register(dst);
+    //    program->release_register(src);
+    //  } break;
+    //  }
+    //  return true;
+    //}
 
-    bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, class_desc targetType, program_builder::expression_result value, class_desc valueType) {
-      unused(ast, program, target, targetType, value, valueType);
-      return true;
-    }
+    //bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, type_class targetType, program_builder::expression_result value, type_class valueType) {
+    //  unused(ast, program, target, targetType, value, valueType);
+    //  return true;
+    //}
 
-    bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, type_primitive targetType, program_builder::expression_result value, class_desc valueType) {
-      unused(ast, program, target, targetType, value, valueType);
-      return true;
-    }
+    //bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, type_primitive targetType, program_builder::expression_result value, type_class valueType) {
+    //  unused(ast, program, target, targetType, value, valueType);
+    //  return true;
+    //}
 
-    bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, class_desc targetType, program_builder::expression_result value, type_primitive valueType) {
-      unused(ast, program, target, targetType, value, valueType);
-      return true;
-    }
+    //bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, type_class targetType, program_builder::expression_result value, type_primitive valueType) {
+    //  unused(ast, program, target, targetType, value, valueType);
+    //  return true;
+    //}
 
-    template<typename T, typename U>
-    bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, T targetType, program_builder::expression_result value, U valueType) {
-      unused(ast, program, target, targetType, value, valueType);
-      return false;
-    }
+    //template<typename T, typename U>
+    //bool generate_init_code(ast const & ast, program_builder * program, program_builder::expression_result target, T targetType, program_builder::expression_result value, U valueType) {
+    //  unused(ast, program, target, targetType, value, valueType);
+    //  return false;
+    //}
 
     bool generate_code(ast const & ast, program_builder * program, expr::init const& statement) {
-      generate_code(ast, program, statement.expression);
-      auto value = program->pop_expression_result();
-
-      generate_code(ast, program, statement.target);
-      auto target = program->pop_expression_result();
-
-      if (!target.type_index.has_value() || value.type_index.has_value())
-        return false;
-
-      type const & targetType = program->types[target.type_index.value()];
-      type const & valueType = program->types[value.type_index.value()];
-
-      return std::visit([&](const auto & a) {
-        return std::visit([&](const auto & b) {
-          return generate_init_code(ast, program, target, a, value, b);
-          }, valueType.desc);
-      }, targetType.desc);
+      unused(ast, program, statement);
+      return true;
+      // generate_code(ast, program, statement.expression);
+      // auto value = program->pop_expression_result();
+      // 
+      // generate_code(ast, program, statement.target);
+      // auto target = program->pop_expression_result();
+      // 
+      // if (!target.type_index.has_value() || value.type_index.has_value())
+      //   return false;
+      // 
+      // type const & targetType = program->types[target.type_index.value()];
+      // type const & valueType = program->types[value.type_index.value()];
+      // 
+      // return std::visit([&](const auto & a) {
+      //   return std::visit([&](const auto & b) {
+      //     return generate_init_code(ast, program, target, a, value, b);
+      //     }, valueType.desc);
+      // }, targetType.desc);
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::function_return const& statement) {
@@ -243,6 +240,22 @@ namespace adder {
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::function_declaration const& statement) {
+      program_builder::symbol_desc symbol;
+      symbol.flags = statement.flags;
+      symbol.identifier = statement.identifier;
+      symbol.type_index = program->add_function_type(statement);
+
+      if (statement.body.has_value())
+      {
+        size_t start = program->code.size();
+        generate_code(ast, program, statement.body.value());
+        size_t end   = program->code.size();
+      }
+
+      program->push_symbol(statement.identifier, symbol);
+
+      statement.signature;
+
       unused(ast, program, statement);
       return true;
     }
@@ -256,16 +269,44 @@ namespace adder {
       return true;
     }
 
-    bool push_argument(ast const& ast, program_builder * program, std::string_view const & name, program_builder::expression_result src, size_t argType) {
+    bool push_argument(ast const& ast, program_builder * program, std::string_view const & name, program_builder::expression_result src, size_t argType, bool isInline) {
       unused(ast, program, src, argType);
 
-      if (src.type_index == argType) {
-        // Copy argument.
-        program->push_variable(name, argType, symbol_flags::fn_parameter | symbol_flags::const_);
-        program->find_unnamed_copy();
-        generate_copy(ast, );
+      if (isInline) {
+        if (src.type_index == argType) {
+          if (src.symbol_index.has_value()) {
+            program_builder::symbol_desc alias = program->symbols[src.symbol_index.value()];
+            alias.identifier = name;
+            alias.flags |= symbol_flags::fn_parameter;
+            program->push_symbol(name, alias);
+          }
+          else if (src.address.has_value()) {
+            program_builder::symbol_desc alias;
+            alias.identifier = name;
+            alias.address    = src.address;
+            alias.type_index = src.type_index.value();
+            alias.flags      = symbol_flags::fn_parameter;
+            program->push_symbol(name, alias);
+          }
+          else if (src.constant.has_value()) {
+            // Push new variable and store the constant in it
+            program->push_variable(name, src.type_index.value(), symbol_flags::const_ | symbol_flags::fn_parameter);
+            vm::register_index reg = program->pin_constant(src.constant.value());
+            program->store(reg, program->symbols.back());
+          }
+        }
+        else {
+          // Need to push new symbol and convert into it.
+        }
       }
-
+      else {
+        if (src.type_index == argType) {
+          // Copy argument.
+          program->push_variable(name, argType, symbol_flags::fn_parameter | symbol_flags::const_);
+          // program->find_unnamed_copy();
+          // sgenerate_copy(ast, );
+        }
+      }
       return false;
     }
 
@@ -281,30 +322,42 @@ namespace adder {
       // Push parameters to the stack
       auto & callable  = program->symbols[function.symbol_index.value()];
       auto & callableT = program->types[callable.type_index];
-      if (!std::holds_alternative<function_desc>(callableT.desc)) {
+      if (!std::holds_alternative<type_function>(callableT.desc)) {
         // Push error: Type is not callable.
         return false;
       }
 
-      auto & func = std::get<function_desc>(callableT.desc);
+      auto & func = std::get<type_function>(callableT.desc);
       if (func.arguments.size() != program->results.size() - startResult - 1) {
         // Push error: Invalid argument count
         return false;
       }
 
-      for (size_t i = startResult + 1; i < program->results.size(); ++i) {
-        push_argument(ast, program, program->results[i], func.arguments[i]);
+      bool inlineCall = func.function_id.has_value() && func.allowInline;
+
+      if (inlineCall)
+        inlineCall &= ast.get<expr::function_declaration>(func.function_id.value()).body.has_value();
+
+      for (size_t i = 0; i < func.arguments.size(); ++i) {
+        std::string_view name = "";
+        if (inlineCall) {
+          auto &decl = ast.get<expr::function_declaration>(func.function_id.value());
+          auto &body = ast.get<expr::block>(decl.body.value());
+          auto &var  = ast.get<expr::variable_declaration>(body.statements[i]);
+          name = var.name;
+        }
+        push_argument(ast, program, name, program->results[i], func.arguments[i], inlineCall);
       }
 
-      if (callable.function.has_value() && callable.function.value().allowInline) {
-        // Inline the functions code.
-        auto const & decl = ast.get<expr::function_declaration>(callable.function->function_id);
-
+      if (inlineCall) {
+        auto &decl = ast.get<expr::function_declaration>(func.function_id.value());
         if (decl.body.has_value()) {
-          generate_code(ast, program, decl.body.value());
+          if (!generate_code(ast, program, decl.body.value())) {
+            return false;
+          }
         }
 
-        decl.return_type_name;
+        // TODO: Something with decl.return_type_name;
       }
       else {
         if (callable.address.has_value()) {
@@ -355,7 +408,9 @@ namespace adder {
     }
 
     bool generate_code(ast const& ast, program_builder* program, expr::byte_code const& code) {
-      return code.callback != nullptr && code.callback(ast, program);
+      unused(ast);
+
+      return code.callback != nullptr && code.callback(program);
     }
 
     bool generate_code(ast const & ast, program_builder * program, size_t statementId) {
@@ -375,21 +430,20 @@ namespace adder {
 
       return {}; // ret.binary();
     }
+  }
 
-    program compile(std::string const & source) {
-      lexer::token_parser tokenizer(source);
-      ast ast = parse(&tokenizer);
-      define_builtins(&ast);
-      if (!tokenizer.ok()) {
-        for (auto & error : tokenizer.errors()) {
-          printf("Error: %s\n", error.c_str());
-        }
+  compiler::program compile(std::string const & source) {
+    compiler::lexer::token_parser tokenizer(source);
+    compiler::ast ast = compiler::parse(&tokenizer);
+    if (!tokenizer.ok()) {
+      for (auto & error : tokenizer.errors()) {
+        printf("Error: %s\n", error.c_str());
       }
-
-      // evaluate_types(&ast);
-      // evaluate_conversions(&ast);
-
-      return generate_code(ast);
     }
+
+    // evaluate_types(&ast);
+    // evaluate_conversions(&ast);
+
+    return generate_code(ast);
   }
 }

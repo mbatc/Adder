@@ -18,7 +18,7 @@ int main(int argc, char ** argv) {
     fclose(file);
   }
 
-  auto result = adder::compiler::compile(content);
+  auto result = adder::compile(content);
 
   adder::vm::machine vm;
   uint64_t base  = adder::vm::load_program(&vm, result.binary);
