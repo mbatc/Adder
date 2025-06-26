@@ -57,12 +57,13 @@ namespace adder {
 
     uint64_t memory::push(uint8_t const * data, size_t size) {
       const uint64_t addr = allocate_stack(size);
-      write_stack(to_stack_offset(addr), data, size);
+      write_stack(0, data, size);
       return addr;
     }
 
-    void memory::pop(size_t bytes) {
-      stack.erase(stack.end() - bytes, stack.end());
+    uint64_t memory::pop(size_t bytes) {
+      stack_size -= bytes;
+      return stack_bottom();
     }
 
     uint64_t memory::stack_bottom() const {
@@ -73,18 +74,18 @@ namespace adder {
       return stack_address >= stack_bottom() && stack_address < stack_top;
     }
 
-    uint8_t * memory::read(uint64_t stack_address) {
-      if (!is_stack(stack_address))
-        return heap.read(stack_address);
+    uint8_t * memory::read(uint64_t address) {
+      if (!is_stack(address))
+        return heap.read(address);
       else
-        return read_stack(stack_address - stack_bottom());
+        return read_stack(address - stack_bottom());
     }
 
-    uint8_t const * memory::read(uint64_t stack_address) const {
-      if (!is_stack(stack_address))
-        return heap.read(stack_address);
+    uint8_t const * memory::read(uint64_t address) const {
+      if (!is_stack(address))
+        return heap.read(address);
       else
-        return read_stack(stack_address - stack_bottom());
+        return read_stack(address - stack_bottom());
     }
 
     size_t memory::write(uint64_t stack_address, uint8_t const * bytes, size_t count) {
@@ -155,12 +156,12 @@ namespace adder {
         const uint64_t addr = vm->registers[args.src_addr];
         const uint8_t *mem  = vm->memory.read(addr);
         vm->registers[args.dst] = 0;
-
         memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
-      void load_stack(machine * vm, op_code_args<op_code::load_stack> const & args) {
-        const uint8_t *mem  = vm->memory.read_stack(args.offset);
+      void load_offset(machine * vm, op_code_args<op_code::load_offset> const & args) {
+        const uint64_t addr = vm->registers[args.addr];
+        const uint8_t *mem  = vm->memory.read_stack(addr + args.offset);
         vm->registers[args.dst] = 0;
         memcpy(&vm->registers[args.dst], mem, args.size);
       }
@@ -174,16 +175,17 @@ namespace adder {
       }
 
       void store(machine * vm, op_code_args<op_code::store> const & args) {
-        const uint64_t addr = vm->registers[args.dst_addr];
+        const uint64_t addr = vm->registers[args.addr];
         vm->memory.write(addr, reinterpret_cast<uint8_t const *>(&vm->registers[args.src]), args.size);
       }
 
-      void store_stack(machine * vm, op_code_args<op_code::store_stack> const & args) {
-        vm->memory.write_stack(args.offset, reinterpret_cast<uint8_t const *>(&vm->registers[args.src]), args.size);
+      void store_offset(machine * vm, op_code_args<op_code::store_offset> const & args) {
+        const uint64_t addr = vm->registers[args.addr];
+        vm->memory.write(addr + args.offset, reinterpret_cast<uint8_t const *>(&vm->registers[args.src]), args.size);
       }
 
       void store_addr(machine * vm, op_code_args<op_code::store_addr> const & args) {
-        vm->memory.write(args.dst_addr, reinterpret_cast<uint8_t const *>(&vm->registers[args.src]), args.size);
+        vm->memory.write(args.addr, reinterpret_cast<uint8_t const *>(&vm->registers[args.src]), args.size);
       }
 
       void set(machine * vm, op_code_args<op_code::set> const & args) {
@@ -230,15 +232,21 @@ namespace adder {
       }
 
       void alloc_stack(machine * vm, op_code_args<op_code::alloc_stack> const & args) {
-        vm->memory.allocate_stack(args.bytes);
+        vm->registers[(int)register_names::sp] = vm->memory.allocate_stack(args.bytes);
+      }
+
+      void free_stack(machine * vm, op_code_args<op_code::free_stack> const & args) {
+        vm->registers[(int)register_names::sp] = vm->memory.pop(args.bytes);
       }
 
       void push(machine * vm, op_code_args<op_code::push> const & args) {
-        vm->memory.push((uint8_t const *)&vm->registers[args.src], args.size);
+        vm->registers[(int)register_names::sp] = vm->memory.push((uint8_t const *)&vm->registers[args.src], args.size);
       }
 
       void pop(machine * vm, op_code_args<op_code::pop> const & args) {
-        vm->memory.pop(args.size);
+        vm->registers[args.dst] = 0;
+        memcpy(&vm->registers[args.dst], vm->memory.read_stack(0), args.size);
+        vm->registers[(int)register_names::sp] = vm->memory.pop(args.size);
       }
 
       void jump(machine * vm, op_code_args<op_code::jump> const & args) {
@@ -287,20 +295,17 @@ namespace adder {
       case op_code::load:
         op::load(vm, inst.load);
         break;
-      case op_code::load_stack:
-        op::load_stack(vm, inst.load_stack);
+      case op_code::load_offset:
+        op::load_offset(vm, inst.load_offset);
         break;
       case op_code::load_addr:
         op::load_addr(vm, inst.load_addr);
         break;
-      case op_code::alloc_stack:
-        op::alloc_stack(vm, inst.alloc_stack);
-        break;
       case op_code::store:
         op::store(vm, inst.store);
         break;
-      case op_code::store_stack:
-        op::store_stack(vm, inst.store_stack);
+      case op_code::store_offset:
+        op::store_offset(vm, inst.store_offset);
         break;
       case op_code::set:
         op::set(vm, inst.set);
@@ -322,6 +327,12 @@ namespace adder {
         break;
       case op_code::div_f64:
         op::div_f64(vm, inst.add);
+        break;
+      case op_code::alloc_stack:
+        op::alloc_stack(vm, inst.alloc_stack);
+        break;
+      case op_code::free_stack:
+        op::free_stack(vm, inst.free_stack);
         break;
       case op_code::push:
         op::push(vm, inst.push);

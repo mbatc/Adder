@@ -6,15 +6,15 @@
 
 namespace adder {
   namespace compiler {
-    struct stack_offset {
-      uint64_t offset = 0;
+    struct stack_frame_offset {
+      int64_t offset = 0;
     };
 
-    struct program_offset {
-      uint64_t offset = 0;
+    struct program_address {
+      uint64_t addr = 0;
     };
 
-    using address_desc = std::variant<stack_offset, program_offset>;
+    using address_desc = std::variant<stack_frame_offset, program_address>;
 
     // Symbols are prefixed with the symbol type, e.g. fn, init, class, var.
     // Symbols components are separated by ':'.
@@ -47,7 +47,7 @@ namespace adder {
       struct scope {
         std::vector<size_t> symbols;
 
-        uint64_t stackSize = 0;
+        int64_t stackSize = 0;
       };
 
       // struct relocation {
@@ -121,6 +121,7 @@ namespace adder {
 
       bool push_symbol(std::string_view const& identifier, symbol_desc const& desc);
       bool pop_symbol();
+      bool push_fn_parameter(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, std::string_view const & type_name, symbol_flags const & flags);
       void pop_variable();
@@ -129,22 +130,24 @@ namespace adder {
       vm::register_index pin_register();
       vm::register_index pin_symbol(symbol_desc const& symbol);
       vm::register_index pin_constant(vm::register_value value);
-      vm::register_index pin_address(program_offset address, size_t size);
-      vm::register_index pin_address(stack_offset stack, size_t size);
+      vm::register_index pin_address(program_address address, size_t size);
+      vm::register_index pin_address(stack_frame_offset stack, size_t size);
       vm::register_index pin_address(address_desc address, size_t size);
       vm::register_index pin_address(uint64_t address, size_t size);
+      vm::register_index pin_stack_frame_offset(int64_t offset, size_t size);
       vm::register_index pin_result(expression_result const & value);
       vm::register_index pin_relocation(std::string_view identifier, size_t size);
 
       void release_register(vm::register_index reg);
 
       expression_result pop_expression_result();
-      uint64_t evaluate_address(uint64_t offset);
-      uint64_t evaluate_stack_address(uint64_t offset);
-      uint64_t evaluate_address(symbol_desc const & symbol);
+      // uint64_t evaluate_address(uint64_t offset);
+      // uint64_t evaluate_stack_address(uint64_t offset);
+      // uint64_t evaluate_address(symbol_desc const & symbol);
 
-      bool store(vm::register_index src, program_offset const & addr, uint8_t sz);
-      bool store(vm::register_index src, stack_offset const & addr, uint8_t sz);
+      bool store(vm::register_index src, vm::register_index dst, uint8_t sz);
+      bool store(vm::register_index src, program_address const & addr, uint8_t sz);
+      bool store(vm::register_index src, stack_frame_offset const & addr, uint8_t sz);
       bool store(vm::register_index src, address_desc const & addr, uint8_t sz);
       bool store(vm::register_index src, symbol_desc const & symbol);
       void add_instruction(vm::instruction inst);

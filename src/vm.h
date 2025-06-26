@@ -12,11 +12,11 @@ namespace adder {
     enum class op_code : uint64_t {
       exit,             ///< Load a value from a memory address
       load,             ///< Load a value from a memory address
-      load_stack,       ///< Load a value from the stack (offset from stack pointer)
       load_addr,        ///< Load a value from a constant address
+      load_offset,      ///< Load a value from an address (stored in a register) with some offset
       store,            ///< Store a value to a memory address
-      store_stack,      ///< Store a value to the stack (offset from stack pointer)
       store_addr,       ///< Store a value to a constant address
+      store_offset,     ///< Store a value to an address (stored in a register) with some offset
       set,              ///< Set the value of a register
       add_i64,          ///< Add two registers as integers
       add_f64,          ///< Add two registers as floats
@@ -48,34 +48,36 @@ namespace adder {
       uint8_t        size;
     };
 
-    template<> struct op_code_args<op_code::load_stack> {
-      register_index dst;
-      register_value offset;
-      uint8_t        size;
-    };
-
     template<> struct op_code_args<op_code::load_addr> {
       register_index dst;
       register_value addr; // Constant address within the program. Must be relocated when the program is loaded.
       uint8_t        size;
     };
 
-    template<> struct op_code_args<op_code::store> {
-      register_index src;
-      register_index dst_addr; // [reg]
+    template<> struct op_code_args<op_code::load_offset> {
+      register_index dst;
+      register_index addr;
       uint8_t        size;
+      int64_t        offset;
     };
 
-    template<> struct op_code_args<op_code::store_stack> {
+    template<> struct op_code_args<op_code::store> {
       register_index src;
-      register_value offset;
+      register_index addr; // [reg]
       uint8_t        size;
     };
 
     template<> struct op_code_args<op_code::store_addr> {
       register_index src;
-      register_value dst_addr;
+      register_value addr;
       uint8_t        size;
+    };
+
+    template<> struct op_code_args<op_code::store_offset> {
+      register_index src;
+      register_index addr;
+      uint8_t        size;
+      int64_t        offset;
     };
 
     template<> struct op_code_args<op_code::set> {
@@ -151,10 +153,10 @@ namespace adder {
       union {
         uint8_t arg_bytes[1];
         op_code_args<op_code::load> load;
-        op_code_args<op_code::load_stack> load_stack;
+        op_code_args<op_code::load_offset> load_offset;
         op_code_args<op_code::load_addr> load_addr;
         op_code_args<op_code::store> store;
-        op_code_args<op_code::store_stack> store_stack;
+        op_code_args<op_code::store_offset> store_offset;
         op_code_args<op_code::store_addr> store_addr;
         op_code_args<op_code::set> set;
         op_code_binary_op_args add;
@@ -203,7 +205,7 @@ namespace adder {
       uint64_t push(uint8_t const * data, size_t size);
 
       /// Pop data from the stack
-      void pop(size_t bytes);
+      uint64_t pop(size_t bytes);
 
       uint64_t  stack_bottom() const;
       bool      is_stack(uint64_t stack_address) const;
@@ -231,12 +233,20 @@ namespace adder {
       r4, ///< General IO 4
       r5, ///< General IO 5
       r6, ///< General IO 6
-      sp, ///< Stack pointer
+      fp, ///< Frame pointer. Offset of current stack frame.
+      sp, ///< Stack pointer. 
       count
     };
     inline static constexpr size_t register_count = (size_t)register_names::count;
 
     struct machine {
+      machine() {
+        memset(registers, 0, sizeof(registers));
+        memset(&next_instruction, 0, sizeof(next_instruction));
+        program_counter = 0;
+        registers[(uint8_t)register_names::fp] = registers[(uint8_t)register_names::sp] = memory.stack_top;
+      }
+
       register_value registers[register_count];
       uint64_t       program_counter;  ///< Address of next instruction to execute
       instruction    next_instruction;
