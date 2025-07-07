@@ -25,7 +25,7 @@ namespace adder {
 
     bool generate_code(ast const& ast, program_builder* program, size_t statementId);
 
-    bool generate_literal_code(ast const& ast, program_builder* program, bool value) {
+    bool generate_literal_code(ast const & ast, program_builder* program, bool value) {
       unused(ast);
 
       program_builder::expression_result result;
@@ -36,7 +36,7 @@ namespace adder {
       return true;
     }
 
-    bool generate_literal_code(ast const& ast, program_builder* program, int64_t value) {
+    bool generate_literal_code(ast const & ast, program_builder* program, int64_t value) {
       unused(ast);
 
       program_builder::expression_result result;
@@ -47,7 +47,7 @@ namespace adder {
       return true;
     }
 
-    bool generate_literal_code(ast const& ast, program_builder* program, double value) {
+    bool generate_literal_code(ast const & ast, program_builder* program, double value) {
       unused(ast);
 
       program_builder::expression_result result;
@@ -58,7 +58,7 @@ namespace adder {
       return true;
     }
 
-    bool generate_literal_code(ast const& ast, program_builder* program, std::string_view const & value) {
+    bool generate_literal_code(ast const & ast, program_builder* program, std::string_view const & value) {
       unused(ast, value);
 
       program_builder::expression_result result;
@@ -82,7 +82,7 @@ namespace adder {
 
     bool generate_code(ast const & ast, program_builder * program, expr::identifier const & statement, size_t statementId) {
       unused(ast, statement, statementId);
-      std::optional<size_t> symbolIndex = program->find_symbol_index(statement.name);
+      std::optional<size_t> symbolIndex = program->lookup_identifier_symbol_index(statement.name);
       if (!symbolIndex.has_value()) {
         // Push Error: Undeclared identifier `statement.name`
         return false;
@@ -94,79 +94,90 @@ namespace adder {
       return true;
     }
 
-    bool initialize_variable(ast const & ast, program_builder * program, program_builder::expression_result receiver, program_builder::expression_result initializer) {
-      if (receiver.symbol_index.has_value()) {
-        // Resolve symbol address
-        program_builder::symbol_desc &receiverSymbol = program->symbols[receiver.symbol_index.value()];
-        receiver.symbol_index.reset();
-        receiver.type_index = receiverSymbol.type_index;
-        return initialize_variable(ast, program, receiver, initializer);
-      }
-
-      // if (initializer.type_index.has_value()) {
-      //   size_t symbolIndex = program->find_initializer(
-      //     receiver.type_index.value(),
-      //     initializer.type_index.value());
-      // }
-      
-      if (initializer.symbol_index.has_value()) {
-        program_builder::symbol_desc symbol = program->symbols[initializer.symbol_index.value()];
-
-        if ((symbol.flags & symbol_flags::initializer) == symbol_flags::none) {
-          return false;
-        }
-
-
-
-        return true;
-      }
-
-      if (initializer.type_index.has_value()) {
-        std::optional<size_t> symbolIndex = program->find_unnamed_initializer(receiver.type_index.value(), initializer.type_index.value());
-        if (!symbolIndex.has_value()) {
-          // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
-        }
-
-        program_builder::expression_result unnamedInit;
-        unnamedInit.symbol_index = symbolIndex;
-
-        size_t start = program->results.size();
-        program->push_expression_result(unnamedInit);
-        program->push_expression_result(receiver);
-        program->push_expression_result(initializer);
-        return generate_call(ast, program, start);
-      }
-
+    bool generate_code(ast const & ast, program_builder * program, expr::list const & statement, size_t statementId) {
+      unused(ast, program, statement, statementId);
       return false;
+    }
+
+    bool generate_code(ast const & ast, program_builder * program, expr::type_name const & statement, size_t statementId) {
+      unused(ast, program, statement, statementId);
+      return false;
+    }
+
+    bool generate_code(ast const & ast, program_builder * program, expr::type_fn const & statement, size_t statementId) {
+      unused(ast, program, statement, statementId);
+      return false;
+    }
+
+    bool generate_code(ast const & ast, program_builder * program, expr::type_modifier const & statement, size_t statementId) {
+      unused(ast, program, statement, statementId);
+      return false;
+    }
+
+    bool initialize_variable(ast const& ast, program_builder* program, program_builder::expression_result receiver, program_builder::expression_result initializer) {
+      if (!receiver.symbol_index.has_value()) {
+        return false;
+      }
+
+      std::optional<size_t> initializerType = initializer.type_index;
+      if (initializer.symbol_index.has_value())
+        initializerType = program->symbols[initializer.symbol_index.has_value()].type_index;
+
+      if (!initializerType.has_value()) {
+        return false;
+      }
+      
+      program_builder::expression_result unnamedInit;
+      unnamedInit.symbol_index = program->find_unnamed_initializer(receiver.type_index.value(), initializerType.value());
+
+      if (!unnamedInit.symbol_index.has_value()) {
+        // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
+        return false;
+      }
+
+      size_t start = program->results.size();
+      program->push_expression_result(unnamedInit);
+      program->push_expression_result(receiver);
+      program->push_expression_result(initializer);
+      return generate_call(ast, program, start);
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::variable_declaration const & statement, size_t statementId) {
       unused(statementId);
-      
-      size_t typeIndex = program->get_type_index(statement.type_name);
-      // type const &typeInfo = program->types[typeIndex];
 
-      program->push_variable(statement.name, statement.type_name, statement.flags);
-
-      program_builder::expression_result receiver = {
-        std::nullopt,
-        std::nullopt,
-        program->find_symbol_index(statement.name),
-        typeIndex
-      };
-
+      std::optional<program_builder::expression_result> initializer;
       if (statement.initializer.has_value())
       {
         generate_code(ast, program, statement.initializer.value());
-
-        auto initializer = program->pop_expression_result();
-
-        initialize_variable(ast, program, receiver, initializer);
+        initializer = program->pop_expression_result();
 
         // auto type  = program->get_type(initializer.type_name);
         // program->pin_result(initializer, type_size(type));
         // program->pin_result(initializer, type_size(type));
       }
+
+      std::optional<size_t> type = statement.type;
+      if (!type.has_value()) {
+        if (!initializer.has_value() || !initializer->type_index.has_value()) {
+          // Push Error: Unable to infer variable type.
+          return false;
+        }
+
+        type = initializer->type_index;
+      }
+
+      const size_t variableType = program->get_type_index(ast, statement.type.value());
+      program->push_variable(statement.name, variableType, statement.flags);
+
+      program_builder::expression_result receiver = {
+        std::nullopt,
+        std::nullopt,
+        program->lookup_identifier_symbol_index(statement.name),
+        variableType
+      };
+
+      if (initializer.has_value())
+        initialize_variable(ast, program, receiver, initializer.value());
 
       return true;
     }
@@ -211,7 +222,7 @@ namespace adder {
     //  return false;
     //}
 
-    bool generate_code(ast const & ast, program_builder * program, expr::init const& statement, size_t statementId) {
+    bool generate_code(ast const & ast, program_builder * program, expr::init const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
       return true;
       // generate_code(ast, program, statement.expression);
@@ -233,22 +244,28 @@ namespace adder {
       // }, targetType.desc);
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::function_return const& statement, size_t statementId) {
+    bool generate_code(ast const & ast, program_builder * program, expr::function_return const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::binary_operator const& statement, size_t statementId) {
+    bool generate_code(ast const & ast, program_builder * program, expr::binary_operator const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::function_declaration const& statement, size_t statementId) {
+    bool generate_code(ast const& ast, program_builder* program, expr::function_declaration const& statement, size_t statementId) {
+      bool isInitializer = (statement.flags & symbol_flags::initializer) == symbol_flags::initializer;
+      auto typeName = get_type_name(ast, statement.type.value());
+      if (!typeName.has_value()) {
+        // Push error: Invalid function
+        return false;
+      }
       program_builder::symbol_desc symbol;
-      symbol.flags = statement.flags;
+      symbol.flags      = statement.flags;
       symbol.identifier = statement.identifier;
       symbol.type_index = program->add_function_type(ast, statement, statementId);
-
+      symbol.symbol     = adder::format("%s:%s:%.*s", isInitializer ? "init" : "fn", typeName.value().c_str(), statement.identifier.length(), statement.identifier.data());
       if (statement.body.has_value())
       {
         program->push_scope();
@@ -256,7 +273,7 @@ namespace adder {
         symbol.address = std::nullopt;
         for (auto argId : statement.arguments) {
           auto & arg = ast.get<expr::variable_declaration>(argId);
-          program->push_fn_parameter(arg.name, program->get_type_index(arg.type_name), arg.flags);
+          program->push_fn_parameter(arg.name, program->get_type_index(ast, arg.type.value()), arg.flags);
         }
 
         if (!generate_code(ast, program, statement.body.value()))
@@ -271,8 +288,6 @@ namespace adder {
       }
 
       program->push_symbol(statement.identifier, symbol);
-
-      statement.signature;
 
       unused(ast, program, statement);
       return true;
@@ -313,18 +328,37 @@ namespace adder {
             program->push_variable(name, src.type_index.value(), symbol_flags::const_ | symbol_flags::fn_parameter);
             vm::register_index reg = program->pin_constant(src.constant.value());
             program->store(reg, program->symbols.back());
+            program->release_register(reg);
           }
         }
         else {
-          // Need to push new symbol and convert into it.
+          program->push_variable(name, argType, symbol_flags::fn_parameter | symbol_flags::const_);
+          program_builder::expression_result receiver;
+          receiver.symbol_index = program->symbols.size() - 1;
+          return initialize_variable(ast, program, receiver, src);
         }
       }
       else {
+        program->push_variable(name, argType, symbol_flags::fn_parameter | symbol_flags::const_);
+        program_builder::expression_result receiver;
+        receiver.symbol_index = program->symbols.size() - 1;
         if (src.type_index == argType) {
-          // Copy argument.
-          program->push_variable(name, argType, symbol_flags::fn_parameter | symbol_flags::const_);
-          // program->find_unnamed_copy();
-          // sgenerate_copy(ast, );
+          program_builder::expression_result unnamedInit;
+          unnamedInit.symbol_index = program->find_unnamed_initializer(argType, argType);
+
+          if (!unnamedInit.symbol_index.has_value()) {
+            // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
+            return false;
+          }
+
+          size_t start = program->results.size();
+          program->push_expression_result(unnamedInit);
+          program->push_expression_result(receiver);
+          program->push_expression_result(src);
+          return generate_call(ast, program, start);
+        }
+        else {
+          return initialize_variable(ast, program, receiver, src);
         }
       }
       return false;
@@ -353,20 +387,20 @@ namespace adder {
         return false;
       }
 
-      bool inlineCall = func.function_id.has_value() && func.allowInline;
+      bool inlineCall = func.function_id.has_value() && (callable.flags & symbol_flags::inline_) == symbol_flags::inline_;
 
       if (inlineCall)
         inlineCall &= ast.get<expr::function_declaration>(func.function_id.value()).body.has_value();
 
       for (size_t i = 0; i < func.arguments.size(); ++i) {
+        int64_t resultIdx = startResult + i + 1;
         std::string_view name = "";
         if (inlineCall) {
           auto &decl = ast.get<expr::function_declaration>(func.function_id.value());
-          auto &body = ast.get<expr::block>(decl.body.value());
-          auto &var  = ast.get<expr::variable_declaration>(body.statements[i]);
+          auto &var  = ast.get<expr::variable_declaration>(decl.arguments[i]);
           name = var.name;
         }
-        push_argument(ast, program, name, program->results[i], func.arguments[i], inlineCall);
+        push_argument(ast, program, name, program->results[resultIdx], func.arguments[i], inlineCall);
       }
 
       if (inlineCall) {
@@ -417,7 +451,7 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::class_decl const& statement, size_t statementId) {
+    bool generate_code(ast const & ast, program_builder * program, expr::class_decl const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
       return true;
     }
@@ -431,7 +465,7 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const& ast, program_builder* program, expr::byte_code const& code, size_t statementId) {
+    bool generate_code(ast const& ast, program_builder* program, expr::byte_code const & code, size_t statementId) {
       unused(ast, statementId);
 
       return code.callback != nullptr && code.callback(program);
@@ -445,8 +479,47 @@ namespace adder {
       return result;
     }
 
+    bool evaluate_type_name(ast const & ast, program_builder * program, size_t statementId) {
+      if (ast.is<expr::type_modifier>(statementId)) {
+        expr::type_modifier const & modifier = ast.get<expr::type_modifier>(statementId);
+        evaluate_type_name(ast, program, modifier.modified);
+
+        type_modifier mod;
+        mod.base = program->get_type_index(ast, modifier.modified);
+        mod.const_ = modifier.const_;
+        mod.reference = modifier.reference;
+
+        type t;
+        t.desc = mod;
+        t.identifier = get_type_name(ast, statementId).value();
+        program->add_type(t);
+      }
+
+      if (ast.is<expr::type_fn>(statementId)) {
+        expr::type_fn const & fn = ast.get<expr::type_fn>(statementId);
+        evaluate_type_name(ast, program, fn.return_type);
+
+        for (auto const & arg : fn.argument_list) {
+          evaluate_type_name(ast, program, arg);
+        }
+      }
+    }
+
+    bool evaluate_type_names(ast const & ast, program_builder * program) {
+      for (size_t i = 0; i < ast.statements.size(); ++i) {
+      }
+    }
+
+    bool evaluate_types(ast const & ast, program_builder * program) {
+      for (size_t i = 0; i < ast.statements.size(); ++i) {
+      }
+    }
+
     program generate_code(ast const & ast) {
       program_builder ret;
+
+      evaluate_types(ast, &ret);
+
       expr::block const & top = ast.get<expr::block>(ast.statements.size() - 1);
       for (size_t statementId : top.statements) {
         generate_code(ast, &ret, statementId);

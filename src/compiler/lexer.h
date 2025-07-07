@@ -34,6 +34,7 @@ namespace adder {
         extern_,
         as,
         const_,
+        ref,
         let,
 
         if_,
@@ -50,6 +51,8 @@ namespace adder {
         close_paren,
         open_brace,
         close_brace,
+        open_bracket,
+        close_bracket,
         comma,
         new_line,
         line_comment,

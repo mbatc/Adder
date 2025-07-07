@@ -16,6 +16,8 @@ namespace adder {
 
     using address_desc = std::variant<stack_frame_offset, program_address>;
 
+    std::optional<std::string> get_type_name(ast const & ast, size_t statement);
+
     // Symbols are prefixed with the symbol type, e.g. fn, init, class, var.
     // Symbols components are separated by ':'.
     // Components in a symbol are determined by the type.
@@ -23,9 +25,9 @@ namespace adder {
     // e.g.,
     //
     //  var:type:name
-    //  fn:name:arg0,arg1,...,argN
-    //  init:type:name:arg0,arg1,...,argN
-    //  method:type:name:arg0,arg1,...,argN
+    //  fn:arg0,arg1,...,argN:name
+    //  init:[ref]type,arg0,arg1,...,argN:name
+    //  method:[ref]type,arg0,arg1,...,argN:name
 
     struct program_builder {
       program_builder();
@@ -37,6 +39,8 @@ namespace adder {
         int64_t scope_index = 0;
         /// Identifier of the symbol
         std::string_view identifier;
+        /// Full symbol name for linking
+        std::string symbol;
         /// Flags for the symbol.
         symbol_flags flags = symbol_flags::none;
         /// Address of the symbol within the program, if known.
@@ -101,21 +105,28 @@ namespace adder {
         { "bool",    { type_primitive::bool_ } }
       };
 
-      size_t get_type_index(std::string_view const& name) const;
-      type const * get_type(std::string_view const& name) const;
-      size_t get_type_size(type_const const & desc) const;
-      size_t get_type_size(type_reference const & desc) const;
+      size_t get_type_index(std::string_view const & name) const;
+      type const * get_type(std::string_view const & name) const;
+      
+      size_t get_type_index(ast const & tree, size_t statement) const;
+      type const * get_type(ast const & tree, size_t statement) const;
+
+      size_t get_type_size(type_modifier const & desc) const;
       size_t get_type_size(type_primitive const & desc) const;
       size_t get_type_size(type_class const & desc) const;
       size_t get_type_size(type_function const & desc) const;
+      size_t get_type_size(type_function_decl const & desc) const;
       size_t get_type_size(type const & type) const;
       size_t get_type_size(size_t const & typeIndex) const;
 
       std::optional<size_t> find_symbol_index(std::string_view const& identifier) const;
       symbol_desc const * find_symbol(std::string_view const& identifier) const;
+      std::optional<size_t> lookup_identifier_symbol_index(std::string_view const& identifier) const;
+      symbol_desc const * lookup_identifier_symbol(std::string_view const& identifier) const;
       std::optional<size_t> find_unnamed_initializer(size_t receiverTypeIndex, size_t initializerTypeIndex) const;
-      bool add_type(type const & desc);
-      bool add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
+
+      size_t add_type(type const & desc);
+      size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
       bool push_scope();
       bool pop_scope();
 
@@ -129,6 +140,7 @@ namespace adder {
 
       vm::register_index pin_register();
       vm::register_index pin_symbol(symbol_desc const& symbol);
+      vm::register_index pin_reference(symbol_desc const& symbol);
       vm::register_index pin_constant(vm::register_value value);
       vm::register_index pin_address(program_address address, size_t size);
       vm::register_index pin_address(stack_frame_offset stack, size_t size);

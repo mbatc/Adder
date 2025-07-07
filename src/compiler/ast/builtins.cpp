@@ -22,7 +22,7 @@ namespace adder {
       expr::variable_declaration arg0;
       arg0.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
       arg0.name = "self";
-      arg0.type_name = "int32"; // TODO: Reference to int32 (not value)
+      arg0.type_name = "ref int32"; // TODO: Reference to int32 (not value)
 
       expr::variable_declaration arg1;
       arg1.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
@@ -37,8 +37,8 @@ namespace adder {
       decl.arguments.push_back(tree->add(arg1));
       decl.body       = tree->add(code);
       decl.identifier = "";
-      decl.signature  = "init:[ref]int32,int64:";
-      decl.flags      = symbol_flags::initializer;
+      decl.signature  = "init:[ref]int32,int64";
+      decl.flags      = symbol_flags::initializer | symbol_flags::inline_;
       return tree->add(decl);
     }
 

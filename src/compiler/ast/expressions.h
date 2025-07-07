@@ -10,6 +10,26 @@ namespace adder {
     struct program_builder;
 
     namespace expr {
+      struct list {
+        size_t expr;
+        std::optional<size_t> next;
+      };
+
+      struct type_name {
+        std::string_view name;
+      };
+
+      struct type_fn {
+        size_t return_type; ///< Function return type.
+        std::vector<size_t> argument_list; ///< List expression. Each node should contain a type
+      };
+
+      struct type_modifier {
+        bool reference = false;
+        bool const_ = false;
+        size_t modified;
+      };
+
       struct literal {
         std::variant<
           std::string_view,
@@ -24,7 +44,7 @@ namespace adder {
       };
 
       struct variable_declaration {
-        std::string_view type_name;
+        std::optional<size_t> type; // If nullopt, infer the type from initializer expression
         std::string_view name;
         symbol_flags     flags;
         std::optional<size_t> initializer;
@@ -93,12 +113,11 @@ namespace adder {
       };
 
       struct function_declaration {
-        // Return type for this scope.
-        std::string_view           identifier;
-        std::string                signature;
-        symbol_flags               flags = symbol_flags::none;
-        /// Name of the function return type
-        std::optional<std::string> return_type_name;
+        std::string_view identifier;
+        // Linkage flags
+        symbol_flags flags = symbol_flags::none;
+        // Type of the function. This must be a type_fn
+        std::optional<size_t> type;
         /// Arguments declarations.
         std::vector<size_t> arguments;
         /// ID of the expression that contains the function body.
@@ -126,6 +145,10 @@ namespace adder {
       using statement = std::variant<
         literal,
         identifier,
+        list,
+        type_fn,
+        type_name,
+        type_modifier,
         variable_declaration,
         init,
         function_return,

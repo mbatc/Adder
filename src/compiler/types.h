@@ -18,6 +18,7 @@ namespace adder {
       member       = 1 << 3, ///< This symbol is a class member
       static_      = 1 << 4, ///< This symbol has static storage
       initializer  = 1 << 5, ///< This a class initializer method
+      inline_      = 1 << 6, ///< This symbol can be inlined where possible
     };
   }
 
@@ -48,6 +49,17 @@ namespace adder {
       std::vector<std::string> constructors;
     };
 
+    struct type_function_decl {
+      /// Size of a variable of this type in bytes.
+      size_t size = sizeof(vm::address_t);
+      /// Index of the return type definition
+      size_t type;
+      /// Allow this function to be inlined at the call site.
+      bool allowInline = false;
+      /// Expression that contains the function definition. Used to generate inline code
+      std::optional<size_t> function_id;
+    };
+
     struct type_function {
       /// Size of a variable of this type in bytes.
       size_t size = sizeof(vm::address_t);
@@ -55,23 +67,17 @@ namespace adder {
       size_t return_type;
       /// Indices of argument type definitions
       std::vector<size_t> arguments;
-      /// Allow this function to be inlined at the call site.
-      bool allowInline = false;
-      /// Expression that contains the function definition. Used to generate inline code
-      std::optional<size_t> function_id;
     };
 
-    struct type_const {
+    struct type_modifier {
       size_t base;
-    };
-
-    struct type_reference {
-      size_t base;
+      bool const_ = false;
+      bool reference = false;
     };
 
     struct type {
-      std::string_view identifier;
-      std::variant<type_primitive, type_class, type_function, type_reference, type_const> desc;
+      std::string identifier;
+      std::variant<type_primitive, type_class, type_function, type_function_decl, type_modifier> desc;
     };
   }
 }

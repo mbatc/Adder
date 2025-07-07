@@ -33,12 +33,19 @@ namespace adder {
         return nullptr;
       return &(*it);
     }
-    size_t program_builder::get_type_size(type_const const & desc) const {
-      return get_type_size(desc.base);
+
+    size_t program_builder::get_type_index(ast const & tree, size_t type) const {
+      auto name = get_type_name(tree, type);
+      return name.has_value() ? get_type_index(name.value()) : 0;
     }
 
-    size_t program_builder::get_type_size(type_reference const & /*desc*/) const {
-      return sizeof(vm::address_t);
+    type const * program_builder::get_type(ast const & tree, size_t type) const {
+      auto name = get_type_name(tree, type);
+      return name.has_value() ? get_type(name.value()) : nullptr;
+    }
+
+    size_t program_builder::get_type_size(type_modifier const & desc) const {
+      return desc.reference ? sizeof(vm::address_t) : get_type_size(desc.base);
     }
 
     size_t program_builder::get_type_size(type_primitive const& desc) const {
@@ -67,6 +74,10 @@ namespace adder {
       return desc.size;
     }
 
+    size_t program_builder::get_type_size(type_function_decl const& desc) const {
+      return desc.size;
+    }
+
     size_t program_builder::get_type_size(size_t const & typeIndex) const {
       return get_type_size(types[typeIndex]);
     }
@@ -77,53 +88,62 @@ namespace adder {
         }, type.desc);
     }
 
-    std::optional<size_t> program_builder::find_symbol_index(std::string_view const& identifier) const {
+    std::optional<size_t> program_builder::find_symbol_index(std::string_view const& symbol) const {
       auto it = std::find_if(
         symbols.rbegin(),
         symbols.rend(),
-        [&](const symbol_desc& symbol) { return symbol.identifier == identifier; });
+        [&](const symbol_desc& desc) { return desc.symbol == symbol; });
       return it == symbols.rend() ? -1 : &(*it) - symbols.data();
     }
 
-    program_builder::symbol_desc const * program_builder::find_symbol(std::string_view const& identifier) const {
-      std::optional<size_t> idx = find_symbol_index(identifier);
+    program_builder::symbol_desc const * program_builder::find_symbol(std::string_view const& symbol) const {
+      std::optional<size_t> idx = find_symbol_index(symbol);
+
+      return idx.has_value() ? &symbols[idx.value()] : nullptr;
+    }
+
+    std::optional<size_t> program_builder::lookup_identifier_symbol_index(std::string_view const& identifier) const {
+      auto it = std::find_if(
+        symbols.rbegin(),
+        symbols.rend(),
+        [&](const symbol_desc& desc) { return desc.identifier == identifier; });
+      return it == symbols.rend() ? -1 : &(*it) - symbols.data();
+    }
+
+    program_builder::symbol_desc const * program_builder::lookup_identifier_symbol(std::string_view const& symbol) const {
+      std::optional<size_t> idx = lookup_identifier_symbol_index(symbol);
 
       return idx.has_value() ? &symbols[idx.value()] : nullptr;
     }
 
     std::optional<size_t> program_builder::find_unnamed_initializer(size_t receiverTypeIndex, size_t initializerTypeIndex) const {
-      std::string_view signature = adder::format(
-        "init:[ref]%.*s,%.*s::",
+      std::string_view symbol = adder::format(
+        "init:[ref]%.*s,%.*s:",
         types[receiverTypeIndex].identifier.length(), types[receiverTypeIndex].identifier.data(),
         types[initializerTypeIndex].identifier.length(), types[initializerTypeIndex].identifier.data()
       );
 
-      return find_symbol_index(signature);
+      return find_symbol_index(symbol);
     }
 
-    bool program_builder::add_type(type const & desc) {
+    size_t program_builder::add_type(type const & desc) {
       if (get_type(desc.identifier) != nullptr)
         return false;
       types.push_back(desc);
-      return true;
+      return types.size() - 1;
     }
 
-    bool program_builder::add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id)
+    size_t program_builder::add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id)
     {
-      type_function fn;
+      type_function_decl fn;
       fn.allowInline;
       fn.function_id = id;
-      if (decl.return_type_name.has_value())
-        fn.return_type = get_type_index(decl.return_type_name.value());
-      for (size_t arg : decl.arguments)
-        fn.arguments.push_back(get_type_index(tree.get<expr::variable_declaration>(arg).type_name));
+      fn.type = get_type_index(tree, decl.type.value());
 
       type t;
-      t.identifier = decl.identifier;
+      t.identifier = decl.identifier.empty() ? adder::format("__unnamed_fn_%lld", id.value()) : decl.identifier;
       t.desc = fn;
-      add_type(t);
-      // add_type(decayed);
-      return true;
+      return add_type(t);
     }
 
     bool program_builder::push_scope() {
@@ -411,6 +431,48 @@ namespace adder {
     void program_builder::add_instruction(vm::instruction inst) {
       code.push_back(inst);
     }
+
+    std::optional<std::string> get_type_name(ast const& ast, size_t statement) {
+      if (ast.is<expr::type_name>(statement)) {
+        return std::string(ast.get<expr::type_name>(statement).name);
+      }
+
+      if (ast.is<expr::type_modifier>(statement)) {
+        auto& modifier = ast.get<expr::type_modifier>(statement);
+        if (!(modifier.const_ || modifier.reference))
+          return get_type_name(ast, modifier.modified);
+        std::string ret = "[";
+        if (modifier.const_)
+          ret += "const";
+        if (modifier.reference)
+          ret += "ref";
+        ret += "]";
+        auto nested = get_type_name(ast, modifier.modified);
+        if (!nested.has_value())
+          return std::nullopt;
+        return ret + nested.value();
+      }
+
+      if (ast.is<expr::type_fn>(statement)) {
+        auto& fn = ast.get<expr::type_fn>(statement);
+        std::string ret = "(";
+        for (size_t i = 0; i < fn.argument_list.size(); ++i) {
+          auto arg = get_type_name(ast, fn.argument_list[i]);
+          if (!arg.has_value())
+            return std::nullopt;
+          ret += arg.value();
+          if (i != fn.argument_list.size() - 1)
+            ret += ",";
+        }
+
+        auto returnName = get_type_name(ast, fn.return_type);
+        if (!returnName.has_value())
+          return std::nullopt;
+
+        return ret + ")=>" + returnName.value();
+      }
+
+      return std::nullopt;
+    }
   }
 }
-

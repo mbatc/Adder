@@ -17,6 +17,7 @@ namespace adder {
         { "extern", token_id::extern_,             token_class::keyword },
         { "as",     token_id::as,                  token_class::keyword },
         { "const",  token_id::const_,              token_class::keyword },
+        { "ref",    token_id::ref,                 token_class::keyword },
         { "let",    token_id::let,                 token_class::keyword },
 
         { "if",     token_id::if_,                 token_class::keyword },
@@ -32,6 +33,8 @@ namespace adder {
         { ")",      token_id::close_paren,         token_class::grammar},
         { "{",      token_id::open_brace,          token_class::grammar},
         { "}",      token_id::close_brace,         token_class::grammar},
+        { "[",      token_id::open_bracket,        token_class::grammar},
+        { "]",      token_id::close_bracket,       token_class::grammar},
         { ",",      token_id::comma,               token_class::grammar},
         { "\n",     token_id::new_line,            token_class::grammar},
         { "//",     token_id::line_comment,        token_class::grammar},

@@ -362,40 +362,35 @@ namespace adder {
         return true;
       }
 
-      std::optional<size_t> add_function_declaration(ast* tree, std::string_view identifier, std::string_view returnType, std::vector<size_t> &&arguments, size_t bodyId, symbol_flags flags) {
-        std::string signature = "(";
-        size_t numParams = 0;
-        for (auto & paramId : arguments) {
+      std::optional<size_t> add_function_declaration(ast * tree, std::string_view identifier, size_t returnType, std::vector<size_t> &&arguments, size_t bodyId, symbol_flags flags) {
+        type_fn type;
+        type.return_type = returnType;
+        for (auto& paramId : arguments) {
           if (!tree->is<variable_declaration>(paramId)) {
             // Push Error: Invalid statement in argument list.
             return std::nullopt;
           }
 
-          auto &decl = tree->get<variable_declaration>(paramId);
-          if (numParams != 0)
-            signature += ",";
-          signature += decl.type_name;
-          ++numParams;
-        }
+          auto& decl = tree->get<variable_declaration>(paramId);
+          if (!decl.type.has_value()) {
+            // Push Error: Cannot infer type of argument
+            return std::nullopt;
+          }
 
-        if ((flags & symbol_flags::initializer) != symbol_flags::none) {
-          signature = "init:" + signature;
-        } else {
-          signature = "fn:" + signature + std::string(returnType);
+          type.argument_list.push_back(decl.type.value());
         }
 
         function_declaration function;
         function.identifier = identifier;
+        function.type = tree->add(type);
         function.arguments = std::move(arguments);
-        function.signature = std::string(identifier) + signature;
-        function.return_type_name = returnType;
         function.flags = flags;
         function.body = bodyId;
 
         return tree->add(function);
       }
 
-      std::optional<size_t> consume_function_declaration(ast* tree, lexer::token_parser* tokenizer, lexer::token_view const & name, symbol_flags flags) {
+      std::optional<size_t> consume_function_declaration(ast * tree, lexer::token_parser * tokenizer, lexer::token_view const & name, symbol_flags flags) {
         std::vector<size_t> arguments;
         if (!consume_function_parameter_list(tree, &arguments, tokenizer))
           return std::nullopt;
@@ -427,19 +422,118 @@ namespace adder {
         return consume_function_declaration(tree, tokenizer, name, flags);
       }
 
+      std::optional<type_modifier> consume_type_modifiers(ast * tree, lexer::token_parser * tokenizer, rules::token_rule const & terminator) {
+        type_modifier modifiers;
+        while (tokenizer->next()) {
+          if (terminator(tokenizer->current())) {
+            tokenizer->next();
+            return modifiers;
+          }
+
+          switch (tokenizer->current().id) {
+          case lexer::token_id::const_:
+            modifiers.const_ = true;
+            break;
+          case lexer::token_id::ref:
+            modifiers.reference = true;
+            break;
+          default:
+            // TODO: Push error. Unknown modifier
+            return std::nullopt;
+          }
+        }
+
+        return modifiers;
+      }
+
+      bool consume_type_list(ast * tree, lexer::token_parser * tokenizer, std::vector<size_t> * arguments, rules::token_rule const & terminator) {
+        while (tokenizer->current().id != lexer::token_id::close_paren) {
+          auto paramId = consume_type_expression(tree, tokenizer);
+          if (!paramId.has_value())
+            return false;
+
+          arguments->push_back(paramId.value());
+
+          if (tokenizer->current().id == lexer::token_id::close_paren)
+            break;
+          if (tokenizer->current().id != lexer::token_id::comma)
+            return false;
+
+          tokenizer->next();
+        }
+        tokenizer->next();
+        return true;
+      }
+
+      std::optional<size_t> consume_type_fn(ast * tree, lexer::token_parser * tokenizer) {
+        expr::type_fn fn;
+        if (!consume_type_list(tree, tokenizer, &fn.argument_list, lexer::token_id::close_paren)) {
+          return std::nullopt;
+        }
+
+        if (!tokenizer->parse(lexer::token_id::arrow).ok()) {
+          if (fn.argument_list.size() == 1) {
+            // OK, we had a type expression wrapped in parenthesis.
+            return fn.argument_list[0];
+          }
+
+          // TODO: Log error. Expected return expression
+          return std::nullopt;
+        }
+
+        auto returnType = consume_type_expression(tree, tokenizer);
+        if (!returnType.has_value()) {
+          // TODO: Log error. Missing or invalid return type.
+          return std::nullopt;
+        }
+        fn.return_type = returnType.value();
+        return tree->add(fn);
+      }
+
+      std::optional<size_t> consume_type_expression(ast * tree, lexer::token_parser * tokenizer) {
+        switch (tokenizer->current().id) {
+        case lexer::token_id::open_paren: {
+          return consume_type_fn(tree, tokenizer);
+        } break;
+        case lexer::token_id::open_bracket: {
+          auto modifier = consume_type_modifiers(tree, tokenizer, lexer::token_id::close_bracket);
+          if (!modifier.has_value()) {
+            return std::nullopt;
+          }
+          auto modified = consume_type_expression(tree, tokenizer);
+          if (!modified.has_value()) {
+            return std::nullopt;
+          }
+          modifier->modified = modified.value();
+          return tree->add(modifier.value());
+        } break;
+        case lexer::token_id::identifier: {
+          type_name name;
+          name.name = tokenizer->current().name;
+          return tree->add(name);
+        } break;
+        default: {
+          // TODO: Log error. Invalid type expression
+          return std::nullopt;
+        }
+        }
+      }
+
       std::optional<size_t> consume_variable_decl(ast * tree, lexer::token_parser * tokenizer, symbol_flags flags, rules::token_rule const & terminator) {
         lexer::token_view identifier;
-        lexer::token_view type_name;
-        if (!tokenizer->
-          parse(lexer::token_id::identifier, &identifier).
-          parse(lexer::token_id::colon).
-          parse(lexer::token_id::identifier, &type_name).
-          ok())
+        if (!tokenizer->parse(lexer::token_id::identifier, &identifier).ok())
           return std::nullopt;
 
+        std::optional<size_t> typeExpression;
+        if (tokenizer->current().id == lexer::token_id::colon) {
+          tokenizer->next();
+
+          typeExpression = consume_type_expression(tree, tokenizer);
+        }
+
         variable_declaration decl;
-        decl.name  = identifier.name;
-        decl.type_name  = type_name.name;
+        decl.name = identifier.name;
+        decl.type = typeExpression;
         decl.flags = flags;
 
         // Initialization statement

@@ -28,6 +28,7 @@ namespace adder {
       }
 
       expr::operator_type get_operator_type(lexer::token_id token);
+      std::optional<size_t> consume_type_expression(ast* tree, lexer::token_parser* tokenizer);
       std::optional<size_t> consume_literal(ast * tree, lexer::token_parser * tokenizer);
       std::optional<size_t> consume_expression(ast * tree, lexer::token_parser * tokenizer, rules::token_rule const & terminator = lexer::token_id::semi_colon);
       std::optional<size_t> consume_const(ast * tree, lexer::token_parser * tokenizer, symbol_flags flags = symbol_flags::none);
