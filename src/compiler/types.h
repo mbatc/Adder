@@ -52,12 +52,12 @@ namespace adder {
     struct type_function_decl {
       /// Size of a variable of this type in bytes.
       size_t size = sizeof(vm::address_t);
-      /// Index of the return type definition
+      /// Index of the function type definition
       size_t type;
       /// Allow this function to be inlined at the call site.
       bool allowInline = false;
       /// Expression that contains the function definition. Used to generate inline code
-      std::optional<size_t> function_id;
+      size_t function_id;
     };
 
     struct type_function {

@@ -126,7 +126,18 @@ namespace adder {
       if (!initializerType.has_value()) {
         return false;
       }
+
+      if (!receiver.type_index.has_value())
+        receiver.type_index = program->symbols[receiver.symbol_index.value()].type_index;
       
+      if (program->is_reference_of(receiver.type_index.value(), initializer.type_index.value())) {
+        // Explicitly init references to types.
+        auto addr = program->pin_address_of(initializer);
+        program->store(addr, receiver);
+        program->release_register(addr);
+        return true;
+      }
+
       program_builder::expression_result unnamedInit;
       unnamedInit.symbol_index = program->find_unnamed_initializer(receiver.type_index.value(), initializerType.value());
 
@@ -365,7 +376,7 @@ namespace adder {
     }
 
     /// Generate a call using expressions pushed to the builders result stack.
-    bool generate_call(ast const& ast, program_builder* program, size_t startResult) {
+    bool generate_call(ast const& ast, program_builder * program, size_t startResult) {
       program_builder::expression_result function = program->results[startResult];
 
       if (!function.symbol_index.has_value()) {
@@ -375,36 +386,56 @@ namespace adder {
 
       // Push parameters to the stack
       auto & callable  = program->symbols[function.symbol_index.value()];
-      auto & callableT = program->types[callable.type_index];
-      if (!std::holds_alternative<type_function>(callableT.desc)) {
+      auto & symbolType = program->types[callable.type_index];
+
+      // Pointer to the actual function definition.
+      // Allows us to inline the call if possible
+      type_function_decl * func =
+        std::holds_alternative<type_function_decl>(symbolType.desc)
+          ? &std::get<type_function_decl>(symbolType.desc)
+          : nullptr;
+
+      type_function * signature =
+        std::holds_alternative<type_function>(symbolType.desc)
+        ? &std::get<type_function>(symbolType.desc)
+        : nullptr;
+
+      if (signature == nullptr && func == nullptr) {
         // Push error: Type is not callable.
         return false;
       }
+      if (signature == nullptr && func != nullptr) {
+        auto & funcType = program->types[func->type];
+        if (!std::holds_alternative<type_function>(funcType.desc)) {
+          // Push error: Function declaration does not have a valid type.
+          return false;
+        }
+        signature = &std::get<type_function>(funcType.desc);
+      }
 
-      auto & func = std::get<type_function>(callableT.desc);
-      if (func.arguments.size() != program->results.size() - startResult - 1) {
+      if (signature->arguments.size() != program->results.size() - startResult - 1) {
         // Push error: Invalid argument count
         return false;
       }
 
-      bool inlineCall = func.function_id.has_value() && (callable.flags & symbol_flags::inline_) == symbol_flags::inline_;
+      bool inlineCall = func != nullptr && (callable.flags & symbol_flags::inline_) == symbol_flags::inline_;
 
       if (inlineCall)
-        inlineCall &= ast.get<expr::function_declaration>(func.function_id.value()).body.has_value();
+        inlineCall &= ast.get<expr::function_declaration>(func->function_id).body.has_value();
 
-      for (size_t i = 0; i < func.arguments.size(); ++i) {
+      for (size_t i = 0; i < signature->arguments.size(); ++i) {
         int64_t resultIdx = startResult + i + 1;
         std::string_view name = "";
         if (inlineCall) {
-          auto &decl = ast.get<expr::function_declaration>(func.function_id.value());
+          auto &decl = ast.get<expr::function_declaration>(func->function_id);
           auto &var  = ast.get<expr::variable_declaration>(decl.arguments[i]);
           name = var.name;
         }
-        push_argument(ast, program, name, program->results[resultIdx], func.arguments[i], inlineCall);
+        push_argument(ast, program, name, program->results[resultIdx], signature->arguments[i], inlineCall);
       }
 
       if (inlineCall) {
-        auto &decl = ast.get<expr::function_declaration>(func.function_id.value());
+        auto &decl = ast.get<expr::function_declaration>(func->function_id);
         if (decl.body.has_value()) {
           if (!generate_code(ast, program, decl.body.value())) {
             return false;
@@ -497,22 +528,41 @@ namespace adder {
 
       if (ast.is<expr::type_fn>(statementId)) {
         expr::type_fn const & fn = ast.get<expr::type_fn>(statementId);
-        evaluate_type_name(ast, program, fn.return_type);
-
-        for (auto const & arg : fn.argument_list) {
-          evaluate_type_name(ast, program, arg);
+        type_function desc;
+        if (!evaluate_type_name(ast, program, fn.return_type)) {
+          return false;
         }
+
+        desc.return_type = program->get_type_index(ast, fn.return_type);
+        for (auto const & arg : fn.argument_list) {
+          if (!evaluate_type_name(ast, program, arg)) {
+            return false;
+          }
+          desc.arguments.push_back(program->get_type_index(ast, arg));
+        }
+
+        type t;
+        t.desc = desc;
+        t.identifier = get_type_name(ast, statementId).value();
+        program->add_type(t);
       }
+
+      return true;
     }
 
     bool evaluate_type_names(ast const & ast, program_builder * program) {
       for (size_t i = 0; i < ast.statements.size(); ++i) {
+        evaluate_type_name(ast, program, i);
       }
+      return true;
     }
 
     bool evaluate_types(ast const & ast, program_builder * program) {
-      for (size_t i = 0; i < ast.statements.size(); ++i) {
-      }
+      // TODO: Add user type definitions
+      // for (size_t i = 0; i < ast.statements.size(); ++i) {
+      // }
+
+      return evaluate_type_names(ast, program);
     }
 
     program generate_code(ast const & ast) {
@@ -525,7 +575,7 @@ namespace adder {
         generate_code(ast, &ret, statementId);
       }
 
-      return {}; // ret.binary();
+      return ret.binary();
     }
   }
 

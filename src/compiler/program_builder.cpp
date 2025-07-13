@@ -1,4 +1,5 @@
 #include "program_builder.h"
+#include "../compiler.h"
 
 namespace adder {
   namespace compiler {
@@ -42,6 +43,27 @@ namespace adder {
     type const * program_builder::get_type(ast const & tree, size_t type) const {
       auto name = get_type_name(tree, type);
       return name.has_value() ? get_type(name.value()) : nullptr;
+    }
+
+    bool program_builder::is_reference_of(size_t const & reference, size_t const & baseType) const {
+      if (!std::holds_alternative<type_modifier>(types[reference].desc)) {
+        return false;
+      }
+
+      auto& modifiers = std::get<type_modifier>(types[reference].desc);
+      return modifiers.reference && modifiers.base == baseType;
+    }
+
+    bool program_builder::is_function(size_t const& type) const {
+      return std::holds_alternative<type_function_decl>(types[type].desc);
+    }
+
+    bool program_builder::is_const(size_t const & type) const {
+      if (!std::holds_alternative<type_modifier>(types[type].desc)) {
+        return false;
+      }
+      return std::holds_alternative<type_modifier>(types[type].desc)
+        && std::get<type_modifier>(types[type].desc).const_;
     }
 
     size_t program_builder::get_type_size(type_modifier const & desc) const {
@@ -88,37 +110,40 @@ namespace adder {
         }, type.desc);
     }
 
-    std::optional<size_t> program_builder::find_symbol_index(std::string_view const& symbol) const {
+    std::optional<size_t> program_builder::find_symbol_index(std::string_view const& name) const {
       auto it = std::find_if(
         symbols.rbegin(),
         symbols.rend(),
-        [&](const symbol_desc& desc) { return desc.symbol == symbol; });
+        [&](const symbol &desc) { return desc.name == name; });
       return it == symbols.rend() ? -1 : &(*it) - symbols.data();
     }
 
-    program_builder::symbol_desc const * program_builder::find_symbol(std::string_view const& symbol) const {
-      std::optional<size_t> idx = find_symbol_index(symbol);
+    program_builder::symbol const * program_builder::find_symbol(std::string_view const& name) const {
+      std::optional<size_t> idx = find_symbol_index(name);
 
       return idx.has_value() ? &symbols[idx.value()] : nullptr;
     }
 
-    std::optional<size_t> program_builder::lookup_identifier_symbol_index(std::string_view const& identifier) const {
+    std::optional<size_t> program_builder::lookup_identifier_symbol_index(std::string_view const & identifier) const {
       auto it = std::find_if(
-        symbols.rbegin(),
-        symbols.rend(),
-        [&](const symbol_desc& desc) { return desc.identifier == identifier; });
-      return it == symbols.rend() ? -1 : &(*it) - symbols.data();
+        identifiers.rbegin(),
+        identifiers.rend(),
+        [&](const symbol& desc) { return desc.name == identifier; });
+      if (it == symbols.rend())
+        return std::nullopt;
+
+      return it->symbol_index;
     }
 
-    program_builder::symbol_desc const * program_builder::lookup_identifier_symbol(std::string_view const& symbol) const {
-      std::optional<size_t> idx = lookup_identifier_symbol_index(symbol);
+    program_builder::symbol const * program_builder::lookup_identifier_symbol(std::string_view const & identifier) const {
+      std::optional<size_t> idx = lookup_identifier_symbol_index(identifier);
 
       return idx.has_value() ? &symbols[idx.value()] : nullptr;
     }
 
     std::optional<size_t> program_builder::find_unnamed_initializer(size_t receiverTypeIndex, size_t initializerTypeIndex) const {
       std::string_view symbol = adder::format(
-        "init:[ref]%.*s,%.*s:",
+        "init:([ref]%.*s,%.*s)=>void:",
         types[receiverTypeIndex].identifier.length(), types[receiverTypeIndex].identifier.data(),
         types[initializerTypeIndex].identifier.length(), types[initializerTypeIndex].identifier.data()
       );
@@ -133,16 +158,22 @@ namespace adder {
       return types.size() - 1;
     }
 
-    size_t program_builder::add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id)
-    {
+    size_t program_builder::add_function_type(ast const& tree, expr::function_declaration const& decl, std::optional<size_t> id) {
       type_function_decl fn;
       fn.allowInline;
-      fn.function_id = id;
+      fn.function_id = id.value();
       fn.type = get_type_index(tree, decl.type.value());
+
+      if (fn.type == 0) {
+        // TODO: Log error. Invalid funciton type.
+        return 0;
+      }
 
       type t;
       t.identifier = decl.identifier.empty() ? adder::format("__unnamed_fn_%lld", id.value()) : decl.identifier;
+      t.identifier = adder::format("%s%s", t.identifier.c_str(), types[fn.type].identifier.c_str());
       t.desc = fn;
+
       return add_type(t);
     }
 
@@ -152,12 +183,6 @@ namespace adder {
     }
 
     bool program_builder::pop_scope() {
-      scope &block = scopes.back();
-      while (block.symbols.size() > 0)
-      {
-        block.symbols.pop_back();
-        symbols.pop_back();
-      }
       scopes.pop_back();
       return true;
     }
@@ -177,27 +202,32 @@ namespace adder {
     //   registerStack.pop_back();
     // }
 
-    bool program_builder::push_symbol(std::string_view const& identifier, symbol_desc const& desc) {
+    bool program_builder::push_symbol(symbol const & desc) {
       scope &block = scopes.back();
-      block.symbols.push_back(symbols.size() - 1);
+      bool isGlobal = (desc.flags & symbol_flags::extern_) == symbol_flags::extern_
+        || (desc.flags & symbol_flags::extern_) == symbol_flags::static_
+        || scopes.size() == 1;
 
-      symbol_desc newSymbol = desc;
-      newSymbol.identifier  = identifier;
-      newSymbol.scope_index = scopes.size() - 1;
-      symbols.push_back(newSymbol);
+      symbol newSymbol = desc;
+      newSymbol.name  = name;
+      if (isGlobal)
+        globalSymbols.push_back(newSymbol);
+      else
+        localSymbols.push_back(newSymbol);
+
       return true;
     }
 
     bool program_builder::pop_symbol() {
       scope &block = scopes.back();
-      symbol_desc back = symbols.back();
+      symbol back = symbols.back();
       symbols.pop_back();
       block.symbols.pop_back();
       return true;
     }
 
     bool program_builder::push_fn_parameter(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags) {
-      symbol_desc symbol;
+      symbol symbol;
       symbol.flags       = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
       symbol.type_index  = typeIndex;
       symbol.identifier  = identifier;
@@ -220,7 +250,7 @@ namespace adder {
       alloc.alloc_stack.bytes = (uint32_t)get_type_size(type);
       add_instruction(alloc);
 
-      symbol_desc symbol;
+      symbol symbol;
       symbol.flags       = flags;
       symbol.type_index  = typeIndex;
       symbol.identifier  = identifier;
@@ -238,7 +268,7 @@ namespace adder {
 
     void program_builder::pop_variable() {
       scope &block = scopes.back();
-      symbol_desc var = symbols.back();
+      symbol var = symbols.back();
 
       // TODO: Destroy instance by calling destroy function
       // destroy();
@@ -259,7 +289,7 @@ namespace adder {
       return registers.pin();
     }
 
-    vm::register_index program_builder::pin_symbol(symbol_desc const& symbol) {
+    vm::register_index program_builder::pin_symbol(symbol const& symbol) {
       const size_t sz = get_type_size(types[symbol.type_index]);
       if (sz > sizeof(vm::register_value)) {
         // Error: Cannot pin `symbol` to register. Too large.
@@ -331,9 +361,37 @@ namespace adder {
       return registers.pin();
     }
 
-    vm::register_index program_builder::pin_relocation(std::string_view identifier, size_t size)
-    {
+    vm::register_index program_builder::pin_address_of(symbol const & symbol) {
+      if (symbol.address.has_value()) {
+        vm::register_index dst = pin_register();
+        set(dst, symbol.address.value());
+        return dst;
+      }
+      else {
+        vm::register_index dst = pin_register();
+        set(dst, program_address{ 0 });
+        uint64_t offset = (uint8_t*)&code.back().set.val - (uint8_t*)code.data();
+        relocations[symbol.identifier].push_back(offset);
+        return dst;
+      }
+    }
+
+    vm::register_index program_builder::pin_address_of(expression_result const & result) {
+      if (result.address.has_value()) {
+        vm::register_index dst = pin_register();
+        set(dst, result.address.value());
+        return dst;
+      }
+      else if (result.symbol_index.has_value()) {
+        return pin_address_of(symbols[result.symbol_index.value()]);
+      }
+
+      return false;
+    }
+
+    vm::register_index program_builder::pin_relocation(std::string_view identifier, size_t size) {
       vm::register_index idx = registers.pin();
+
       vm::instruction op;
       op.code = vm::op_code::load_addr;
       op.load_addr.addr = 0;
@@ -369,6 +427,33 @@ namespace adder {
     //  uint64_t offset = std::get<scope_stack_offset>(symbol.address.value()).offset;
     //  return scopes[symbol.scope_index].stackSize - offset;
     //}
+    
+    void program_builder::set(vm::register_index dst, vm::register_value value) {
+      vm::instruction i;
+      i.code = vm::op_code::set;
+      i.set.dst = dst;
+      i.set.val = value;
+      add_instruction(i);
+    }
+
+    void program_builder::set(vm::register_index dst, program_address const& addr) {
+      set(dst, addr.addr);
+    }
+
+    void program_builder::set(vm::register_index dst, stack_frame_offset const& addr) {
+      set(dst, -addr.offset);
+
+      vm::instruction add;
+      add.code = vm::op_code::add_i64;
+      add.add.dst = dst;
+      add.add.lhs = dst;
+      add.add.rhs = (uint8_t)vm::register_names::fp;
+      add_instruction(add);
+    }
+
+    void program_builder::set(vm::register_index dst, address_desc const& addr) {
+      std::visit([=](auto&& o) { return set(dst, o); }, addr);
+    }
 
     bool program_builder::store(vm::register_index src, program_address const & addr, uint8_t sz) {
       vm::instruction instr;
@@ -407,7 +492,7 @@ namespace adder {
       return true;
     }
 
-    bool program_builder::store(vm::register_index src, symbol_desc const & symbol)
+    bool program_builder::store(vm::register_index src, symbol const & symbol)
     {
       if (!store(src, symbol.address.value_or(program_address{ 0 }), (uint8_t)get_type_size(types[symbol.type_index])))
         return false;
@@ -428,8 +513,56 @@ namespace adder {
       return false;
     }
 
+    bool program_builder::store(vm::register_index src, expression_result const& result)
+    {
+      if (result.symbol_index.has_value()) {
+        return store(src, symbols[result.symbol_index.value()]);
+      }
+      else if (result.type_index.has_value()) {
+        if (result.address.has_value()) {
+          return store(src, result.address.value(), get_type_size(result.type_index.value()));
+        }
+        else if (result.constant.has_value()) {
+          return store(src, result.constant.value(), get_type_size(result.type_index.value()));
+        }
+      }
+
+      return false;
+    }
+
     void program_builder::add_instruction(vm::instruction inst) {
       code.push_back(inst);
+    }
+
+    program program_builder::binary() const {
+      program::header header;
+
+      std::vector<program::symbol_table_entry> publicSymbols;
+      std::vector<program::symbol_table_entry> externSymbols;
+
+      std::vector<uint8_t> symbolNames;
+      std::vector<uint8_t> symbolData;
+
+      for (auto& symbol : symbols) {
+        program::symbol_table_entry item;
+        item.name_address = symbolNames.size();
+        item.data_address = symbolData.size();
+
+        for (char c : symbol.identifier)
+          symbolNames.push_back(c);
+        symbolNames.push_back('\0');
+
+        bool isExtern  = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
+        bool isAddress = is_function(symbol.type_index) || isExtern;
+
+        if (isExtern)
+          externSymbols.push_back(item);
+        else
+          publicSymbols.push_back(item);
+      }
+
+      std::vector<uint8_t> data;
+      data.push_back();
     }
 
     std::optional<std::string> get_type_name(ast const& ast, size_t statement) {
