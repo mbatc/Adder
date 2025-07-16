@@ -5,6 +5,7 @@ namespace adder {
   namespace compiler {
     program_builder::program_builder() {
       scopes.push_back({});
+      symbolPrefix.push_back("");
     }
 
     vm::register_index program_builder::Registers::pin() {
@@ -112,10 +113,14 @@ namespace adder {
 
     std::optional<size_t> program_builder::find_symbol_index(std::string_view const& name) const {
       auto it = std::find_if(
-        symbols.rbegin(),
-        symbols.rend(),
+        symbols.begin(),
+        symbols.end(),
         [&](const symbol &desc) { return desc.name == name; });
-      return it == symbols.rend() ? -1 : &(*it) - symbols.data();
+
+      if (it == symbols.end())
+        return std::nullopt;
+      else
+        return &(*it) - symbols.data();
     }
 
     program_builder::symbol const * program_builder::find_symbol(std::string_view const& name) const {
@@ -124,15 +129,18 @@ namespace adder {
       return idx.has_value() ? &symbols[idx.value()] : nullptr;
     }
 
-    std::optional<size_t> program_builder::lookup_identifier_symbol_index(std::string_view const & identifier) const {
-      auto it = std::find_if(
-        identifiers.rbegin(),
-        identifiers.rend(),
-        [&](const symbol& desc) { return desc.name == identifier; });
-      if (it == symbols.rend())
-        return std::nullopt;
+    std::optional<size_t> program_builder::lookup_identifier_symbol_index(std::string_view const & name) const {
+      for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+        auto identifierIt = std::find_if(
+          it->identifiers.rbegin(),
+          it->identifiers.rend(),
+          [&](const identifier & desc) { return desc.name == name; });
 
-      return it->symbol_index;
+        if (identifierIt != it->identifiers.rend())
+          return identifierIt->symbol_index;
+      }
+
+      return std::nullopt;
     }
 
     program_builder::symbol const * program_builder::lookup_identifier_symbol(std::string_view const & identifier) const {
@@ -183,8 +191,27 @@ namespace adder {
     }
 
     bool program_builder::pop_scope() {
+      auto& scope = scopes.back();
+      for (size_t idx : scope.localSymbols) {
+        // TODO: Call destroy method.
+
+        vm::instruction free;
+        free.code = vm::op_code::free_stack;
+        free.free_stack.bytes = (uint32_t)get_type_size(types[symbols[idx].type_index]);
+        add_instruction(free);
+
+        symbols.erase(idx);
+      }
       scopes.pop_back();
       return true;
+    }
+
+    void program_builder::push_symbol_prefix(std::string const & prefix) {
+      symbolPrefix.push_back(symbolPrefix.back() + prefix + ">");
+    }
+
+    void program_builder::pop_symbol_prefix() {
+      symbolPrefix.pop_back();
     }
 
     // std::vector<Registers> registerStack;
@@ -202,35 +229,30 @@ namespace adder {
     //   registerStack.pop_back();
     // }
 
-    bool program_builder::push_symbol(symbol const & desc) {
+    std::optional<size_t> program_builder::push_symbol(symbol desc) {
       scope &block = scopes.back();
-      bool isGlobal = (desc.flags & symbol_flags::extern_) == symbol_flags::extern_
-        || (desc.flags & symbol_flags::extern_) == symbol_flags::static_
-        || scopes.size() == 1;
+      bool isLocal = (desc.flags & symbol_flags::extern_) != symbol_flags::extern_
+        && (desc.flags & symbol_flags::static_) != symbol_flags::static_;
 
-      symbol newSymbol = desc;
-      newSymbol.name  = name;
-      if (isGlobal)
-        globalSymbols.push_back(newSymbol);
-      else
-        localSymbols.push_back(newSymbol);
+      if (isLocal)
+        desc.name = adder::format("%s%s", symbolPrefix.back().c_str(), desc.name.c_str());
 
-      return true;
+      auto existing = find_symbol_index(desc.name);
+      if (existing.has_value())
+        return std::nullopt;
+
+      size_t index = symbols.emplace(desc);
+      if (isLocal)
+        block.localSymbols.push_back(index);
+
+      return index;
     }
 
-    bool program_builder::pop_symbol() {
-      scope &block = scopes.back();
-      symbol back = symbols.back();
-      symbols.pop_back();
-      block.symbols.pop_back();
-      return true;
-    }
-
-    bool program_builder::push_fn_parameter(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags) {
+    bool program_builder::push_fn_parameter(std::string_view const& name, size_t typeIndex, symbol_flags const & flags) {
       symbol symbol;
       symbol.flags       = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
       symbol.type_index  = typeIndex;
-      symbol.identifier  = identifier;
+      symbol.name        = name;
 
       scope &block = scopes.back();
       block.stackSize += get_type_size(typeIndex);
@@ -240,10 +262,17 @@ namespace adder {
       // We offset from frame pointer as it is static during a scope/call. Stack pointer is always moving.
       symbol.address = stack_frame_offset{ block.stackSize };
 
-      return push_symbol(identifier, symbol);
+      identifier id;
+      id.symbol_index = push_symbol(symbol);
+      id.name = name;
+      if (!id.symbol_index.has_value())
+        return false;
+
+      block.identifiers.push_back(id);
+      return true;
     }
 
-    bool program_builder::push_variable(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags) {
+    bool program_builder::push_variable(std::string_view const& name, size_t typeIndex, symbol_flags const & flags) {
       auto const& type = types[typeIndex];
       vm::instruction alloc;
       alloc.code = vm::op_code::alloc_stack;
@@ -253,32 +282,38 @@ namespace adder {
       symbol symbol;
       symbol.flags       = flags;
       symbol.type_index  = typeIndex;
-      symbol.identifier  = identifier;
+      symbol.name        = name; // TODO: Generate more unique symbol names
 
       scope &block = scopes.back();
       block.stackSize += get_type_size(type);
       symbol.address = stack_frame_offset{ block.stackSize };
 
-      return push_symbol(identifier, symbol);
+      identifier id;
+      id.symbol_index = push_symbol(symbol);
+      id.name = name;
+      if (!id.symbol_index.has_value())
+        return false;
+
+      block.identifiers.push_back(id);
+      return true;
     }
 
     bool program_builder::push_variable(std::string_view const& identifier, std::string_view const & typeName, symbol_flags const & flags) {
       return push_variable(identifier, get_type_index(typeName), flags);
     }
 
-    void program_builder::pop_variable() {
+    bool program_builder::push_identifier(std::string_view const & name, symbol const & symbol) {
       scope &block = scopes.back();
-      symbol var = symbols.back();
 
-      // TODO: Destroy instance by calling destroy function
-      // destroy();
+      identifier id;
+      id.symbol_index = push_symbol(symbol);
+      id.name = name;
+      if (!id.symbol_index.has_value())
+        return false;
 
-      vm::instruction free;
-      free.code = vm::op_code::free_stack;
-      free.free_stack.bytes = (uint32_t)get_type_size(types[var.type_index]);
-      add_instruction(free);
-
-      block.stackSize -= free.free_stack.bytes;
+      if (!name.empty())
+        block.identifiers.push_back(id);
+      return true;
     }
 
     void program_builder::push_expression_result(expression_result result) {
@@ -299,7 +334,7 @@ namespace adder {
         return pin_address(symbol.address.value(), sz);
       }
       else {
-        return pin_relocation(symbol.identifier, sz);
+        return pin_relocation(symbol.name, sz);
       }
     }
 
@@ -371,7 +406,7 @@ namespace adder {
         vm::register_index dst = pin_register();
         set(dst, program_address{ 0 });
         uint64_t offset = (uint8_t*)&code.back().set.val - (uint8_t*)code.data();
-        relocations[symbol.identifier].push_back(offset);
+        relocations[symbol.name].push_back(offset);
         return dst;
       }
     }
@@ -509,7 +544,7 @@ namespace adder {
         break;
       }
 
-      relocations[symbol.identifier].push_back((uint8_t*)pAddr - (uint8_t*)code.data());
+      relocations[symbol.name].push_back((uint8_t*)pAddr - (uint8_t*)code.data());
       return false;
     }
 
@@ -520,10 +555,10 @@ namespace adder {
       }
       else if (result.type_index.has_value()) {
         if (result.address.has_value()) {
-          return store(src, result.address.value(), get_type_size(result.type_index.value()));
+          return store(src, result.address.value(), (uint8_t)get_type_size(result.type_index.value()));
         }
         else if (result.constant.has_value()) {
-          return store(src, result.constant.value(), get_type_size(result.type_index.value()));
+          return false;
         }
       }
 
@@ -548,21 +583,31 @@ namespace adder {
         item.name_address = symbolNames.size();
         item.data_address = symbolData.size();
 
-        for (char c : symbol.identifier)
+        for (char c : symbol.name)
           symbolNames.push_back(c);
         symbolNames.push_back('\0');
 
-        bool isExtern  = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
-        bool isAddress = is_function(symbol.type_index) || isExtern;
+        bool isExtern   = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
+        bool isFunction = is_function(symbol.type_index);
 
         if (isExtern)
           externSymbols.push_back(item);
         else
           publicSymbols.push_back(item);
+
+        if (!isExtern) {
+          if (isFunction) {
+            // TODO: We need to relocate this offset after we've built the whole program
+            item.data_address = symbol.function->instruction_offset;
+          }
+          else {
+            size_t bytes = get_type_size(symbol.type_index);
+            symbolData.resize(symbolData.size() + bytes, 0);
+          }
+        }
       }
 
-      std::vector<uint8_t> data;
-      data.push_back();
+      return {};
     }
 
     std::optional<std::string> get_type_name(ast const& ast, size_t statement) {

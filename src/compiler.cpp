@@ -265,21 +265,24 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const& ast, program_builder* program, expr::function_declaration const& statement, size_t statementId) {
+    bool generate_code(ast const & ast, program_builder * program, expr::function_declaration const & statement, size_t statementId) {
       bool isInitializer = (statement.flags & symbol_flags::initializer) == symbol_flags::initializer;
       auto typeName = get_type_name(ast, statement.type.value());
       if (!typeName.has_value()) {
         // Push error: Invalid function
         return false;
       }
-      program_builder::symbol_desc symbol;
+
+      program_builder::symbol symbol;
       symbol.flags      = statement.flags;
-      symbol.identifier = statement.identifier;
+      symbol.name       = adder::format("%s:%s:%.*s", isInitializer ? "init" : "fn", typeName.value().c_str(), statement.identifier.length(), statement.identifier.data());
       symbol.type_index = program->add_function_type(ast, statement, statementId);
-      symbol.symbol     = adder::format("%s:%s:%.*s", isInitializer ? "init" : "fn", typeName.value().c_str(), statement.identifier.length(), statement.identifier.data());
+
       if (statement.body.has_value())
       {
+        program->push_symbol_prefix(symbol.name);
         program->push_scope();
+
         // size_t start = program->code.size();
         symbol.address = std::nullopt;
         for (auto argId : statement.arguments) {
@@ -287,18 +290,17 @@ namespace adder {
           program->push_fn_parameter(arg.name, program->get_type_index(ast, arg.type.value()), arg.flags);
         }
 
+        symbol.function.emplace();
+        symbol.function->instruction_offset = program->code.size();
         if (!generate_code(ast, program, statement.body.value()))
           return false;
-
-        for (auto argId : statement.arguments) {
-          unused(argId);
-          program->pop_symbol();
-        }
+        symbol.function->instruction_count  = program->code.size() - symbol.function->instruction_offset;
 
         program->pop_scope();
+        program->pop_symbol_prefix();
       }
 
-      program->push_symbol(statement.identifier, symbol);
+      program->push_identifier(statement.identifier, symbol);
 
       unused(ast, program, statement);
       return true;
@@ -321,24 +323,24 @@ namespace adder {
       if (isInline) {
         if (src.type_index == argType) {
           if (src.symbol_index.has_value()) {
-            program_builder::symbol_desc alias = program->symbols[src.symbol_index.value()];
-            alias.identifier = name;
+            program_builder::symbol alias = program->symbols[src.symbol_index.value()];
+            alias.name   = name;
             alias.flags |= symbol_flags::fn_parameter;
-            program->push_symbol(name, alias);
+            program->push_symbol(alias);
           }
           else if (src.address.has_value()) {
-            program_builder::symbol_desc alias;
-            alias.identifier = name;
+            program_builder::symbol alias;
+            alias.name       = name;
             alias.address    = src.address;
             alias.type_index = src.type_index.value();
             alias.flags      = symbol_flags::fn_parameter;
-            program->push_symbol(name, alias);
+            program->push_symbol(alias);
           }
           else if (src.constant.has_value()) {
             // Push new variable and store the constant in it
             program->push_variable(name, src.type_index.value(), symbol_flags::const_ | symbol_flags::fn_parameter);
             vm::register_index reg = program->pin_constant(src.constant.value());
-            program->store(reg, program->symbols.back());
+            program->store(reg, *program->lookup_identifier_symbol(name));
             program->release_register(reg);
           }
         }
@@ -423,6 +425,8 @@ namespace adder {
       if (inlineCall)
         inlineCall &= ast.get<expr::function_declaration>(func->function_id).body.has_value();
 
+      program->push_scope();
+
       for (size_t i = 0; i < signature->arguments.size(); ++i) {
         int64_t resultIdx = startResult + i + 1;
         std::string_view name = "";
@@ -454,9 +458,7 @@ namespace adder {
         }
       }
 
-      for (size_t i = startResult + 1; i < program->results.size(); ++i) {
-        program->pop_variable();
-      }
+      program->pop_scope();
 
       program->results.resize(startResult);
       return true;
@@ -490,9 +492,13 @@ namespace adder {
     bool generate_code(ast const & ast, program_builder * program, expr::block const & scope, size_t blockId) {
       unused(blockId);
 
+      program->push_scope();
+
       for (size_t statementId : scope.statements)
         if (!generate_code(ast, program, statementId))
           return false;
+
+      program->pop_scope();
       return true;
     }
 

@@ -3,6 +3,7 @@
 #include "types.h"
 #include "ast.h"
 #include "ast/builtins.h"
+#include "../containers/pool.h"
 
 namespace adder {
   namespace compiler {
@@ -69,13 +70,15 @@ namespace adder {
       };
 
       /// Symbols in the program.
-      std::vector<symbol> globalSymbols;
+      adder::pool<symbol> symbols;
+      /// Stack of prefixes for symbols
+      std::vector<std::string> symbolPrefix;
       /// Instructions in the program.
       std::vector<vm::instruction> code;
 
       struct scope {
         /// Visibile identifiers.
-        std::vector<symbol> symbols;
+        std::vector<size_t> localSymbols;
         /// Visibile identifiers.
         std::vector<identifier> identifiers;
         /// Size of the stack frame.
@@ -147,12 +150,14 @@ namespace adder {
       size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
       bool push_scope();
       bool pop_scope();
+      void push_symbol_prefix(std::string const & name);
+      void pop_symbol_prefix();
 
-      bool push_symbol(symbol const & desc);
+      std::optional<size_t> push_symbol(symbol desc);
       bool push_fn_parameter(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, std::string_view const & type_name, symbol_flags const & flags);
-      void pop_variable();
+      bool push_identifier(std::string_view const& identifier, symbol const & symbol);
       void push_expression_result(expression_result result);
 
       vm::register_index pin_register();
