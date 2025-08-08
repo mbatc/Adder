@@ -29,6 +29,7 @@ namespace adder {
       push,             ///< Push a register to the stack
       pop,              ///< Pop a register value from the stack. Store in named register
       jump,             ///< Set the program counter.
+      jump_indirect,    ///< Set the program counter to a value stored in a register
       move,             ///< Move a value from a register
       compare_i64,      ///< Compare the values in two registers as integers
       compare_f64,      ///< Compare the values in two registers as floats
@@ -117,7 +118,11 @@ namespace adder {
     };
 
     template<> struct op_code_args<op_code::jump> {
-      uint64_t dst_addr;
+      uint64_t addr;
+    };
+
+    template<> struct op_code_args<op_code::jump_indirect> {
+      register_index addr; // [reg]
     };
 
     template<> struct op_code_args<op_code::move> {
@@ -167,6 +172,7 @@ namespace adder {
         op_code_args<op_code::push> push;
         op_code_args<op_code::pop> pop;
         op_code_args<op_code::jump> jump;
+        op_code_args<op_code::jump_indirect> jump_indirect;
         op_code_args<op_code::move> move;
         op_code_binary_op_args compare;
         op_code_args<op_code::conditional_jump> conditional_jump;
@@ -175,13 +181,12 @@ namespace adder {
     };
 
     struct allocator {
-      struct block {
-        uint64_t offset;
-        uint64_t size;
-      };
-
-      std::list<block>     blocks; ///< Available blocks
-      std::vector<uint8_t> data;   ///< Allocated data for this heap.
+      // struct block {
+      //   uint64_t offset;
+      //   uint64_t size;
+      // };
+      // std::list<block>     blocks; ///< Available blocks
+      // std::vector<uint8_t> data;   ///< Allocated data for this heap.
 
       uint8_t const * read(uint64_t stack_address) const;
       uint8_t * read(uint64_t stack_address);
@@ -190,7 +195,7 @@ namespace adder {
       void free(uint64_t block);
     };
 
-    struct memory {
+    struct memory_t {
       inline static constexpr uint64_t stack_top = std::numeric_limits<uint64_t>::max();
 
       /// Allocate heap memory.
@@ -225,37 +230,58 @@ namespace adder {
       allocator            heap;  ///< Heap allocator
     };
 
-    enum class register_names {
-      r0, ///< General IO 0
-      r1, ///< General IO 1
-      r2, ///< General IO 2
-      r3, ///< General IO 3
-      r4, ///< General IO 4
-      r5, ///< General IO 5
-      r6, ///< General IO 6
-      fp, ///< Frame pointer. Offset of current stack frame.
-      sp, ///< Stack pointer. 
-      count
+    struct stack_t {
+      stack_t(memory_t* allocator) {
+
+      }
     };
+
+    struct register_names {
+      enum {
+        r0, ///< General IO 0
+        r1, ///< General IO 1
+        r2, ///< General IO 2
+        r3, ///< General IO 3
+        r4, ///< General IO 4
+        r5, ///< General IO 5
+        r6, ///< General IO 6
+        pc, ///< Program counter.
+        fp, ///< Frame pointer. Offset of current stack frame.
+        sp, ///< Stack pointer.
+        rp, ///< Return pointer. Where the current scope should return to.
+        count
+      };
+    };
+
     inline static constexpr size_t register_count = (size_t)register_names::count;
 
     struct machine {
       machine() {
         memset(registers, 0, sizeof(registers));
         memset(&next_instruction, 0, sizeof(next_instruction));
-        program_counter = 0;
-        registers[(uint8_t)register_names::fp] = registers[(uint8_t)register_names::sp] = memory.stack_top;
+        registers[register_names::pc].u64 = 0;
+        registers[register_names::fp].u64 = registers[register_names::sp].u64 = memory.stack_top;
       }
 
-      register_value registers[register_count];
-      uint64_t       program_counter;  ///< Address of next instruction to execute
-      instruction    next_instruction;
-      memory         memory;
+      union {
+        register_value value;
+        uint64_t       u64;
+        int64_t        i64;
+        double         d64;
+      } registers[register_count];
+
+      uint64_t program_counter() const {
+        return registers[register_names::pc].u64;
+      }
+
+      instruction next_instruction;
+      memory_t    memory;
+      stack_t     stack = { &memory };
     };
 
     bool decode(machine * vm);
     void relocate_program(uint8_t * program, size_t size, uint64_t base);
-    uint64_t load_program(machine * vm, std::vector<uint8_t> const & program);
+    uint64_t load_program(machine * vm, std::vector<uint8_t> const & program, bool relocated = true);
     bool execute(machine * vm);
 
     bool step(machine *vm);

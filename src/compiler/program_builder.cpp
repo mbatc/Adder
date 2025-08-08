@@ -46,25 +46,40 @@ namespace adder {
       return name.has_value() ? get_type(name.value()) : nullptr;
     }
 
-    bool program_builder::is_reference_of(size_t const & reference, size_t const & baseType) const {
-      if (!std::holds_alternative<type_modifier>(types[reference].desc)) {
-        return false;
-      }
+    std::optional<size_t> program_builder::unwrap_type(size_t const & type) const
+    {
+      if (std::holds_alternative<type_modifier>(types[type].desc))
+        return std::get<type_modifier>(types[type].desc).base;
+      else
+        return std::nullopt;
+    }
 
-      auto& modifiers = std::get<type_modifier>(types[reference].desc);
+    bool program_builder::is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const {
+      if (!(reference.has_value()
+        && baseType.has_value()
+        && std::holds_alternative<type_modifier>(types[*reference].desc)))
+        return false;
+
+      auto& modifiers = std::get<type_modifier>(types[*reference].desc);
       return modifiers.reference && modifiers.base == baseType;
     }
 
-    bool program_builder::is_function(size_t const& type) const {
-      return std::holds_alternative<type_function_decl>(types[type].desc);
+    bool program_builder::is_reference(std::optional<size_t> const & type) const
+    {
+      return type.has_value()
+        && std::holds_alternative<type_modifier>(types[*type].desc)
+        && std::get<type_modifier>(types[*type].desc).reference;
     }
 
-    bool program_builder::is_const(size_t const & type) const {
-      if (!std::holds_alternative<type_modifier>(types[type].desc)) {
-        return false;
-      }
-      return std::holds_alternative<type_modifier>(types[type].desc)
-        && std::get<type_modifier>(types[type].desc).const_;
+    bool program_builder::is_function(std::optional<size_t> const& type) const {
+      return type.has_value()
+        && (std::holds_alternative<type_function_decl>(types[*type].desc) || is_function(unwrap_type(*type)));
+    }
+
+    bool program_builder::is_const(std::optional<size_t> const & type) const {
+      return type.has_value()
+        && std::holds_alternative<type_modifier>(types[*type].desc)
+        && std::get<type_modifier>(types[*type].desc).const_;
     }
 
     size_t program_builder::get_type_size(type_modifier const & desc) const {
@@ -214,6 +229,70 @@ namespace adder {
       symbolPrefix.pop_back();
     }
 
+    void program_builder::call(symbol const & symbol) {
+      push_return_pointer();
+      jump_to(symbol);
+      pop_return_pointer();
+    }
+
+    void program_builder::jump_to(symbol const& symbol)
+    {
+      if (!is_function(symbol.type_index))
+        return;
+
+      if (is_reference(symbol.type_index)) {
+         vm::register_index addr = pin_symbol(symbol);
+         jump_indirect(addr);
+      }
+
+      if (symbol.address.has_value()) {
+      }
+      else {
+        if (symbol.function.has_value()) {
+          jump_to(program_address{ 0 });
+          uint64_t offset = (uint8_t*)&code.back().jump.addr - (uint8_t*)code.data();
+          relocations[symbol.name].push_back(offset);
+        }
+        else if (is_reference(symbol.type_index)) {
+        }
+      }
+    }
+
+    void program_builder::jump_to(program_address const& address)
+    {
+      vm::instruction op;
+      op.code = vm::op_code::jump;
+      op.jump.addr = address.addr;
+      add_instruction(op);
+    }
+
+    void program_builder::jump_indirect(address_desc const & addr)
+    {
+      size_t idx = pin_address(addr, sizeof(vm::address_t));
+      jump_indirect(idx);
+      release_register(idx);
+    }
+
+    void program_builder::jump_indirect(vm::register_index const & address)
+    {
+      vm::instruction op;
+      op.code = vm::op_code::jump_indirect;
+      op.jump_indirect.addr = address;
+      add_instruction(op);
+    }
+
+    void program_builder::push_return_pointer()
+    {
+      push(vm::register_names::rp);
+      move(vm::register_names::rp, vm::register_names::pc);
+    }
+
+    void program_builder::pop_return_pointer()
+    {
+      move(vm::register_names::pc, vm::register_names::rp);
+      pop(vm::register_names::rp);
+    }
+
     // std::vector<Registers> registerStack;
     // /// Push current register state
     // bool push_registers() {
@@ -274,6 +353,7 @@ namespace adder {
 
     bool program_builder::push_variable(std::string_view const& name, size_t typeIndex, symbol_flags const & flags) {
       auto const& type = types[typeIndex];
+
       vm::instruction alloc;
       alloc.code = vm::op_code::alloc_stack;
       alloc.alloc_stack.bytes = (uint32_t)get_type_size(type);
@@ -318,6 +398,28 @@ namespace adder {
 
     void program_builder::push_expression_result(expression_result result) {
       results.push_back(result);
+    }
+
+    void program_builder::push(vm::register_index const& src) {
+      vm::instruction op;
+      op.code = vm::op_code::push;
+      op.push.size = sizeof(vm::register_value);
+      op.push.src  = src;
+      add_instruction(op);
+
+      scope& block = scopes.back();
+      block.stackSize += op.push.size;
+    }
+
+    void program_builder::pop(vm::register_index const& dst) {
+      vm::instruction op;
+      op.code     = vm::op_code::pop;
+      op.pop.size = sizeof(vm::register_value);
+      op.pop.dst  = dst;
+      add_instruction(op);
+
+      scope& block = scopes.back();
+      block.stackSize += op.push.size;
     }
 
     vm::register_index program_builder::pin_register() {
@@ -450,19 +552,15 @@ namespace adder {
       return ret;
     }
 
-    //uint64_t program_builder::evaluate_address(uint64_t offset) {
-    //  return scopes.back().stackSize - offset;
-    //}
+    void program_builder::move(vm::register_index dst, vm::register_index src)
+    {
+      vm::instruction i;
+      i.code = vm::op_code::move;
+      i.move.dst = dst;
+      i.move.src = src;
+      add_instruction(i);
+    }
 
-    //uint64_t program_builder::evaluate_stack_address(uint64_t offset) {
-    //  return scopes.back().stackSize - offset;
-    //}
-
-    //uint64_t program_builder::evaluate_address(symbol_desc const & symbol) {
-    //  uint64_t offset = std::get<scope_stack_offset>(symbol.address.value()).offset;
-    //  return scopes[symbol.scope_index].stackSize - offset;
-    //}
-    
     void program_builder::set(vm::register_index dst, vm::register_value value) {
       vm::instruction i;
       i.code = vm::op_code::set;
@@ -570,44 +668,122 @@ namespace adder {
     }
 
     program program_builder::binary() const {
+      // Compiled Program Layout
+      // header
+      //  * public_symbol_count: uint64_t
+      //  * extern_symbol_count: uint64_t
+      //  * symbol_data_size:    uint64_t
+      //  * program_data_size:   uint64_t
+      //  * code_size:           uint64_t
+      // public_symbol_table[]
+      // extern_symbol_table[]
+      // symbol_data
+      // program_data
+      // code
+      //
+      // public_symbols is a sequence of symbol address/data address pairs.
+      //   * symbol address is the location of the symbol name. Symbol name is a c-string
+      //   * data address is the location of the data. Format of the data depends on the type of symbol.
+      //     For a function, this is code.
+      //     For a variable, this is the value and any initialization code.
+      //   * public_symbols is terminated by a [ 0, 0 ] pair.
+      //
+      // extern_symbols is a sequence of address/symbol pairs.
+      //   * Same as public_symbols except data address is 0 at program load time.
+      //   * When the program is loaded, the vm should try resolve external symbols.
+      //   * The VM will query the host for the symbol addresses and write the resolved address to "data address" in the table.
+
       program::header header;
 
       std::vector<program::symbol_table_entry> publicSymbols;
       std::vector<program::symbol_table_entry> externSymbols;
-
-      std::vector<uint8_t> symbolNames;
       std::vector<uint8_t> symbolData;
+      std::vector<uint8_t> programData;
+
+      std::vector<vm::instruction> compiledCode;
 
       for (auto& symbol : symbols) {
         program::symbol_table_entry item;
-        item.name_address = symbolNames.size();
-        item.data_address = symbolData.size();
-
+        item.name_address = symbolData.size();
         for (char c : symbol.name)
-          symbolNames.push_back(c);
-        symbolNames.push_back('\0');
-
-        bool isExtern   = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
-        bool isFunction = is_function(symbol.type_index);
-
-        if (isExtern)
+          symbolData.push_back(c);
+        symbolData.push_back('\0');
+        const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
+        if (isExtern) {
+          item.data_address = 0;
           externSymbols.push_back(item);
-        else
-          publicSymbols.push_back(item);
-
-        if (!isExtern) {
-          if (isFunction) {
-            // TODO: We need to relocate this offset after we've built the whole program
-            item.data_address = symbol.function->instruction_offset;
+        }
+        else {
+          if (is_function(symbol.type_index)) {
+            item.data_address = compiledCode.size() * sizeof(decltype(compiledCode)::value_type);
+            compiledCode.insert(
+              compiledCode.end(),
+              code.begin() + symbol.function->instruction_offset,
+              code.begin() + symbol.function->instruction_offset + symbol.function->instruction_count
+            );
           }
           else {
+            item.data_address = symbolData.size();
+
             size_t bytes = get_type_size(symbol.type_index);
             symbolData.resize(symbolData.size() + bytes, 0);
           }
+
+          publicSymbols.push_back(item);
         }
       }
 
-      return {};
+      header.header_size = sizeof(program::header);
+
+      header.public_symbol_count  = publicSymbols.size();
+      header.public_symbol_offset = header.header_size;
+
+      header.extern_symbol_count  = externSymbols.size();
+      header.extern_symbol_offset = header.public_symbol_offset
+        + header.public_symbol_count * sizeof(program::symbol_table_entry);
+
+      header.symbol_data_size = symbolData.size();
+      header.symbol_data_offset = header.extern_symbol_offset
+        + header.extern_symbol_count * sizeof(program::symbol_table_entry);
+
+      header.program_data_size   = 0;
+      header.program_data_offset = header.symbol_data_offset + header.symbol_data_size;
+
+      header.code_offset = header.program_data_offset + header.program_data_size;
+      header.code_size   = compiledCode.size() * sizeof(vm::instruction);
+
+      int64_t nextPublicEntry = 0;
+      int64_t nextExternEntry = 0;
+      for (auto & symbol : symbols) {
+        const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
+        if (isExtern) {
+          externSymbols[nextExternEntry].name_address += header.symbol_data_offset;
+
+          ++nextExternEntry;
+        }
+        else {
+          publicSymbols[nextPublicEntry].name_address += header.symbol_data_offset;
+
+          if (is_function(symbol.type_index)) {
+            publicSymbols[nextPublicEntry].data_address += header.code_offset;
+          }
+          else {
+            publicSymbols[nextPublicEntry].data_address += header.symbol_data_offset;
+          }
+
+          ++nextPublicEntry;
+        }
+      }
+
+      std::vector<uint8_t> executable;
+      bytes::insert(executable, header);
+      bytes::insert(executable, publicSymbols.begin(), publicSymbols.end());
+      bytes::insert(executable, externSymbols.begin(), externSymbols.end());
+      bytes::insert(executable, symbolData.begin(), symbolData.end());
+      bytes::insert(executable, programData.begin(), programData.end());
+      bytes::insert(executable, compiledCode.begin(), compiledCode.end());
+
+      return executable;
     }
 
     std::optional<std::string> get_type_name(ast const& ast, size_t statement) {
@@ -616,7 +792,7 @@ namespace adder {
       }
 
       if (ast.is<expr::type_modifier>(statement)) {
-        auto& modifier = ast.get<expr::type_modifier>(statement);
+        auto & modifier = ast.get<expr::type_modifier>(statement);
         if (!(modifier.const_ || modifier.reference))
           return get_type_name(ast, modifier.modified);
         std::string ret = "[";

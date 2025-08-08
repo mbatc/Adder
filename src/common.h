@@ -24,6 +24,24 @@ namespace adder {
     std::vector<std::string_view> split(std::string_view const & str, std::vector<std::string> const & sep = whitespace);
   }
 
+  namespace bytes {
+    template<typename T>
+    void insert(std::vector<uint8_t>& dst, T const& value) {
+      dst.insert(
+        dst.end(),
+        (uint8_t*)&value,
+        (uint8_t*)&value + sizeof(T)
+      );
+    }
+
+    template<typename It>
+    void insert(std::vector<uint8_t>& dst, It const & begin, It const & end) {
+      for (auto it = begin; it != end; ++it) {
+        insert(dst, *it);
+      }
+    }
+  }
+
   template<typename... Args>
   std::string_view format(char const * fmt, Args&&... args) {
     thread_local std::vector<char> formatBuffer(512, 0);

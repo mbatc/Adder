@@ -128,9 +128,11 @@ namespace adder {
       size_t get_type_index(ast const & tree, size_t statement) const;
       type const * get_type(ast const & tree, size_t statement) const;
 
-      bool is_reference_of(size_t const & reference, size_t const & baseType) const;
-      bool is_const(size_t const & type) const;
-      bool is_function(size_t const & type) const;
+      std::optional<size_t> unwrap_type(size_t const & type) const;
+      bool is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const;
+      bool is_reference(std::optional<size_t> const & type) const;
+      bool is_const(std::optional<size_t> const & type) const;
+      bool is_function(std::optional<size_t> const & type) const;
 
       size_t get_type_size(type_modifier const & desc) const;
       size_t get_type_size(type_primitive const & desc) const;
@@ -153,12 +155,25 @@ namespace adder {
       void push_symbol_prefix(std::string const & name);
       void pop_symbol_prefix();
 
+      void call(symbol const & symbol);
+      void jump_to(symbol const & symbol);
+      void jump_to(program_address const & address);
+      void jump_indirect(address_desc const & addr);
+      void jump_indirect(vm::register_index const & address);
+      void push_return_pointer();
+      void pop_return_pointer();
+
       std::optional<size_t> push_symbol(symbol desc);
       bool push_fn_parameter(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, std::string_view const & type_name, symbol_flags const & flags);
       bool push_identifier(std::string_view const& identifier, symbol const & symbol);
       void push_expression_result(expression_result result);
+
+      /// Push a register value to the stack
+      void push(vm::register_index const & src);
+      /// Pop a register value from the stack
+      void pop(vm::register_index const & dst);
 
       vm::register_index pin_register();
       vm::register_index pin_symbol(symbol const& symbol);
@@ -176,6 +191,8 @@ namespace adder {
       void release_register(vm::register_index reg);
 
       expression_result pop_expression_result();
+
+      void move(vm::register_index dst, vm::register_index src);
 
       void set(vm::register_index dst, vm::register_value value);
       void set(vm::register_index dst, program_address const& addr);

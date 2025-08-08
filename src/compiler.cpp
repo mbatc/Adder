@@ -298,6 +298,7 @@ namespace adder {
 
         program->pop_scope();
         program->pop_symbol_prefix();
+        program->pop_return_pointer();
       }
 
       program->push_identifier(statement.identifier, symbol);
@@ -449,13 +450,7 @@ namespace adder {
         // TODO: Something with decl.return_type_name;
       }
       else {
-        if (callable.address.has_value()) {
-          // Insert jmp to address.
-        }
-        else {
-          // Insert relocation to evaluate once the function address is known.
-          // callable.flags
-        }
+        program->call(callable);
       }
 
       program->pop_scope();
