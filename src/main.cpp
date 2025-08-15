@@ -33,6 +33,9 @@ inline static std::string op_code_to_string(adder::vm::op_code op) {
     case adder::vm::op_code::compare_f64: return "compare_f64";           ///< Compare the values in two registers as floats
     case adder::vm::op_code::conditional_jump: return "conditional_jump"; ///< Set the program counter if the specified comparison bits are set.
     case adder::vm::op_code::conditional_move: return "conditional_move"; ///< Compare the specified register with a value. Move if equal
+    case adder::vm::op_code::call: return "call"; ///< Compare the specified register with a value. Move if equal
+    case adder::vm::op_code::call_indirect: return "call_indirect"; ///< Compare the specified register with a value. Move if equal
+    case adder::vm::op_code::ret: return "ret"; ///< Compare the specified register with a value. Move if equal
     default: return "unknown";
   }
 }
@@ -70,30 +73,24 @@ int main(int argc, char ** argv) {
 
   auto result = adder::compile(content);
 
-  adder::vm::machine vm;
-  uint64_t base  = adder::vm::load_program(&vm, result.binary);
-  uint64_t mainAddr = 0;
+  adder::vm::allocator allocator;
+  adder::vm::machine vm(&allocator);
+  void * base  = adder::vm::load_program(&vm, result.binary);
+  void * mainAddr = 0;
   for (uint64_t i = 0; i < result.get_header().public_symbol_count; ++i) {
-    auto name = result.get_symbol(
-      result.get_public_symbols()[i]
-    );
+    auto name = result.get_symbol(result.get_public_symbols()[i]);
     if (name == "fn:()=>void:main") {
-      mainAddr = base + result.get_public_symbols()[i].data_address;
+      mainAddr = (uint8_t*)base + result.get_public_symbols()[i].data_address;
       break;
     }
   }
 
-  adder::compiler::program_builder stub;
-  stub.push_return_pointer();
-  stub.jump_to(adder::compiler::program_address{ mainAddr });
-  adder::compiler::program entry_program = stub.binary();
-  uint64_t entry = vm.memory.heap.allocate(stub.code.size() * sizeof(adder::vm::instruction));
-  vm.memory.heap.write(entry, (uint8_t*)stub.code.data(), stub.code.size() * sizeof(adder::vm::instruction));
+  void * entry = compile_call_handle(&vm, mainAddr);
 
   // uint64_t entry_base = adder::vm::load_program(&vm, entry_program.binary, false);
   // uint64_t entry = entry_base + entry_program.get_header().code_offset;
   // Set program counter to the entry point.
-  vm.registers[adder::vm::register_names::pc].u64 = entry;
+  vm.registers[adder::vm::register_names::pc].ptr = entry;
 
   int64_t step = 0;
   do
@@ -103,17 +100,17 @@ int main(int argc, char ** argv) {
       std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.d64 << "]" << std::endl;
 
     std::cout << "\nStack:\n";
-    for (int p = 0; p < vm.memory.stack_size; ++p)
+    for (int p = 0; p < vm.stack.size; ++p)
     {
       if (p % 8 == 0)
         std::cout << std::endl;
-      printf("0x%.2x ", vm.memory.stack[p]);
+      printf("0x%.2x ", vm.stack.base[p]);
     }
     std::cout << "\n\n";
 
     adder::vm::decode(&vm);
 
-    std::cout << "\Instruction " << step << ": " << op_code_to_string(vm.next_instruction.code) << "\n";
+    std::cout << "\nInstruction " << step << ": " << op_code_to_string(vm.next_instruction.code) << "\n";
 
     if (!adder::vm::execute(&vm))
     {
@@ -123,7 +120,7 @@ int main(int argc, char ** argv) {
 
     ++step;
 
-    if (vm.registers[adder::vm::register_names::pc].u64 == entry)
+    if (vm.registers[adder::vm::register_names::pc].ptr == entry)
     {
       printf("Finished call\n");
       break;

@@ -156,12 +156,19 @@ namespace adder {
       void pop_symbol_prefix();
 
       void call(symbol const & symbol);
+      void call(program_address const & symbol);
+      void call_indirect(vm::register_index const & symbol);
+      void call_indirect(address_desc const & symbol);
+      void ret();
+
       void jump_to(symbol const & symbol);
       void jump_to(program_address const & address);
       void jump_indirect(address_desc const & addr);
       void jump_indirect(vm::register_index const & address);
       void push_return_pointer();
+      void push_frame_pointer();
       void pop_return_pointer();
+      void pop_frame_pointer();
 
       std::optional<size_t> push_symbol(symbol desc);
       bool push_fn_parameter(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);

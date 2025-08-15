@@ -294,11 +294,12 @@ namespace adder {
         symbol.function->instruction_offset = program->code.size();
         if (!generate_code(ast, program, statement.body.value()))
           return false;
+        program->pop_scope();
+        program->ret();
+
         symbol.function->instruction_count  = program->code.size() - symbol.function->instruction_offset;
 
-        program->pop_scope();
         program->pop_symbol_prefix();
-        program->pop_return_pointer();
       }
 
       program->push_identifier(statement.identifier, symbol);

@@ -230,19 +230,54 @@ namespace adder {
     }
 
     void program_builder::call(symbol const & symbol) {
-      push_return_pointer();
-      jump_to(symbol);
-      pop_return_pointer();
+      if (!is_function(symbol.type_index))
+        return;
+
+      if (symbol.function.has_value()) {
+        call(program_address{ 0 });
+        uint64_t offset = (uint8_t*)&code.back().jump.addr - (uint8_t*)code.data();
+        relocations[symbol.name].push_back(offset);
+      }
+      else {
+        vm::register_index addr = pin_symbol(symbol);
+        call_indirect(addr);
+      }
     }
 
-    void program_builder::jump_to(symbol const& symbol)
-    {
+    void program_builder::call(program_address const & address) {
+      vm::instruction op;
+      op.code = vm::op_code::call;
+      op.call.addr = address.addr;
+      add_instruction(op);
+    }
+
+    void program_builder::call_indirect(address_desc const & addr) {
+      vm::register_index idx = pin_address(addr, sizeof(vm::address_t));
+      call_indirect(idx);
+      release_register(idx);
+    }
+
+    void program_builder::ret() {
+      vm::instruction op;
+      op.code = vm::op_code::ret;
+      add_instruction(op);
+    }
+
+    void program_builder::call_indirect(vm::register_index const & reg) {
+      vm::instruction op;
+      op.code = vm::op_code::call_indirect;
+      op.call_indirect.addr = reg;
+      add_instruction(op);
+    }
+
+    void program_builder::jump_to(symbol const& symbol) {
       if (!is_function(symbol.type_index))
         return;
 
       if (is_reference(symbol.type_index)) {
          vm::register_index addr = pin_symbol(symbol);
          jump_indirect(addr);
+         return;
       }
 
       if (symbol.address.has_value()) {
@@ -268,7 +303,7 @@ namespace adder {
 
     void program_builder::jump_indirect(address_desc const & addr)
     {
-      size_t idx = pin_address(addr, sizeof(vm::address_t));
+      vm::register_index idx = pin_address(addr, sizeof(vm::address_t));
       jump_indirect(idx);
       release_register(idx);
     }
@@ -287,10 +322,20 @@ namespace adder {
       move(vm::register_names::rp, vm::register_names::pc);
     }
 
+    void program_builder::push_frame_pointer()
+    {
+      push(vm::register_names::fp);
+      move(vm::register_names::fp, vm::register_names::sp);
+    }
+
     void program_builder::pop_return_pointer()
     {
-      move(vm::register_names::pc, vm::register_names::rp);
       pop(vm::register_names::rp);
+    }
+
+    void program_builder::pop_frame_pointer()
+    {
+      pop(vm::register_names::fp);
     }
 
     // std::vector<Registers> registerStack;
@@ -467,7 +512,7 @@ namespace adder {
       vm::instruction op;
       op.code = vm::op_code::load_offset;
       op.load_offset.addr   = (uint8_t)vm::register_names::fp;
-      op.load_offset.offset = -offset;
+      op.load_offset.offset = offset;
       op.load_offset.size   = (uint8_t)size;
       op.load_offset.dst    = idx;
       add_instruction(op);
@@ -574,7 +619,7 @@ namespace adder {
     }
 
     void program_builder::set(vm::register_index dst, stack_frame_offset const& addr) {
-      set(dst, -addr.offset);
+      set(dst, addr.offset);
 
       vm::instruction add;
       add.code = vm::op_code::add_i64;
@@ -602,7 +647,7 @@ namespace adder {
       vm::instruction instr;
       instr.code = vm::op_code::store_offset;
       instr.store_offset.addr   = (uint8_t)vm::register_names::fp;
-      instr.store_offset.offset = -addr.offset;
+      instr.store_offset.offset = addr.offset;
       instr.store_offset.src    = src;
       instr.store_offset.size   = sz;
       add_instruction(instr);

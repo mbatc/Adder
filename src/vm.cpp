@@ -1,5 +1,7 @@
 #include "vm.h"
 #include "common.h"
+#include "compiler.h"
+#include "compiler/program_builder.h"
 
 namespace adder {
   namespace vm {
@@ -7,130 +9,36 @@ namespace adder {
       return sizeof(instruction);
     }
 
-    uint8_t const * allocator::read(uint64_t address) const {
-      return (uint8_t const * )(address);
+    void * allocator::allocate(size_t size) {
+      return std::malloc(size);
     }
 
-    uint8_t * allocator::read(uint64_t address) {
-      return (uint8_t*)(address);
-    }
-
-    size_t allocator::write(uint64_t address, uint8_t const * bytes, size_t count) {
-      memcpy(read(address), bytes, count);
-      return count;
-    }
-
-    uint64_t allocator::allocate(size_t size) {
-      return (uint64_t)std::malloc(size);
-    }
-
-    void allocator::free(uint64_t block) {
-      std::free((void*)block);
-    }
-
-    uint64_t memory::allocate(size_t size) {
-      return heap.allocate(size);
-    }
-
-    void memory::free(uint64_t stack_address) {
-      return heap.free(stack_address);
-    }
-
-    uint64_t memory::allocate_stack(size_t size) {
-      stack_size += size;
-
-      size_t newSize = stack.size();
-      while (newSize < stack_size)
-        newSize = std::max(newSize * 2, stack_size);
-
-      if (newSize > stack.size()) {
-        size_t prevSize = stack.size();
-        stack.resize(newSize);
-        std::memmove(stack.data() + stack.size() - prevSize, stack.data(), prevSize);
-      }
-
-      return stack_bottom();
-    }
-
-    uint64_t memory::push(uint8_t const * data, size_t size) {
-      const uint64_t addr = allocate_stack(size);
-      write_stack(0, data, size);
-      return addr;
-    }
-
-    uint64_t memory::pop(size_t bytes) {
-      stack_size -= bytes;
-      return stack_bottom();
-    }
-
-    uint64_t memory::stack_bottom() const {
-      return stack_top - stack_size;
-    }
-
-    bool memory::is_stack(uint64_t stack_address) const {
-      return stack_address >= stack_bottom() && stack_address < stack_top;
-    }
-
-    uint8_t * memory::read(uint64_t address) {
-      if (!is_stack(address))
-        return heap.read(address);
-      else
-        return read_stack(address - stack_bottom());
-    }
-
-    uint8_t const * memory::read(uint64_t address) const {
-      if (!is_stack(address))
-        return heap.read(address);
-      else
-        return read_stack(address - stack_bottom());
-    }
-
-    size_t memory::write(uint64_t stack_address, uint8_t const * bytes, size_t count) {
-      if (!is_stack(stack_address))
-        return heap.write(stack_address, bytes, count);
-      else
-        return write_stack(stack_address - stack_bottom(), bytes, count);
-    }
-
-    uint64_t memory::to_stack_offset(uint64_t address) {
-      return address - stack_bottom();
-    }
-
-    uint8_t * memory::read_stack(uint64_t offset) {
-      return stack.data() + stack.size() - stack_size + offset;
-    }
-
-    uint8_t const * memory::read_stack(uint64_t offset) const {
-      return stack.data() + stack.size() - stack_size + offset;
-    }
-
-    size_t memory::write_stack(uint64_t offset, uint8_t const * bytes, size_t count) {
-      memcpy(read_stack(offset), bytes, count);
-      return count;
+    void allocator::free(void * ptr) {
+      std::free(ptr);
     }
 
     bool decode(machine * vm) {
-      instruction const * pInstruction = reinterpret_cast<instruction const *>(vm->memory.read(vm->program_counter()));
+      instruction const * pInstruction = reinterpret_cast<instruction const *>((uint8_t*)vm->program_counter());
       size_t sz = instruction_size(pInstruction->code);
       vm->registers[register_names::pc].u64 += sz;
       memcpy(&vm->next_instruction, pInstruction, sz);
       return true;
     }
 
-    void relocate_program(uint8_t * program, size_t size, uint64_t base) {
-      uint8_t * pc  = program;
-      uint8_t * end = program + size;
+    void relocate_program(void * program, size_t size) {
+      uint8_t * pc  = (uint8_t *)program;
+      uint8_t * end = (uint8_t *)program + size;
 
       while (pc < end) {
         vm::instruction *inst = (vm::instruction*)pc;
         switch (inst->code)
         {
         case vm::op_code::load_addr:
-          inst->load_addr.addr += base;
+          inst->load_addr.addr += (uint64_t)program;
           break;
         case vm::op_code::jump:
         case vm::op_code::conditional_jump:
-          inst->jump.addr += base;
+          inst->jump.addr += (uint64_t)program;
           break;
         }
 
@@ -138,15 +46,15 @@ namespace adder {
       }
     }
 
-    uint64_t load_program(vm::machine* vm, std::vector<uint8_t> const& program, bool relocated) {
+    void * load_program(vm::machine* vm, std::vector<uint8_t> const& program, bool relocated) {
       // Reserve space for the program
-      uint64_t baseOffset = vm->memory.allocate(program.size());
+      void * baseOffset = vm->heap_allocator->allocate(program.size());
       // Write to memory
-      vm->memory.write(baseOffset, program.data(), program.size());
+      memcpy(baseOffset, program.data(), program.size());
 
       // Relocate the program to the loaded base address
       if (relocated) {
-        relocate_program(vm->memory.read(baseOffset), program.size(), baseOffset);
+        relocate_program((uint8_t*)baseOffset, program.size());
       }
 
       return baseOffset;
@@ -154,39 +62,38 @@ namespace adder {
 
     namespace op {
       void load(machine * vm, op_code_args<op_code::load> const & args) {
-        const uint64_t addr = vm->registers[args.src_addr].u64;
-        const uint8_t *mem  = vm->memory.read(addr);
+        const void * addr = vm->registers[args.src_addr].ptr;
+        const uint8_t *mem  = (const uint8_t*)addr;
         vm->registers[args.dst].u64 = 0;
         memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
       void load_offset(machine * vm, op_code_args<op_code::load_offset> const & args) {
-        const uint64_t addr = vm->registers[args.addr].u64;
-        const uint8_t *mem  = vm->memory.read(addr + args.offset);
+        const void * addr = vm->registers[args.addr].ptr;
+        const uint8_t *mem  = (const uint8_t*)addr + args.offset;
         vm->registers[args.dst].u64 = 0;
         memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
       void load_addr(machine * vm, op_code_args<op_code::load_addr> const & args) {
-        const uint64_t addr = args.addr;
-        const uint8_t *mem  = vm->memory.read(addr);
+        const uint8_t *mem  = (const uint8_t *)args.addr;
         vm->registers[args.dst].u64 = 0;
-
         memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
       void store(machine * vm, op_code_args<op_code::store> const & args) {
-        const uint64_t addr = vm->registers[args.addr].u64;
-        vm->memory.write(addr, reinterpret_cast<uint8_t const *>(&vm->registers[args.src]), args.size);
+        uint8_t *mem = (uint8_t *)vm->registers[args.addr].ptr;
+        memcpy(mem, &vm->registers[args.src], args.size);
       }
 
       void store_offset(machine * vm, op_code_args<op_code::store_offset> const & args) {
-        const uint64_t addr = vm->registers[args.addr].u64;
-        vm->memory.write(addr + args.offset, reinterpret_cast<uint8_t const *>(&vm->registers[args.src]), args.size);
+        uint8_t *mem = (uint8_t *)vm->registers[args.addr].ptr + args.offset;
+        memcpy(mem, &vm->registers[args.src], args.size);
       }
 
       void store_addr(machine * vm, op_code_args<op_code::store_addr> const & args) {
-        vm->memory.write(args.addr, reinterpret_cast<uint8_t const *>(&vm->registers[args.src]), args.size);
+        uint8_t *mem = (uint8_t *)args.addr;
+        memcpy(mem, &vm->registers[args.src], args.size);
       }
 
       void set(machine * vm, op_code_args<op_code::set> const & args) {
@@ -230,23 +137,26 @@ namespace adder {
       }
 
       void alloc_stack(machine * vm, op_code_args<op_code::alloc_stack> const & args) {
-        vm->registers[register_names::sp].u64 = vm->memory.allocate_stack(args.bytes);
+        vm->stack.allocate(args.bytes);
+        vm->registers[register_names::sp].ptr = vm->stack.end();
       }
 
       void free_stack(machine * vm, op_code_args<op_code::free_stack> const & args) {
-        vm->registers[register_names::sp].u64 = vm->memory.pop(args.bytes);
+        vm->stack.free(args.bytes);
+        vm->registers[register_names::sp].ptr = vm->stack.end();
       }
 
       void push(machine * vm, op_code_args<op_code::push> const & args) {
-        vm->stack_base_addr = ;
-        vm->stack_size = ;
-        vm->registers[register_names::sp].u64 = vm->memory.push((uint8_t const *)&vm->registers[args.src], args.size);
+        vm->stack.push(&vm->registers[args.src], args.size);
+        vm->registers[register_names::sp].ptr = vm->stack.end();
       }
 
       void pop(machine * vm, op_code_args<op_code::pop> const & args) {
         vm->registers[args.dst].u64 = 0;
-        memcpy(&vm->registers[args.dst], vm->memory.read_stack(0), args.size);
-        vm->registers[register_names::sp].u64 = vm->memory.pop(args.size);
+        memcpy(&vm->registers[args.dst], vm->stack.end() - args.size, args.size);
+
+        vm->stack.free(args.size);
+        vm->registers[register_names::sp].ptr = vm->stack.end();
       }
 
       void jump(machine * vm, op_code_args<op_code::jump> const & args) {
@@ -290,6 +200,34 @@ namespace adder {
       void conditional_move(machine * vm, op_code_args<op_code::conditional_move> const & args) {
         if (args.cmp_val == (vm->registers[args.cmp_reg].u64 & 0xFF))
           move(vm, args);
+      }
+
+      void call(machine * vm, op_code_args<op_code::call> const & args) {
+        vm->stack.push(&vm->registers[vm::register_names::fp], sizeof(vm::register_value));
+        vm->stack.push(&vm->registers[vm::register_names::rp], sizeof(vm::register_value));
+        vm->registers[vm::register_names::sp].ptr = vm->stack.end();
+
+        vm->registers[vm::register_names::rp] = vm->registers[vm::register_names::pc];
+        vm->registers[vm::register_names::fp] = vm->registers[vm::register_names::sp];
+        vm->registers[vm::register_names::pc].value = args.addr;
+      }
+
+      void call_indirect(machine * vm, op_code_args<op_code::call_indirect> const & args) {
+        vm->stack.push(&vm->registers[vm::register_names::fp], sizeof(vm::register_value));
+        vm->stack.push(&vm->registers[vm::register_names::rp], sizeof(vm::register_value));
+        vm->registers[vm::register_names::sp].ptr = vm->stack.end();
+
+        vm->registers[vm::register_names::rp] = vm->registers[vm::register_names::pc];
+        vm->registers[vm::register_names::fp] = vm->registers[vm::register_names::sp];
+        vm->registers[vm::register_names::pc].value = vm->registers[args.addr].value;
+      }
+
+      void ret(machine * vm, op_code_args<op_code::ret> const & args) {
+        vm->registers[vm::register_names::pc] = vm->registers[vm::register_names::rp];
+        vm->stack.free(vm->stack.end() - (uint8_t*)vm->registers[vm::register_names::fp].ptr);
+        vm->stack.pop(&vm->registers[vm::register_names::rp], sizeof(vm::register_value));
+        vm->stack.pop(&vm->registers[vm::register_names::fp], sizeof(vm::register_value));
+        vm->registers[vm::register_names::sp].ptr = vm->stack.end();
       }
     }
 
@@ -365,6 +303,15 @@ namespace adder {
       case op_code::conditional_move:
         op::conditional_move(vm, inst.conditional_move);
         break;
+      case op_code::call:
+        op::call(vm, inst.call);
+        break;
+      case op_code::call_indirect:
+        op::call_indirect(vm, inst.call_indirect);
+        break;
+      case op_code::ret:
+        op::ret(vm, inst.ret);
+        break;
       default:
         return false;
       }
@@ -375,6 +322,19 @@ namespace adder {
     bool step(machine *vm) {
       return decode(vm)
         && execute(vm);
+    }
+
+    void* compile_call_handle(machine * vm, void* entryAddr) {
+      compiler::program_builder stub;
+      stub.call(adder::compiler::program_address{ (uint64_t)entryAddr });
+      adder::vm::instruction op;
+      op.code = adder::vm::op_code::exit;
+      stub.add_instruction(op);
+
+      adder::compiler::program entry_program = stub.binary();
+      void * ret = vm->heap_allocator->allocate(stub.code.size() * sizeof(adder::vm::instruction));
+      memcpy(ret, (uint8_t*)stub.code.data(), stub.code.size() * sizeof(adder::vm::instruction));
+      return ret;
     }
   }
 }

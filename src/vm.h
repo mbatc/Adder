@@ -35,6 +35,10 @@ namespace adder {
       compare_f64,      ///< Compare the values in two registers as floats
       conditional_jump, ///< Set the program counter if the specified comparison bits are set.
       conditional_move, ///< Compare the specified register with a value. Move if equal
+      call,             ///< Call a function
+      call_indirect,    ///< Call an address stored in a register
+      ret,              ///< Return from a function
+      // call_native,      ///< Call a native function
       count,            ///< Number of op codes
     };
 
@@ -147,6 +151,16 @@ namespace adder {
       uint8_t        cmp_val;
     };
 
+    template<> struct op_code_args<op_code::call> {
+      register_value addr;
+    };
+
+    template<> struct op_code_args<op_code::call_indirect> {
+      register_index addr;
+    };
+
+    template<> struct op_code_args<op_code::ret> {};
+
     inline static constexpr size_t op_code_count = (size_t)op_code::count;
 
     size_t instruction_size(op_code code);
@@ -177,6 +191,9 @@ namespace adder {
         op_code_binary_op_args compare;
         op_code_args<op_code::conditional_jump> conditional_jump;
         op_code_args<op_code::conditional_move> conditional_move;
+        op_code_args<op_code::call> call;
+        op_code_args<op_code::call_indirect> call_indirect;
+        op_code_args<op_code::ret> ret;
       };
     };
 
@@ -188,52 +205,81 @@ namespace adder {
       // std::list<block>     blocks; ///< Available blocks
       // std::vector<uint8_t> data;   ///< Allocated data for this heap.
 
-      uint8_t const * read(uint64_t stack_address) const;
-      uint8_t * read(uint64_t stack_address);
-      size_t write(uint64_t stack_address, uint8_t const * bytes, size_t count);
-      uint64_t allocate(size_t size);
-      void free(uint64_t block);
+      void * allocate(size_t size);
+      void   free(void * ptr);
     };
 
-    struct memory_t {
-      inline static constexpr uint64_t stack_top = std::numeric_limits<uint64_t>::max();
-
-      /// Allocate heap memory.
-      uint64_t allocate(size_t size);
-
-      /// Free a heap allocation.
-      void free(uint64_t stack_address);
-
-      uint64_t allocate_stack(size_t size);
+    struct stack {
+      stack(allocator* allocator)
+      : allocator(allocator) {}
 
       /// Push data to the stack
-      uint64_t push(uint8_t const * data, size_t size);
+      void * push(void const * data, size_t bytes) {
+        void* ptr = allocate(bytes);
+        memcpy(ptr, data, bytes);
+        return ptr;
+      }
+
+      void * pop(void * dst, size_t bytes) {
+        memcpy(dst, end() - bytes, bytes);
+        return free(bytes);
+      }
 
       /// Pop data from the stack
-      uint64_t pop(size_t bytes);
-
-      uint64_t  stack_bottom() const;
-      bool      is_stack(uint64_t stack_address) const;
-
-      uint8_t * read(uint64_t stack_address);
-      uint8_t const * read(uint64_t stack_address) const;
-
-      size_t write(uint64_t stack_address, uint8_t const * bytes, size_t count);
-      
-      uint64_t to_stack_offset(uint64_t address);
-      uint8_t * read_stack(uint64_t offset);
-      uint8_t const * read_stack(uint64_t offset) const;
-      size_t write_stack(uint64_t offset, uint8_t const * bytes, size_t count);
-
-      std::vector<uint8_t> stack; ///< Stack allocator
-      uint64_t             stack_size = 0;
-      allocator            heap;  ///< Heap allocator
-    };
-
-    struct stack_t {
-      stack_t(memory_t* allocator) {
-
+      void * free(size_t bytes) {
+        size -= bytes;
+        return base + size;
       }
+
+      /// Allocate data on the stack.
+      void * allocate(size_t bytes) {
+        size_t newSize = size + bytes;
+        if (!grow(newSize)) {
+          return nullptr;
+        }
+
+        void* ptr = base + size;
+        size = newSize;
+        return ptr;
+      }
+
+      uint8_t* begin() { return base; }
+      uint8_t* end() { return begin() + size; }
+      uint8_t const * begin() const { return base; }
+      uint8_t const * end() const { return begin() + size; }
+
+      bool grow(size_t requiredCapacity) {
+        if (requiredCapacity <= capacity)
+          return true;
+
+        size_t newCapacity = capacity;
+        while (requiredCapacity > newCapacity)
+          newCapacity = std::max(2ull, newCapacity * 2);
+
+        return reserve(newCapacity);
+      }
+
+      bool reserve(size_t newCapacity) {
+        if (newCapacity <= capacity) {
+          return true;
+        }
+
+        uint8_t * newData = (uint8_t*)allocator->allocate(newCapacity);
+        if (newData == nullptr) {
+          return false;
+        }
+
+        memcpy(newData, base, size);
+        allocator->free(base);
+        base = newData;
+        capacity = newCapacity;
+        return true;
+      }
+
+      uint8_t * base = nullptr;
+      uint64_t size = 0;
+      uint64_t capacity = 0;
+      allocator * allocator = nullptr;
     };
 
     struct register_names {
@@ -256,11 +302,14 @@ namespace adder {
     inline static constexpr size_t register_count = (size_t)register_names::count;
 
     struct machine {
-      machine() {
+      machine(allocator *allocator)
+        : heap_allocator(allocator)
+        , stack(allocator) {
+        stack.reserve(4 * 1024 * 1024); // 4mb
         memset(registers, 0, sizeof(registers));
         memset(&next_instruction, 0, sizeof(next_instruction));
         registers[register_names::pc].u64 = 0;
-        registers[register_names::fp].u64 = registers[register_names::sp].u64 = memory.stack_top;
+        registers[register_names::fp].ptr = registers[register_names::sp].ptr = stack.base;
       }
 
       union {
@@ -268,6 +317,7 @@ namespace adder {
         uint64_t       u64;
         int64_t        i64;
         double         d64;
+        void*          ptr;
       } registers[register_count];
 
       uint64_t program_counter() const {
@@ -275,15 +325,16 @@ namespace adder {
       }
 
       instruction next_instruction;
-      memory_t    memory;
-      stack_t     stack = { &memory };
+
+      allocator * heap_allocator = nullptr;
+      stack       stack;
     };
 
     bool decode(machine * vm);
-    void relocate_program(uint8_t * program, size_t size, uint64_t base);
-    uint64_t load_program(machine * vm, std::vector<uint8_t> const & program, bool relocated = true);
+    void relocate_program(void * program, size_t size);
+    void * load_program(machine * vm, std::vector<uint8_t> const & program, bool relocated = true);
     bool execute(machine * vm);
-
     bool step(machine *vm);
+    void* compile_call_handle(machine* vm, void* entryAddr);
   }
 }
