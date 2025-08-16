@@ -8,10 +8,15 @@ namespace adder {
       bool i32_init_i64(program_builder* program) {
         auto & self = program->symbols[program->symbols.size() - 2];
         auto & arg  = program->symbols[program->symbols.size() - 1];
+        std::optional<size_t> selfType = program->unwrap_type(self.type_index);
+        if (!selfType.has_value()) {
+          return false;
+        }
 
         vm::register_index addr  = program->pin_symbol(self);
         vm::register_index value = program->pin_symbol(arg);
-        program->store(value, addr, (uint8_t)program->get_type_size(self.type_index)); // Indirect store into address stored in `addr`
+
+        program->store(value, addr, (uint8_t)program->get_type_size(selfType.value())); // Indirect store into address stored in `addr`
         program->release_register(value);
         program->release_register(addr);
         return true;

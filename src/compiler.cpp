@@ -1,6 +1,8 @@
 #include "compiler.h"
 #include "common.h"
 #include "vm.h"
+#include "program.h"
+
 #include "compiler/lexer.h"
 #include "compiler/ast.h"
 #include "compiler/parser.h"
@@ -262,6 +264,19 @@ namespace adder {
 
     bool generate_code(ast const & ast, program_builder * program, expr::binary_operator const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
+
+      size_t startResult = program->results.size();
+      generate_code(ast, program, statement.left.value());
+      if (statement.right.has_value())
+        generate_code(ast, program, statement.right.value());
+
+      switch (statement.type_name) {
+      case expr::operator_type::call:
+        generate_call(ast, program, startResult);
+      default:
+        return false;
+      }
+
       return true;
     }
 
@@ -281,7 +296,7 @@ namespace adder {
       if (statement.body.has_value())
       {
         program->push_symbol_prefix(symbol.name);
-        program->push_scope();
+        program->scopes.emplace_back();
 
         // size_t start = program->code.size();
         symbol.address = std::nullopt;
@@ -427,7 +442,15 @@ namespace adder {
       if (inlineCall)
         inlineCall &= ast.get<expr::function_declaration>(func->function_id).body.has_value();
 
-      program->push_scope();
+      if (inlineCall) {
+        program->push_scope(false);
+      }
+      else {
+        program->push_return_pointer();
+        program->push_frame_pointer();
+        program->move(vm::register_names::fp, vm::register_names::sp);
+        program->push_scope(true);
+      }
 
       for (size_t i = 0; i < signature->arguments.size(); ++i) {
         int64_t resultIdx = startResult + i + 1;
@@ -455,6 +478,11 @@ namespace adder {
       }
 
       program->pop_scope();
+
+      if (!inlineCall) {
+        program->pop_frame_pointer();
+        program->pop_return_pointer();
+      }
 
       program->results.resize(startResult);
       return true;
@@ -488,7 +516,7 @@ namespace adder {
     bool generate_code(ast const & ast, program_builder * program, expr::block const & scope, size_t blockId) {
       unused(blockId);
 
-      program->push_scope();
+      program->push_scope(false);
 
       for (size_t statementId : scope.statements)
         if (!generate_code(ast, program, statementId))
@@ -572,6 +600,8 @@ namespace adder {
 
       evaluate_types(ast, &ret);
 
+      // TODO: First parse: Add top level symbols
+
       expr::block const & top = ast.get<expr::block>(ast.statements.size() - 1);
       for (size_t statementId : top.statements) {
         generate_code(ast, &ret, statementId);
@@ -581,7 +611,7 @@ namespace adder {
     }
   }
 
-  compiler::program compile(std::string const & source) {
+  program compile(std::string const & source) {
     compiler::lexer::token_parser tokenizer(source);
     compiler::ast ast = compiler::parse(&tokenizer);
     if (!tokenizer.ok()) {
@@ -589,9 +619,6 @@ namespace adder {
         printf("Error: %s\n", error.c_str());
       }
     }
-
-    // evaluate_types(&ast);
-    // evaluate_conversions(&ast);
 
     return generate_code(ast);
   }

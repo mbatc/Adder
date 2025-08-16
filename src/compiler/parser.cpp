@@ -194,8 +194,10 @@ namespace adder {
           lastParameter = paramId;
 
           if (tokenizer->previous().id == lexer::token_id::close_paren)
-            break;
+            return tree->add(call);
         }
+
+        tokenizer->next();
 
         return tree->add(call);
       }

@@ -4,6 +4,13 @@
 #include <list>
 
 namespace adder {
+  template<bool Const>
+  struct program_view_impl;
+  struct program;
+  struct program_symbol_table_entry;
+  using program_view       = program_view_impl<false>;
+  using const_program_view = program_view_impl<true>;
+
   namespace vm {
     using register_value = uint64_t;
     using register_index = uint8_t;
@@ -331,10 +338,10 @@ namespace adder {
     };
 
     bool decode(machine * vm);
-    void relocate_program(void * program, size_t size);
-    void * load_program(machine * vm, std::vector<uint8_t> const & program, bool relocated = true);
+    void relocate_program(program_view const & program);
+    const_program_view load_program(machine * vm, program_view const& program, bool relocated = true);
     bool execute(machine * vm);
     bool step(machine *vm);
-    void* compile_call_handle(machine* vm, void* entryAddr);
+    void* compile_call_handle(machine* vm, program_symbol_table_entry const & symbol);
   }
 }

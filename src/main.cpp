@@ -2,6 +2,7 @@
 #include "compiler.h"
 #include "compiler/program_builder.h"
 #include "common.h"
+#include "program.h"
 
 #include <iostream>
 #include <iomanip>
@@ -75,20 +76,10 @@ int main(int argc, char ** argv) {
 
   adder::vm::allocator allocator;
   adder::vm::machine vm(&allocator);
-  void * base  = adder::vm::load_program(&vm, result.binary);
-  void * mainAddr = 0;
-  for (uint64_t i = 0; i < result.get_header().public_symbol_count; ++i) {
-    auto name = result.get_symbol(result.get_public_symbols()[i]);
-    if (name == "fn:()=>void:main") {
-      mainAddr = (uint8_t*)base + result.get_public_symbols()[i].data_address;
-      break;
-    }
-  }
+  auto loaded = adder::vm::load_program(&vm, result.view());
+  auto mainSymbol = loaded.find_public_symbol("fn:()=>void:main");
+  void * entry = compile_call_handle(&vm, *mainSymbol);
 
-  void * entry = compile_call_handle(&vm, mainAddr);
-
-  // uint64_t entry_base = adder::vm::load_program(&vm, entry_program.binary, false);
-  // uint64_t entry = entry_base + entry_program.get_header().code_offset;
   // Set program counter to the entry point.
   vm.registers[adder::vm::register_names::pc].ptr = entry;
 
@@ -114,17 +105,14 @@ int main(int argc, char ** argv) {
 
     if (!adder::vm::execute(&vm))
     {
-      printf("Failed\n");
+      if (vm.next_instruction.code == adder::vm::op_code::exit)
+        printf("Finished call\n");
+      else
+        printf("Failed\n");
       break;
     }
 
     ++step;
-
-    if (vm.registers[adder::vm::register_names::pc].ptr == entry)
-    {
-      printf("Finished call\n");
-      break;
-    }
   } while (true);
 
   return 0;

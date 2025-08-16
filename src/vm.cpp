@@ -1,6 +1,7 @@
 #include "vm.h"
 #include "common.h"
 #include "compiler.h"
+#include "program.h"
 #include "compiler/program_builder.h"
 
 namespace adder {
@@ -25,20 +26,31 @@ namespace adder {
       return true;
     }
 
-    void relocate_program(void * program, size_t size) {
-      uint8_t * pc  = (uint8_t *)program;
-      uint8_t * end = (uint8_t *)program + size;
+    void relocate_program(program_view const & program) {
+      program_header header = program.get_header();
+      uint64_t base = (uint64_t)program.data();
+
+      auto publicSymbols = program.get_public_symbols();
+      // auto externSymbols = program.get_extern_symbols();
+
+      for (size_t i = 0; i < header.public_symbol_count; ++i) {
+        publicSymbols[i].data_address += base;
+        publicSymbols[i].name_address += base;
+      }
+
+      uint8_t * pc  = program.data() + program.get_header().code_offset;
+      uint8_t * end = pc + program.get_header().code_size;
 
       while (pc < end) {
         vm::instruction *inst = (vm::instruction*)pc;
         switch (inst->code)
         {
         case vm::op_code::load_addr:
-          inst->load_addr.addr += (uint64_t)program;
+          inst->load_addr.addr += base;
           break;
         case vm::op_code::jump:
         case vm::op_code::conditional_jump:
-          inst->jump.addr += (uint64_t)program;
+          inst->jump.addr += base;
           break;
         }
 
@@ -46,18 +58,16 @@ namespace adder {
       }
     }
 
-    void * load_program(vm::machine* vm, std::vector<uint8_t> const& program, bool relocated) {
+    const_program_view load_program(vm::machine* vm, program_view const& program, bool relocated) {
       // Reserve space for the program
-      void * baseOffset = vm->heap_allocator->allocate(program.size());
+      program_view loaded = { (uint8_t*)vm->heap_allocator->allocate(program.size()), program.size() };
       // Write to memory
-      memcpy(baseOffset, program.data(), program.size());
-
+      memcpy(loaded.data(), program.data(), program.size());
       // Relocate the program to the loaded base address
       if (relocated) {
-        relocate_program((uint8_t*)baseOffset, program.size());
+        relocate_program(loaded);
       }
-
-      return baseOffset;
+      return { loaded.data(), loaded.size() };
     }
 
     namespace op {
@@ -203,31 +213,17 @@ namespace adder {
       }
 
       void call(machine * vm, op_code_args<op_code::call> const & args) {
-        vm->stack.push(&vm->registers[vm::register_names::fp], sizeof(vm::register_value));
-        vm->stack.push(&vm->registers[vm::register_names::rp], sizeof(vm::register_value));
-        vm->registers[vm::register_names::sp].ptr = vm->stack.end();
-
         vm->registers[vm::register_names::rp] = vm->registers[vm::register_names::pc];
-        vm->registers[vm::register_names::fp] = vm->registers[vm::register_names::sp];
         vm->registers[vm::register_names::pc].value = args.addr;
       }
 
       void call_indirect(machine * vm, op_code_args<op_code::call_indirect> const & args) {
-        vm->stack.push(&vm->registers[vm::register_names::fp], sizeof(vm::register_value));
-        vm->stack.push(&vm->registers[vm::register_names::rp], sizeof(vm::register_value));
-        vm->registers[vm::register_names::sp].ptr = vm->stack.end();
-
-        vm->registers[vm::register_names::rp] = vm->registers[vm::register_names::pc];
         vm->registers[vm::register_names::fp] = vm->registers[vm::register_names::sp];
         vm->registers[vm::register_names::pc].value = vm->registers[args.addr].value;
       }
 
-      void ret(machine * vm, op_code_args<op_code::ret> const & args) {
+      void ret(machine * vm, op_code_args<op_code::ret> const &) {
         vm->registers[vm::register_names::pc] = vm->registers[vm::register_names::rp];
-        vm->stack.free(vm->stack.end() - (uint8_t*)vm->registers[vm::register_names::fp].ptr);
-        vm->stack.pop(&vm->registers[vm::register_names::rp], sizeof(vm::register_value));
-        vm->stack.pop(&vm->registers[vm::register_names::fp], sizeof(vm::register_value));
-        vm->registers[vm::register_names::sp].ptr = vm->stack.end();
       }
     }
 
@@ -324,14 +320,23 @@ namespace adder {
         && execute(vm);
     }
 
-    void* compile_call_handle(machine * vm, void* entryAddr) {
+    void* compile_call_handle(machine * vm, program_symbol_table_entry const & symbol) {
       compiler::program_builder stub;
-      stub.call(adder::compiler::program_address{ (uint64_t)entryAddr });
+      stub.push_return_pointer();
+      stub.push_frame_pointer();
+      stub.move(register_names::fp, register_names::sp);
+      stub.push_scope(true);
+      stub.call(adder::compiler::program_address{ symbol.data_address });
+      stub.pop_scope();
+      stub.pop_frame_pointer();
+      stub.pop_return_pointer();
+
       adder::vm::instruction op;
       op.code = adder::vm::op_code::exit;
       stub.add_instruction(op);
 
-      adder::compiler::program entry_program = stub.binary();
+      adder::program entry_program = stub.binary();
+
       void * ret = vm->heap_allocator->allocate(stub.code.size() * sizeof(adder::vm::instruction));
       memcpy(ret, (uint8_t*)stub.code.data(), stub.code.size() * sizeof(adder::vm::instruction));
       return ret;

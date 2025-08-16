@@ -1,5 +1,6 @@
 #include "program_builder.h"
 #include "../compiler.h"
+#include "../program.h"
 
 namespace adder {
   namespace compiler {
@@ -200,8 +201,12 @@ namespace adder {
       return add_type(t);
     }
 
-    bool program_builder::push_scope() {
+    bool program_builder::push_scope(bool newStackFrame) {
       scopes.emplace_back();
+      scopes.back().isStackFrame = newStackFrame;
+      if (!newStackFrame && scopes.size() > 1) {
+        scopes.back().stackSize = scopes[scopes.size() - 2].stackSize;
+      }
       return true;
     }
 
@@ -277,6 +282,7 @@ namespace adder {
       if (is_reference(symbol.type_index)) {
          vm::register_index addr = pin_symbol(symbol);
          jump_indirect(addr);
+         release_register(addr);
          return;
       }
 
@@ -319,13 +325,11 @@ namespace adder {
     void program_builder::push_return_pointer()
     {
       push(vm::register_names::rp);
-      move(vm::register_names::rp, vm::register_names::pc);
     }
 
     void program_builder::push_frame_pointer()
     {
       push(vm::register_names::fp);
-      move(vm::register_names::fp, vm::register_names::sp);
     }
 
     void program_builder::pop_return_pointer()
@@ -410,8 +414,8 @@ namespace adder {
       symbol.name        = name; // TODO: Generate more unique symbol names
 
       scope &block = scopes.back();
-      block.stackSize += get_type_size(type);
       symbol.address = stack_frame_offset{ block.stackSize };
+      block.stackSize += get_type_size(type);
 
       identifier id;
       id.symbol_index = push_symbol(symbol);
@@ -738,23 +742,25 @@ namespace adder {
       //   * When the program is loaded, the vm should try resolve external symbols.
       //   * The VM will query the host for the symbol addresses and write the resolved address to "data address" in the table.
 
-      program::header header;
+      program_header header;
 
-      std::vector<program::symbol_table_entry> publicSymbols;
-      std::vector<program::symbol_table_entry> externSymbols;
+      std::vector<program_symbol_table_entry> publicSymbols;
+      std::vector<program_symbol_table_entry> externSymbols;
       std::vector<uint8_t> symbolData;
       std::vector<uint8_t> programData;
 
       std::vector<vm::instruction> compiledCode;
 
       for (auto& symbol : symbols) {
-        program::symbol_table_entry item;
+        program_symbol_table_entry item;
         item.name_address = symbolData.size();
         for (char c : symbol.name)
           symbolData.push_back(c);
         symbolData.push_back('\0');
         const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
         if (isExtern) {
+          // TODO: For variable, lookup address via host.
+          //       For function, generate code to call native method.
           item.data_address = 0;
           externSymbols.push_back(item);
         }
@@ -774,22 +780,23 @@ namespace adder {
             symbolData.resize(symbolData.size() + bytes, 0);
           }
 
+          symbolAddress[symbol.name] = item.data_address;
           publicSymbols.push_back(item);
         }
       }
 
-      header.header_size = sizeof(program::header);
+      header.header_size = sizeof(program_header);
 
       header.public_symbol_count  = publicSymbols.size();
       header.public_symbol_offset = header.header_size;
 
       header.extern_symbol_count  = externSymbols.size();
       header.extern_symbol_offset = header.public_symbol_offset
-        + header.public_symbol_count * sizeof(program::symbol_table_entry);
+        + header.public_symbol_count * sizeof(program_symbol_table_entry);
 
       header.symbol_data_size = symbolData.size();
       header.symbol_data_offset = header.extern_symbol_offset
-        + header.extern_symbol_count * sizeof(program::symbol_table_entry);
+        + header.extern_symbol_count * sizeof(program_symbol_table_entry);
 
       header.program_data_size   = 0;
       header.program_data_offset = header.symbol_data_offset + header.symbol_data_size;

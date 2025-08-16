@@ -6,9 +6,9 @@
 #include "../containers/pool.h"
 
 namespace adder {
-  namespace compiler {
-    struct program;
+  struct program;
 
+  namespace compiler {
     struct stack_frame_offset {
       int64_t offset = 0;
     };
@@ -81,6 +81,8 @@ namespace adder {
         std::vector<size_t> localSymbols;
         /// Visibile identifiers.
         std::vector<identifier> identifiers;
+        /// If a stack frame was pushed with this scope.
+        bool isStackFrame = false;
         /// Size of the stack frame.
         int64_t stackSize = 0;
       };
@@ -150,7 +152,7 @@ namespace adder {
 
       size_t add_type(type const & desc);
       size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
-      bool push_scope();
+      bool push_scope(bool newStackFrame);
       bool pop_scope();
       void push_symbol_prefix(std::string const & name);
       void pop_symbol_prefix();
