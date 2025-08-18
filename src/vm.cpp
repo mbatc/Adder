@@ -52,6 +52,9 @@ namespace adder {
         case vm::op_code::conditional_jump:
           inst->jump.addr += base;
           break;
+        case vm::op_code::call:
+          inst->call.addr += base;
+          break;
         }
 
         pc += instruction_size(inst->code);

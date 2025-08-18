@@ -273,6 +273,7 @@ namespace adder {
       switch (statement.type_name) {
       case expr::operator_type::call:
         generate_call(ast, program, startResult);
+        break;
       default:
         return false;
       }
@@ -307,12 +308,16 @@ namespace adder {
 
         symbol.function.emplace();
         symbol.function->instruction_offset = program->code.size();
+        program->begin_relocation_group();
         if (!generate_code(ast, program, statement.body.value()))
           return false;
+        auto [startReloc, endReloc] = program->end_relocation_group();
         program->pop_scope();
         program->ret();
-
-        symbol.function->instruction_count  = program->code.size() - symbol.function->instruction_offset;
+        
+        symbol.function->relocation_start = startReloc;
+        symbol.function->relocation_end   = endReloc;
+        symbol.function->instruction_count = program->code.size() - symbol.function->instruction_offset;
 
         program->pop_symbol_prefix();
       }

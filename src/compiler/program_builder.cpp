@@ -234,6 +234,29 @@ namespace adder {
       symbolPrefix.pop_back();
     }
 
+    void program_builder::add_relocation(std::string_view const& symbol, uint64_t offset) {
+      if (scratchRelocations.empty()) {
+        relocations.push_back({ symbol, offset });
+      }
+      else {
+        scratchRelocations.back().push_back({ symbol, offset });
+      }
+    }
+
+    void program_builder::begin_relocation_group() {
+      scratchRelocations.emplace_back();
+    }
+
+    std::pair<size_t, size_t> program_builder::end_relocation_group() {
+      std::pair<size_t, size_t> range = { relocations.size(), relocations.size() + scratchRelocations.back().size() };
+      relocations.insert(
+        relocations.end(),
+        scratchRelocations.back().begin(),
+        scratchRelocations.back().end());
+      scratchRelocations.pop_back();
+      return range;
+    }
+
     void program_builder::call(symbol const & symbol) {
       if (!is_function(symbol.type_index))
         return;
@@ -241,7 +264,7 @@ namespace adder {
       if (symbol.function.has_value()) {
         call(program_address{ 0 });
         uint64_t offset = (uint8_t*)&code.back().jump.addr - (uint8_t*)code.data();
-        relocations[symbol.name].push_back(offset);
+        add_relocation(symbol.name, offset);
       }
       else {
         vm::register_index addr = pin_symbol(symbol);
@@ -292,7 +315,7 @@ namespace adder {
         if (symbol.function.has_value()) {
           jump_to(program_address{ 0 });
           uint64_t offset = (uint8_t*)&code.back().jump.addr - (uint8_t*)code.data();
-          relocations[symbol.name].push_back(offset);
+          add_relocation(symbol.name, offset);
         }
         else if (is_reference(symbol.type_index)) {
         }
@@ -557,7 +580,7 @@ namespace adder {
         vm::register_index dst = pin_register();
         set(dst, program_address{ 0 });
         uint64_t offset = (uint8_t*)&code.back().set.val - (uint8_t*)code.data();
-        relocations[symbol.name].push_back(offset);
+        add_relocation(symbol.name, offset);
         return dst;
       }
     }
@@ -587,7 +610,7 @@ namespace adder {
 
       // Record that this instruction will require `load_addr.addr` to be relocated.
       uint64_t offset = (uint8_t*)&code.back().load_addr.addr - (uint8_t*)code.data();
-      relocations[identifier].push_back(offset);
+      add_relocation(identifier, offset);
       return idx;
     }
 
@@ -691,7 +714,10 @@ namespace adder {
         break;
       }
 
-      relocations[symbol.name].push_back((uint8_t*)pAddr - (uint8_t*)code.data());
+      add_relocation(
+        symbol.name,
+        (uint8_t*)pAddr - (uint8_t*)code.data()
+      );
       return false;
     }
 
@@ -748,6 +774,7 @@ namespace adder {
       std::vector<program_symbol_table_entry> externSymbols;
       std::vector<uint8_t> symbolData;
       std::vector<uint8_t> programData;
+      std::map<std::string_view, uint64_t> symbolAddress;
 
       std::vector<vm::instruction> compiledCode;
 
@@ -774,13 +801,12 @@ namespace adder {
             );
           }
           else {
-            item.data_address = symbolData.size();
 
             size_t bytes = get_type_size(symbol.type_index);
+            // TODO: alignas(bytes)
+            item.data_address = symbolData.size();
             symbolData.resize(symbolData.size() + bytes, 0);
           }
-
-          symbolAddress[symbol.name] = item.data_address;
           publicSymbols.push_back(item);
         }
       }
@@ -801,6 +827,7 @@ namespace adder {
       header.program_data_size   = 0;
       header.program_data_offset = header.symbol_data_offset + header.symbol_data_size;
 
+      // TODO: alignas(vm::instruction)
       header.code_offset = header.program_data_offset + header.program_data_size;
       header.code_size   = compiledCode.size() * sizeof(vm::instruction);
 
@@ -823,6 +850,7 @@ namespace adder {
             publicSymbols[nextPublicEntry].data_address += header.symbol_data_offset;
           }
 
+          symbolAddress[symbol.name] += publicSymbols[nextPublicEntry].data_address;
           ++nextPublicEntry;
         }
       }
@@ -834,6 +862,30 @@ namespace adder {
       bytes::insert(executable, symbolData.begin(), symbolData.end());
       bytes::insert(executable, programData.begin(), programData.end());
       bytes::insert(executable, compiledCode.begin(), compiledCode.end());
+
+      nextPublicEntry = 0;
+      nextExternEntry = 0;
+
+      for (auto & symbol : symbols) {
+        const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
+        if (isExtern)
+          continue;
+
+        
+        if (is_function(symbol.type_index)) {
+          for (size_t reloc = symbol.function->relocation_start; reloc < symbol.function->relocation_end; ++reloc) {
+            auto& [name, offset] = relocations[reloc];
+
+            uint64_t relativeOffset = offset - symbol.function->instruction_offset * sizeof(vm::instruction);
+            memcpy(
+              executable.data() + symbolAddress[symbol.name] + relativeOffset,
+              &symbolAddress[name],
+              sizeof(vm::address_t)
+            );
+          }
+        }
+        ++nextPublicEntry;
+      }
 
       return executable;
     }

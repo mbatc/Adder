@@ -56,6 +56,9 @@ namespace adder {
         struct function_block {
           size_t instruction_offset = 0;
           size_t instruction_count = 0;
+
+          size_t relocation_start = 0;
+          size_t relocation_end = 0;
         };
 
         /// Function instruction offset
@@ -88,11 +91,6 @@ namespace adder {
       };
       std::vector<scope> scopes;
 
-      // struct relocation {
-      //   uint64_t offset; ///< Where the resolve symbol is written to.
-      //   uint64_t symbol; ///< The index of the symbol in the program.
-      // };
-
       struct expression_result {
         ///< Constant value evaluated
         std::optional<vm::register_value> constant;
@@ -105,9 +103,15 @@ namespace adder {
       };
       std::vector<expression_result>  results;
 
+      struct relocation {
+        std::string_view symbol;
+        uint64_t         offset;
+      };
+
       /// Identifiers whose location needs to be resolved.
-      /// [identifier] -> list of offsets into instructions. Offset is in bytes.
-      std::map<std::string_view, std::vector<uint64_t>> relocations;
+      /// [identifier] -> list of offsets into instructions. Offset is in bytes
+      std::vector<relocation> relocations;
+      std::vector<std::vector<relocation>> scratchRelocations;
 
       std::vector<type> types = {
         { "void",    { type_primitive::_void } },
@@ -154,8 +158,13 @@ namespace adder {
       size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
       bool push_scope(bool newStackFrame);
       bool pop_scope();
+
       void push_symbol_prefix(std::string const & name);
       void pop_symbol_prefix();
+
+      void add_relocation(std::string_view const& symbol, uint64_t offset);
+      void begin_relocation_group();
+      std::pair<size_t, size_t> end_relocation_group();
 
       void call(symbol const & symbol);
       void call(program_address const & symbol);
@@ -178,7 +187,7 @@ namespace adder {
       bool push_variable(std::string_view const& identifier, std::string_view const & type_name, symbol_flags const & flags);
       bool push_identifier(std::string_view const& identifier, symbol const & symbol);
       void push_expression_result(expression_result result);
-
+      
       /// Push a register value to the stack
       void push(vm::register_index const & src);
       /// Pop a register value from the stack
