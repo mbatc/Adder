@@ -364,7 +364,7 @@ namespace adder {
         return true;
       }
 
-      std::optional<size_t> add_function_declaration(ast * tree, std::string_view identifier, size_t returnType, std::vector<size_t> &&arguments, size_t bodyId, symbol_flags flags) {
+      std::optional<size_t> add_function_declaration(ast * tree, std::string_view identifier, size_t returnType, std::vector<size_t> &&arguments, size_t bodyId, symbol_flags flags, functor_type funcType) {
         type_fn type;
         type.return_type = returnType;
         for (auto& paramId : arguments) {
@@ -392,7 +392,7 @@ namespace adder {
         return tree->add(function);
       }
 
-      std::optional<size_t> consume_function_declaration(ast * tree, lexer::token_parser * tokenizer, lexer::token_view const & name, symbol_flags flags) {
+      std::optional<size_t> consume_function_declaration(ast * tree, lexer::token_parser * tokenizer, lexer::token_view const & name, symbol_flags flags, functor_type funcType) {
         std::vector<size_t> arguments;
         if (!consume_function_parameter_list(tree, &arguments, tokenizer))
           return std::nullopt;
@@ -418,7 +418,7 @@ namespace adder {
         //   returnType = infer_return_type(body.statements);
         // }
 
-        return add_function_declaration(tree, name.name, returnType.value(), std::move(arguments), tree->add(std::move(body)), flags);
+        return add_function_declaration(tree, name.name, returnType.value(), std::move(arguments), tree->add(std::move(body)), flags, funcType);
       }
 
       std::optional<size_t> consume_fn(ast * tree, lexer::token_parser * tokenizer, symbol_flags flags) {
@@ -601,7 +601,7 @@ namespace adder {
         ret.name = "void";
         size_t returnType = tree->add(ret);
 
-        return add_function_declaration(tree, name.name, returnType, std::move(arguments), tree->add(std::move(body)), flags | symbol_flags::initializer);
+        return add_function_declaration(tree, name.name, returnType, std::move(arguments), tree->add(std::move(body)), flags, functor_type::initializer);
       }
 
       std::optional<size_t> consume_class(ast * tree, lexer::token_parser * tokenizer) {

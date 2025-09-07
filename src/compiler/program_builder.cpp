@@ -83,13 +83,37 @@ namespace adder {
         && std::get<type_modifier>(types[*type].desc).const_;
     }
 
+    bool program_builder::is_integer(std::optional<size_t> const & type) const {
+      return type.has_value()
+        && std::holds_alternative<type_primitive>(types[*type].desc)
+        && compiler::is_integer(std::get<type_primitive>(types[*type].desc));
+    }
+
+    bool program_builder::is_float(std::optional<size_t> const & type) const {
+      return type.has_value()
+        && std::holds_alternative<type_primitive>(types[*type].desc)
+        && compiler::is_float(std::get<type_primitive>(types[*type].desc));
+    }
+
+    bool program_builder::is_bool(std::optional<size_t> const & type) const {
+      return type.has_value()
+        && std::holds_alternative<type_primitive>(types[*type].desc)
+        && compiler::is_bool(std::get<type_primitive>(types[*type].desc));
+    }
+
+    bool program_builder::is_void(std::optional<size_t> const& type) const {
+      return type.has_value()
+        && std::holds_alternative<type_primitive>(types[*type].desc)
+        && compiler::is_void(std::get<type_primitive>(types[*type].desc));
+    }
+
     size_t program_builder::get_type_size(type_modifier const & desc) const {
       return desc.reference ? sizeof(vm::address_t) : get_type_size(desc.base);
     }
 
     size_t program_builder::get_type_size(type_primitive const& desc) const {
       switch (desc) {
-      case type_primitive::_void: return 0;
+      case type_primitive::void_: return 0;
       case type_primitive::int8: return sizeof(int8_t);
       case type_primitive::int16: return sizeof(int16_t);
       case type_primitive::int32: return sizeof(int32_t);
@@ -167,7 +191,7 @@ namespace adder {
 
     std::optional<size_t> program_builder::find_unnamed_initializer(size_t receiverTypeIndex, size_t initializerTypeIndex) const {
       std::string_view symbol = adder::format(
-        "init:([ref]%.*s,%.*s)=>void:",
+        "init ([ref]%.*s,%.*s)=>void:",
         types[receiverTypeIndex].identifier.length(), types[receiverTypeIndex].identifier.data(),
         types[initializerTypeIndex].identifier.length(), types[initializerTypeIndex].identifier.data()
       );
@@ -224,6 +248,28 @@ namespace adder {
       }
       scopes.pop_back();
       return true;
+    }
+
+    program_builder::expression_result program_builder::alloc_return_value(size_t typeIndex)
+    {
+      const size_t typeSize = get_type_size(typeIndex);
+
+      vm::instruction op;
+      op.code = vm::op_code::alloc_stack;
+      op.alloc_stack.bytes = typeSize;
+
+      if (op.alloc_stack.bytes != 0)
+        add_instruction(op);
+
+      scope &block = scopes.back();
+
+      expression_result r;
+      r.address = stack_frame_offset{ block.stackSize };
+      r.type_index = typeIndex;
+      r.alloc_size = typeSize;
+      block.stackSize += typeSize;
+      results.push_back(r);
+      return r;
     }
 
     void program_builder::push_symbol_prefix(std::string const & prefix) {
@@ -613,6 +659,27 @@ namespace adder {
       add_relocation(identifier, offset);
       return idx;
     }
+    
+    void program_builder::load(vm::register_index dst, vm::register_index address, size_t size, int64_t offset)
+    {
+      vm::instruction op;
+      op.code = vm::op_code::load_offset;
+      op.load_offset.dst = dst;
+      op.load_offset.addr = address;
+      op.load_offset.size = size;
+      op.load_offset.offset = offset;
+      add_instruction(op);
+    }
+
+    void program_builder::load(vm::register_index dst, vm::register_index address, size_t size)
+    {
+      vm::instruction op;
+      op.code = vm::op_code::load;
+      op.load.dst = dst;
+      op.load.src_addr = address;
+      op.load.size = size;
+      add_instruction(op);
+    }
 
     void program_builder::release_register(vm::register_index reg) {
       return registers.release(reg);
@@ -736,6 +803,26 @@ namespace adder {
       }
 
       return false;
+    }
+
+    void program_builder::addi(vm::register_index dst, vm::register_index a, vm::register_index b)
+    {
+      vm::instruction op;
+      op.code = vm::op_code::add_i64;
+      op.add.dst = dst;
+      op.add.lhs = a;
+      op.add.rhs = b;
+      add_instruction(op);
+    }
+    
+    void program_builder::addf(vm::register_index dst, vm::register_index a, vm::register_index b)
+    {
+      vm::instruction op;
+      op.code = vm::op_code::add_f64;
+      op.add.dst = dst;
+      op.add.lhs = a;
+      op.add.rhs = b;
+      add_instruction(op);
     }
 
     void program_builder::add_instruction(vm::instruction inst) {
@@ -871,7 +958,6 @@ namespace adder {
         if (isExtern)
           continue;
 
-        
         if (is_function(symbol.type_index)) {
           for (size_t reloc = symbol.function->relocation_start; reloc < symbol.function->relocation_end; ++reloc) {
             auto& [name, offset] = relocations[reloc];
@@ -927,10 +1013,32 @@ namespace adder {
         if (!returnName.has_value())
           return std::nullopt;
 
-        return ret + ")=>" + returnName.value();
+        switch (fn.func_type) {
+        case functor_type::free:
+          return ret + ")=>" + returnName.value();
+        case functor_type::member:
+          return "mem " + ret + ")=>" + returnName.value();
+        case functor_type::initializer:
+          return "init " + ret + ")=>" + returnName.value();
+        case functor_type::operator_:
+          return "op " + ret + ")=>" + returnName.value();
+        }
       }
 
       return std::nullopt;
+    }
+
+    std::optional<std::string> get_symbol_name(ast const & ast, size_t statement, std::string_view const & identifier) {
+      auto typeName = get_type_name(ast, statement);
+      if (!typeName.has_value())
+        return std::nullopt;
+
+      return (std::string)adder::format(
+        "%s:%.*s",
+        typeName->c_str(),
+        identifier.length(),
+        identifier.data()
+      );
     }
   }
 }

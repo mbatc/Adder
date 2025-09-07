@@ -20,17 +20,7 @@ namespace adder {
     using address_desc = std::variant<stack_frame_offset, program_address>;
 
     std::optional<std::string> get_type_name(ast const & ast, size_t statement);
-
-    // Symbols are prefixed with the symbol type, e.g. fn, init, class, var.
-    // Symbols components are separated by ':'.
-    // Components in a symbol are determined by the type.
-    //
-    // e.g.,
-    //
-    //  var:type:name
-    //  fn:arg0,arg1,...,argN:name
-    //  init:[ref]type,arg0,arg1,...,argN:name
-    //  method:[ref]type,arg0,arg1,...,argN:name
+    std::optional<std::string> get_symbol_name(ast const & ast, size_t statement, std::string_view const & identifier);
 
     struct program_builder {
       program_builder();
@@ -100,6 +90,8 @@ namespace adder {
         std::optional<size_t> symbol_index;
         ///< Type of the value
         std::optional<size_t> type_index;
+        ///< Size of temporary storage allocated for this result
+        std::optional<size_t> alloc_size;
       };
       std::vector<expression_result>  results;
 
@@ -114,7 +106,7 @@ namespace adder {
       std::vector<std::vector<relocation>> scratchRelocations;
 
       std::vector<type> types = {
-        { "void",    { type_primitive::_void } },
+        { "void",    { type_primitive::void_ } },
         { "int8",    { type_primitive::int8 } },
         { "int16",   { type_primitive::int16 } },
         { "int32",   { type_primitive::int32 } },
@@ -139,6 +131,10 @@ namespace adder {
       bool is_reference(std::optional<size_t> const & type) const;
       bool is_const(std::optional<size_t> const & type) const;
       bool is_function(std::optional<size_t> const & type) const;
+      bool is_integer(std::optional<size_t> const & type) const;
+      bool is_float(std::optional<size_t> const & type) const;
+      bool is_bool(std::optional<size_t> const & type) const;
+      bool is_void(std::optional<size_t> const & type) const;
 
       size_t get_type_size(type_modifier const & desc) const;
       size_t get_type_size(type_primitive const & desc) const;
@@ -158,7 +154,7 @@ namespace adder {
       size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
       bool push_scope(bool newStackFrame);
       bool pop_scope();
-
+      expression_result alloc_return_value(size_t size);
       void push_symbol_prefix(std::string const & name);
       void pop_symbol_prefix();
 
@@ -205,7 +201,8 @@ namespace adder {
       vm::register_index pin_address_of(symbol const& symbol);
       vm::register_index pin_address_of(expression_result const & result);
       vm::register_index pin_relocation(std::string_view identifier, size_t size);
-
+      void load(vm::register_index dst, vm::register_index address, size_t size, int64_t offset);
+      void load(vm::register_index dst, vm::register_index address, size_t size);
       void release_register(vm::register_index reg);
 
       expression_result pop_expression_result();
@@ -228,6 +225,10 @@ namespace adder {
       bool store(vm::register_index src, address_desc const & addr, uint8_t sz);
       bool store(vm::register_index src, symbol const & symbol);
       bool store(vm::register_index src, expression_result const & result);
+
+      void addi(vm::register_index dst, vm::register_index a, vm::register_index b);
+      void addf(vm::register_index dst, vm::register_index a, vm::register_index b);
+
       void add_instruction(vm::instruction inst);
 
       /// Convert the program to a binary

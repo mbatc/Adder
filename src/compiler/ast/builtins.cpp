@@ -5,13 +5,14 @@
 namespace adder {
   namespace compiler {
     namespace builtin {
-      bool i32_init_i64(program_builder* program) {
+      bool int_init_int(program_builder* program) {
         auto & self = program->symbols[program->symbols.size() - 2];
         auto & arg  = program->symbols[program->symbols.size() - 1];
         std::optional<size_t> selfType = program->unwrap_type(self.type_index);
-        if (!selfType.has_value()) {
+
+        if (!(program->is_integer(selfType.value())
+          && program->is_integer(arg.type_index)))
           return false;
-        }
 
         vm::register_index addr  = program->pin_symbol(self);
         vm::register_index value = program->pin_symbol(arg);
@@ -21,23 +22,39 @@ namespace adder {
         program->release_register(addr);
         return true;
       }
+      
+      bool add_int_int(program_builder* program) {
+        auto& self = program->symbols[program->symbols.size() - 2];
+        auto& arg = program->symbols[program->symbols.size() - 1];
+        std::optional<size_t> selfType = program->unwrap_type(self.type_index);
+        size_t typeSize = (uint8_t)program->get_type_size(selfType.value());
+        if (!selfType.has_value()) {
+          return false;
+        }
+
+        vm::register_index addr = program->pin_symbol(self);
+        vm::register_index rhs  = program->pin_symbol(arg);
+        vm::register_index lhs  = program->pin_register();
+
+        program->load(lhs, addr, typeSize);
+        program->addi(lhs, lhs, rhs);
+        program->store(lhs, addr, (uint8_t)typeSize);
+
+        program->release_register(addr);
+        program->release_register(rhs);
+        program->release_register(lhs);
+        return true;
+      }
     }
 
-    size_t declare_i32(ast* tree) {
-      expr::type_name selfTypeName;
-      selfTypeName.name = "int32";
-
-      expr::type_modifier selfType;
-      selfType.reference = true;
-      selfType.modified = tree->add(selfTypeName);
-
+    size_t init_i64(ast* tree, size_t refType, std::string_view const & argType) {
       expr::variable_declaration arg0;
       arg0.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
       arg0.name = "self";
-      arg0.type = tree->add(selfType);
+      arg0.type = refType;
 
       expr::type_name arg1TypeName;
-      arg1TypeName.name = "int64";
+      arg1TypeName.name = argType;
 
       expr::variable_declaration arg1;
       arg1.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
@@ -45,7 +62,7 @@ namespace adder {
       arg1.type = tree->add(arg1TypeName);
 
       expr::byte_code code;
-      code.callback = builtin::i32_init_i64;
+      code.callback = builtin::int_init_int;
 
       expr::type_name retTypeName;
       retTypeName.name = "void";
@@ -54,6 +71,7 @@ namespace adder {
       fnType.return_type = tree->add(retTypeName);
       fnType.argument_list.push_back(arg0.type.value());
       fnType.argument_list.push_back(arg1.type.value());
+      fnType.func_type = functor_type::initializer;
 
       expr::function_declaration decl;
       decl.arguments.push_back(tree->add(arg0));
@@ -61,8 +79,62 @@ namespace adder {
       decl.body       = tree->add(code);
       decl.identifier = "";
       decl.type       = tree->add(fnType);
-      decl.flags      = symbol_flags::initializer | symbol_flags::inline_;
+      decl.flags      = symbol_flags::inline_;
+      
       return tree->add(decl);
+    }
+    
+    size_t add_int(ast* tree, size_t valueType) {
+      expr::variable_declaration arg0;
+      arg0.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
+      arg0.name = "$0";
+      arg0.type = valueType;
+
+      expr::variable_declaration arg1;
+      arg1.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
+      arg1.name = "$1";
+      arg1.type = valueType;
+
+      expr::byte_code code;
+      code.callback = builtin::add_int_int;
+
+      expr::type_fn fnType;
+      fnType.return_type = valueType;
+      fnType.argument_list.push_back(arg0.type.value());
+      fnType.argument_list.push_back(arg1.type.value());
+      fnType.func_type = functor_type::operator_;
+
+      expr::function_declaration decl;
+      decl.arguments.push_back(tree->add(arg0));
+      decl.arguments.push_back(tree->add(arg1));
+      decl.body       = tree->add(code);
+      decl.identifier = "+";
+      decl.type       = tree->add(fnType);
+      decl.flags      = symbol_flags::inline_;
+
+      return tree->add(decl);
+    }
+
+    size_t declare_i32(ast* tree, expr::block *scope) {
+      expr::type_name selfTypeName;
+      selfTypeName.name = "int32";
+
+      expr::type_modifier selfType;
+      selfType.reference = true;
+      selfType.modified = tree->add(selfTypeName);
+
+      const size_t valueType = tree->add(selfTypeName);
+      const size_t refType = tree->add(selfType);
+
+      init_i64(tree, refType, "int64");
+      init_i64(tree, refType, "int32");
+      init_i64(tree, refType, "int16");
+      init_i64(tree, refType, "int8");
+      
+      add_int(tree, valueType);
+      add_int(tree, valueType);
+      add_int(tree, valueType);
+      add_int(tree, valueType);
     }
 
     void define_builtins(ast* tree, expr::block *scope) {

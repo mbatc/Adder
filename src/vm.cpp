@@ -4,6 +4,9 @@
 #include "program.h"
 #include "compiler/program_builder.h"
 
+#include <iostream>
+#include <iomanip>
+
 namespace adder {
   namespace vm {
     size_t instruction_size(op_code /*code*/) {
@@ -343,6 +346,44 @@ namespace adder {
       void * ret = vm->heap_allocator->allocate(stub.code.size() * sizeof(adder::vm::instruction));
       memcpy(ret, (uint8_t*)stub.code.data(), stub.code.size() * sizeof(adder::vm::instruction));
       return ret;
+    }
+
+    void call(machine * vm, void * handle)
+    {
+      // Set program counter to the entry point.
+      vm->registers[adder::vm::register_names::pc].ptr = handle;
+      
+      int64_t step = 0;
+      do
+      {
+        int i = 0;
+        for (auto &reg : vm->registers)
+          std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.d64 << "]" << std::endl;
+      
+        std::cout << "\nStack:\n";
+        for (int p = 0; p < vm->stack.size; ++p)
+        {
+          if (p % 8 == 0)
+            std::cout << std::endl;
+          printf("0x%.2x ", vm->stack.base[p]);
+        }
+        std::cout << "\n\n";
+      
+        adder::vm::decode(vm);
+
+        std::cout << "\nInstruction " << step << ": " << op_code_to_string(vm->next_instruction.code) << "\n";
+      
+        if (!adder::vm::execute(vm))
+        {
+          if (vm->next_instruction.code == adder::vm::op_code::exit)
+            std::cout << "Finished call\n";
+          else
+            std::cout << "Failed\n";
+          break;
+        }
+      
+        ++step;
+      } while (true);
     }
   }
 }

@@ -282,16 +282,15 @@ namespace adder {
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::function_declaration const & statement, size_t statementId) {
-      bool isInitializer = (statement.flags & symbol_flags::initializer) == symbol_flags::initializer;
-      auto typeName = get_type_name(ast, statement.type.value());
-      if (!typeName.has_value()) {
+      auto symbolName = get_symbol_name(ast, statement.type.value(), statement.identifier);
+      if (!symbolName.has_value()) {
         // Push error: Invalid function
         return false;
       }
 
       program_builder::symbol symbol;
       symbol.flags      = statement.flags;
-      symbol.name       = adder::format("%s:%s:%.*s", isInitializer ? "init" : "fn", typeName.value().c_str(), statement.identifier.length(), statement.identifier.data());
+      symbol.name       = symbolName.value();
       symbol.type_index = program->add_function_type(ast, statement, statementId);
 
       if (statement.body.has_value())
@@ -299,7 +298,6 @@ namespace adder {
         program->push_symbol_prefix(symbol.name);
         program->scopes.emplace_back();
 
-        // size_t start = program->code.size();
         symbol.address = std::nullopt;
         for (auto argId : statement.arguments) {
           auto & arg = ast.get<expr::variable_declaration>(argId);
@@ -443,6 +441,13 @@ namespace adder {
       }
 
       bool inlineCall = func != nullptr && (callable.flags & symbol_flags::inline_) == symbol_flags::inline_;
+
+      size_t returnTypeSize = program->get_type_size(signature->return_type);
+      std::optional<program_builder::expression_result> returnResult;
+
+      if (returnTypeSize != 0) {
+        returnResult = program->alloc_return_value(returnTypeSize);
+      }
 
       if (inlineCall)
         inlineCall &= ast.get<expr::function_declaration>(func->function_id).body.has_value();

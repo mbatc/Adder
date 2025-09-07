@@ -22,12 +22,13 @@ namespace adder {
       struct type_fn {
         size_t return_type; ///< Function return type.
         std::vector<size_t> argument_list; ///< List expression. Each node should contain a type
+        functor_type func_type = functor_type::free;
       };
 
       struct type_modifier {
-        bool reference = false;
-        bool const_ = false;
-        size_t modified;
+        bool reference  = false;
+        bool const_     = false;
+        size_t modified = 0;
       };
 
       struct literal {
@@ -104,7 +105,7 @@ namespace adder {
         // Function bodies
         std::map<std::string, size_t> functions;
         // Statements in this scope in sequential order.
-        // TODO: If we restrict the ast datastructure a bit, perhaps this can be a body start index + count so we have additional allocations.
+        // TODO: If we restrict the ast datastructure a bit, perhaps this can be a body start index + count for less allocations.
         std::vector<size_t> statements;
       };
 
