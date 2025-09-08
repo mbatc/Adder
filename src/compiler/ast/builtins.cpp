@@ -115,7 +115,7 @@ namespace adder {
       return tree->add(decl);
     }
 
-    size_t declare_i32(ast* tree, expr::block *scope) {
+    void declare_i32(ast* tree, expr::block *scope) {
       expr::type_name selfTypeName;
       selfTypeName.name = "int32";
 
@@ -126,19 +126,21 @@ namespace adder {
       const size_t valueType = tree->add(selfTypeName);
       const size_t refType = tree->add(selfType);
 
-      init_i64(tree, refType, "int64");
-      init_i64(tree, refType, "int32");
-      init_i64(tree, refType, "int16");
-      init_i64(tree, refType, "int8");
-      
-      add_int(tree, valueType);
-      add_int(tree, valueType);
-      add_int(tree, valueType);
-      add_int(tree, valueType);
+      scope->statements.insert(
+        scope->statements.end(),
+        {
+          init_i64(tree, refType, "int64"),
+          init_i64(tree, refType, "int32"),
+          init_i64(tree, refType, "int16"),
+          init_i64(tree, refType, "int8"),
+          
+          add_int(tree, valueType)
+        }
+      );
     }
 
     void define_builtins(ast* tree, expr::block *scope) {
-      scope->statements.push_back(declare_i32(tree));
+      declare_i32(tree, scope);
     }
   }
 }

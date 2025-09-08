@@ -154,7 +154,7 @@ namespace adder {
       size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
       bool push_scope(bool newStackFrame);
       bool pop_scope();
-      expression_result alloc_return_value(size_t size);
+      expression_result alloc_return_value(size_t typeIndex);
       void push_symbol_prefix(std::string const & name);
       void pop_symbol_prefix();
 

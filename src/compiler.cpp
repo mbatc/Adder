@@ -149,6 +149,7 @@ namespace adder {
       }
 
       size_t start = program->results.size();
+      program->alloc_return_value();
       program->push_expression_result(unnamedInit);
       program->push_expression_result(receiver);
       program->push_expression_result(initializer);
@@ -259,14 +260,29 @@ namespace adder {
 
     bool generate_code(ast const & ast, program_builder * program, expr::function_return const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
+      if (statement.expression.has_value()) {
+
+      }
+      program->pop_frame_pointer();
+      program->pop_return_pointer();
+
+      generate_code();
       return true;
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::binary_operator const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
 
-      size_t startResult = program->results.size();
-      generate_code(ast, program, statement.left.value());
+      if (statement.type_name == expr::operator_type::call) {
+        size_t startResult = program->results.size();
+        generate_code(ast, program, statement.left.value());
+
+        // TODO: Eval return type of 
+      }
+
+      // Allow `generate_code` to push all matching identifiers to `results`.
+      // generate_call can then match the correct overload.
+      // size_t overloadsEnd = program->results.size();
       if (statement.right.has_value())
         generate_code(ast, program, statement.right.value());
 
@@ -442,12 +458,7 @@ namespace adder {
 
       bool inlineCall = func != nullptr && (callable.flags & symbol_flags::inline_) == symbol_flags::inline_;
 
-      size_t returnTypeSize = program->get_type_size(signature->return_type);
-      std::optional<program_builder::expression_result> returnResult;
-
-      if (returnTypeSize != 0) {
-        returnResult = program->alloc_return_value(returnTypeSize);
-      }
+      program_builder::expression_result returnResult = program->alloc_return_value(signature->return_type);
 
       if (inlineCall)
         inlineCall &= ast.get<expr::function_declaration>(func->function_id).body.has_value();
@@ -485,9 +496,8 @@ namespace adder {
       }
       else {
         program->call(callable);
+        program->pop_scope();
       }
-
-      program->pop_scope();
 
       if (!inlineCall) {
         program->pop_frame_pointer();

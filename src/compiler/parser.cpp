@@ -312,7 +312,7 @@ namespace adder {
 
       std::optional<size_t> consume_statement(ast* tree, lexer::token_parser* tokenizer) {
         switch (tokenizer->current().id) {
-        case lexer::token_id::fn:         return consume_fn(tree, tokenizer);
+        case lexer::token_id::fn:         return consume_fn(tree, tokenizer, functor_type::free);
         case lexer::token_id::class_:     return consume_class(tree, tokenizer);
         case lexer::token_id::extern_:    return consume_extern(tree, tokenizer);
         case lexer::token_id::open_brace: return consume_block(tree, tokenizer);
@@ -367,6 +367,7 @@ namespace adder {
       std::optional<size_t> add_function_declaration(ast * tree, std::string_view identifier, size_t returnType, std::vector<size_t> &&arguments, size_t bodyId, symbol_flags flags, functor_type funcType) {
         type_fn type;
         type.return_type = returnType;
+        type.func_type = funcType;
         for (auto& paramId : arguments) {
           if (!tree->is<variable_declaration>(paramId)) {
             // Push Error: Invalid statement in argument list.
@@ -421,7 +422,7 @@ namespace adder {
         return add_function_declaration(tree, name.name, returnType.value(), std::move(arguments), tree->add(std::move(body)), flags, funcType);
       }
 
-      std::optional<size_t> consume_fn(ast * tree, lexer::token_parser * tokenizer, symbol_flags flags) {
+      std::optional<size_t> consume_fn(ast * tree, lexer::token_parser * tokenizer, functor_type funcType, symbol_flags flags) {
         lexer::token_view name;
         if (!tokenizer->
           parse(lexer::token_id::fn)
@@ -430,7 +431,7 @@ namespace adder {
           .ok())
           return std::nullopt;
 
-        return consume_function_declaration(tree, tokenizer, name, flags);
+        return consume_function_declaration(tree, tokenizer, name, flags, funcType);
       }
 
       std::optional<expr::type_modifier> consume_type_modifiers(ast * tree, lexer::token_parser * tokenizer, rules::token_rule const & terminator) {
@@ -619,21 +620,21 @@ namespace adder {
         while (tokenizer->current().id != lexer::token_id::close_brace) {
           switch (tokenizer->current().id) {
           case lexer::token_id::fn:     {
-            auto fn = consume_fn(tree, tokenizer, symbol_flags::member);
+            auto fn = consume_fn(tree, tokenizer, functor_type::member/*, symbol_flags::member*/);
             if (!fn.has_value())
               return std::nullopt;
             cls.methods.push_back(fn.value());
             break;
           }
           case lexer::token_id::identifier: {
-            auto var = consume_variable_decl(tree, tokenizer, symbol_flags::member);
+            auto var = consume_variable_decl(tree, tokenizer, symbol_flags::none/*, symbol_flags::member*/);
             if (!var.has_value())
               return std::nullopt;
             cls.members.push_back(var.value());
             break;
           }
           case lexer::token_id::const_: {
-            auto var = consume_const(tree, tokenizer, symbol_flags::member);
+            auto var = consume_const(tree, tokenizer/*, symbol_flags::member*/);
             if (!var.has_value())
               return std::nullopt;
             cls.members.push_back(var.value());
@@ -659,9 +660,9 @@ namespace adder {
           return std::nullopt;
 
         switch (tokenizer->current().id) {
-        case lexer::token_id::fn:     return consume_fn(tree, tokenizer, symbol_flags::extern_);
+        case lexer::token_id::fn: return consume_fn(tree, tokenizer, functor_type::free, symbol_flags::extern_);
         case lexer::token_id::const_: return consume_const(tree, tokenizer, symbol_flags::extern_);
-        case lexer::token_id::identifier:   return consume_variable_decl(tree, tokenizer, symbol_flags::extern_);
+        case lexer::token_id::identifier: return consume_variable_decl(tree, tokenizer, symbol_flags::extern_);
         }
 
         return tokenizer->next();
@@ -676,7 +677,7 @@ namespace adder {
       while (!tokenizer->eof()) {
         std::optional<size_t> nextStatement;
         switch (tokenizer->current().id) {
-        case lexer::token_id::fn:       nextStatement = parser::consume_fn(&ast, tokenizer); break;
+        case lexer::token_id::fn:       nextStatement = parser::consume_fn(&ast, tokenizer, functor_type::free); break;
         case lexer::token_id::const_:   nextStatement = parser::consume_const(&ast, tokenizer); break;
         case lexer::token_id::let:      nextStatement = parser::consume_let(&ast, tokenizer); break;
         case lexer::token_id::class_:   nextStatement = parser::consume_class(&ast, tokenizer); break;

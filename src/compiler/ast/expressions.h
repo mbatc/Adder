@@ -20,7 +20,7 @@ namespace adder {
       };
 
       struct type_fn {
-        size_t return_type; ///< Function return type.
+        size_t return_type = 0; ///< Function return type.
         std::vector<size_t> argument_list; ///< List expression. Each node should contain a type
         functor_type func_type = functor_type::free;
       };
@@ -47,7 +47,7 @@ namespace adder {
       struct variable_declaration {
         std::optional<size_t> type; // If nullopt, infer the type from initializer expression
         std::string_view name;
-        symbol_flags     flags;
+        symbol_flags     flags = symbol_flags::none;
         std::optional<size_t> initializer;
       };
 
@@ -162,6 +162,8 @@ namespace adder {
         class_decl,
         conversion
       >;
+
+      constexpr size_t sz = sizeof(statement);
     }
   }
 }

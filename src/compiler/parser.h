@@ -33,7 +33,7 @@ namespace adder {
       std::optional<size_t> consume_expression(ast * tree, lexer::token_parser * tokenizer, rules::token_rule const & terminator = lexer::token_id::semi_colon);
       std::optional<size_t> consume_const(ast * tree, lexer::token_parser * tokenizer, symbol_flags flags = symbol_flags::none);
       std::optional<size_t> consume_let(ast * tree, lexer::token_parser * tokenizer, symbol_flags flags = symbol_flags::none);
-      std::optional<size_t> consume_fn(ast * tree, lexer::token_parser * tokenizer, symbol_flags flags = symbol_flags::none);
+      std::optional<size_t> consume_fn(ast * tree, lexer::token_parser * tokenizer, functor_type funcType, symbol_flags flags = symbol_flags::none);
       std::optional<size_t> consume_class(ast * tree, lexer::token_parser * tokenizer);
       std::optional<size_t> consume_extern(ast * tree, lexer::token_parser * tokenizer);
       std::optional<size_t> consume_variable_decl(ast* tree, lexer::token_parser* tokenizer, symbol_flags flags, rules::token_rule const& terminator = lexer::token_id::semi_colon);
