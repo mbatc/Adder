@@ -94,6 +94,8 @@ namespace adder {
         std::optional<size_t> alloc_size;
       };
       std::vector<expression_result>  results;
+      void pop_result();
+      void push_result(expression_result r);
 
       struct relocation {
         std::string_view symbol;
@@ -126,7 +128,8 @@ namespace adder {
       size_t get_type_index(ast const & tree, size_t statement) const;
       type const * get_type(ast const & tree, size_t statement) const;
 
-      std::optional<size_t> unwrap_type(size_t const & type) const;
+      std::optional<size_t> unwrap_type(std::optional<size_t> const & type) const;
+      std::optional<size_t> return_type_of(std::optional<size_t> const & func) const;
       bool is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const;
       bool is_reference(std::optional<size_t> const & type) const;
       bool is_const(std::optional<size_t> const & type) const;
@@ -154,7 +157,7 @@ namespace adder {
       size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
       bool push_scope(bool newStackFrame);
       bool pop_scope();
-      expression_result alloc_return_value(size_t typeIndex);
+      expression_result alloc_temporary_value(size_t typeIndex);
       void push_symbol_prefix(std::string const & name);
       void pop_symbol_prefix();
 
@@ -178,6 +181,7 @@ namespace adder {
       void pop_frame_pointer();
 
       std::optional<size_t> push_symbol(symbol desc);
+      bool push_return_value_alias(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_fn_parameter(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, std::string_view const & type_name, symbol_flags const & flags);

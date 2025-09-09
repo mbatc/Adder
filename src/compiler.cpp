@@ -116,7 +116,7 @@ namespace adder {
       return false;
     }
 
-    bool initialize_variable(ast const& ast, program_builder* program, program_builder::expression_result receiver, program_builder::expression_result initializer) {
+    bool initialize_variable(ast const & ast, program_builder * program, program_builder::expression_result receiver, program_builder::expression_result initializer) {
       if (!receiver.symbol_index.has_value()) {
         return false;
       }
@@ -149,7 +149,14 @@ namespace adder {
       }
 
       size_t start = program->results.size();
-      program->alloc_return_value();
+      size_t funcType = program->symbols[unnamedInit.symbol_index.value()].type_index;
+      auto returnType = program->return_type_of(funcType);
+      if (!returnType.has_value()) {
+        // TODO: Push error. Not a callable type. Has no return type.
+        return false;
+      }
+
+      program->alloc_temporary_value(returnType.value());
       program->push_expression_result(unnamedInit);
       program->push_expression_result(receiver);
       program->push_expression_result(initializer);
@@ -259,30 +266,28 @@ namespace adder {
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::function_return const & statement, size_t statementId) {
-      unused(ast, program, statement, statementId);
-      if (statement.expression.has_value()) {
-
+      if (!statement.expression.has_value()) {
+        return false;
       }
+
+      auto returnSymbol = program->lookup_identifier_symbol("$ret");
+      if (returnSymbol == nullptr) {
+        return false;
+      }
+
       program->pop_frame_pointer();
       program->pop_return_pointer();
-
-      generate_code();
       return true;
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::binary_operator const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
 
-      if (statement.type_name == expr::operator_type::call) {
-        size_t startResult = program->results.size();
-        generate_code(ast, program, statement.left.value());
-
-        // TODO: Eval return type of 
-      }
-
       // Allow `generate_code` to push all matching identifiers to `results`.
       // generate_call can then match the correct overload.
       // size_t overloadsEnd = program->results.size();
+      size_t startResult = program->results.size();
+      generate_code(ast, program, statement.left.value());
       if (statement.right.has_value())
         generate_code(ast, program, statement.right.value());
 
@@ -311,10 +316,13 @@ namespace adder {
 
       if (statement.body.has_value())
       {
+        size_t returnType = program->return_type_of(symbol.type_index).value();
+
         program->push_symbol_prefix(symbol.name);
         program->scopes.emplace_back();
 
         symbol.address = std::nullopt;
+        program->push_return_value_alias("$ret", returnType, symbol_flags::none);
         for (auto argId : statement.arguments) {
           auto & arg = ast.get<expr::variable_declaration>(argId);
           program->push_fn_parameter(arg.name, program->get_type_index(ast, arg.type.value()), arg.flags);
@@ -458,7 +466,9 @@ namespace adder {
 
       bool inlineCall = func != nullptr && (callable.flags & symbol_flags::inline_) == symbol_flags::inline_;
 
-      program_builder::expression_result returnResult = program->alloc_return_value(signature->return_type);
+      // TODO: This needs to happen before any parameter expressions are evaluated.
+      //       They might allocate temporary storage which will be freed before this temporary.
+      program_builder::expression_result returnResult = program->alloc_temporary_value(signature->return_type);
 
       if (inlineCall)
         inlineCall &= ast.get<expr::function_declaration>(func->function_id).body.has_value();
@@ -504,7 +514,9 @@ namespace adder {
         program->pop_return_pointer();
       }
 
-      program->results.resize(startResult);
+      while (program->results.size() > startResult)
+        program->pop_result();
+      program->push_result(returnResult);
       return true;
     }
 

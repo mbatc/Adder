@@ -53,34 +53,6 @@ namespace adder {
         return expr::operator_type::unknown;
       }
 
-      // Function scope conventions.
-      // 1. Allocate all stack variables at top of scope.
-      // 2. Pop all stack variables at end of scope.
-
-      // Calling convention
-      // 1. Push used registers to stack.
-      // 2. Push pc to stack.
-      // 3. Push arguments to stack in order specified.
-      // 4. Jump to function address/entry point.
-      //      Execute function (reference arguments from stack). All registers are unused, so use registers as required.
-      //      Push return value to stack.
-      // 6. Pop/use return value.
-      // 7. Pop all arguments from stack.
-
-      // Wrap a block in the byte code for a function call.
-      // r0 reserved for return value.
-      // r1-register_count for parameters.
-      // std::vector<uint8_t> function_call(/* signature */) {
-      //   // Assumes all registers are unused
-      //   // Used registers should be pushed to the stack beforehand
-      // 
-      // }
-
-      // Handle consuming the result of a function
-      // std::vector<uint8_t> function_return() {
-      // 
-      // }
-
       std::optional<size_t> consume_return(ast * tree, lexer::token_parser * tokenizer) {
         if (!tokenizer->parse(lexer::token_id::return_).ok()) {
           return std::nullopt;
@@ -340,7 +312,7 @@ namespace adder {
         return true;
       }
 
-      bool consume_function_body(ast* tree, block * body, lexer::token_parser* tokenizer) {
+      bool consume_function_body(ast * tree, block * body, lexer::token_parser * tokenizer) {
         lexer::token_view token;
         if (!tokenizer->
           parse(rules::or(

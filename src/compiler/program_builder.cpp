@@ -25,6 +25,24 @@ namespace adder {
       free.push_back(idx);
     }
 
+    void program_builder::pop_result() {
+      auto r = results.back();
+      results.pop_back();
+
+      if (r.alloc_size.has_value()) {
+        vm::instruction alloc;
+        alloc.code = vm::op_code::free_stack;
+        alloc.alloc_stack.bytes = (uint32_t)r.alloc_size.value();
+        add_instruction(alloc);
+
+        // TODO: Destroy value
+      }
+    }
+
+    void program_builder::push_result(expression_result r) {
+      results.push_back(r);
+    }
+
     size_t program_builder::get_type_index(std::string_view const& name) const {
       auto it = std::find_if(types.begin(), types.end(), [&](type const& t) { return t.identifier == name; });
       return it - types.begin();
@@ -47,12 +65,26 @@ namespace adder {
       return name.has_value() ? get_type(name.value()) : nullptr;
     }
 
-    std::optional<size_t> program_builder::unwrap_type(size_t const & type) const
-    {
-      if (std::holds_alternative<type_modifier>(types[type].desc))
-        return std::get<type_modifier>(types[type].desc).base;
+    std::optional<size_t> program_builder::unwrap_type(std::optional<size_t> const & type) const {
+      if (type.has_value() && std::holds_alternative<type_modifier>(types[type.value()].desc))
+        return std::get<type_modifier>(types[type.value()].desc).base;
       else
         return std::nullopt;
+    }
+
+    std::optional<size_t> program_builder::return_type_of(std::optional<size_t> const& func) const {
+      if (!func.has_value())
+        return std::nullopt;
+
+      if (std::holds_alternative<type_function>(types[func.value()].desc)) {
+        return std::get<type_function>(types[func.value()].desc).return_type;
+      }
+
+      if (std::holds_alternative<type_function_decl>(types[func.value()].desc)) {
+        return return_type_of(std::get<type_function_decl>(types[func.value()].desc).type);
+      }
+
+      return return_type_of(unwrap_type(func.value()));
     }
 
     bool program_builder::is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const {
@@ -74,7 +106,9 @@ namespace adder {
 
     bool program_builder::is_function(std::optional<size_t> const& type) const {
       return type.has_value()
-        && (std::holds_alternative<type_function_decl>(types[*type].desc) || is_function(unwrap_type(*type)));
+        && (std::holds_alternative<type_function_decl>(types[*type].desc)
+          || std::holds_alternative<type_function>(types[*type].desc)
+          || is_function(unwrap_type(*type)));
     }
 
     bool program_builder::is_const(std::optional<size_t> const & type) const {
@@ -250,13 +284,13 @@ namespace adder {
       return true;
     }
 
-    program_builder::expression_result program_builder::alloc_return_value(size_t typeIndex)
+    program_builder::expression_result program_builder::alloc_temporary_value(size_t typeIndex)
     {
       const size_t typeSize = get_type_size(typeIndex);
 
       vm::instruction op;
       op.code = vm::op_code::alloc_stack;
-      op.alloc_stack.bytes = typeSize;
+      op.alloc_stack.bytes = (uint32_t)typeSize;
 
       if (op.alloc_stack.bytes != 0)
         add_instruction(op);
@@ -268,7 +302,7 @@ namespace adder {
       r.type_index = typeIndex;
       r.alloc_size = typeSize;
       block.stackSize += typeSize;
-      results.push_back(r);
+
       return r;
     }
 
@@ -280,7 +314,7 @@ namespace adder {
       symbolPrefix.pop_back();
     }
 
-    void program_builder::add_relocation(std::string_view const& symbol, uint64_t offset) {
+    void program_builder::add_relocation(std::string_view const & symbol, uint64_t offset) {
       if (scratchRelocations.empty()) {
         relocations.push_back({ symbol, offset });
       }
@@ -445,7 +479,29 @@ namespace adder {
       return index;
     }
 
-    bool program_builder::push_fn_parameter(std::string_view const& name, size_t typeIndex, symbol_flags const & flags) {
+    bool program_builder::push_return_value_alias(std::string_view const & name, size_t typeIndex, symbol_flags const & flags) {
+      symbol symbol;
+      symbol.flags       = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
+      symbol.type_index  = typeIndex;
+      symbol.name        = name;
+
+      // Variable starts at the bottom of the stack (so frame pointer - frame size)
+      // Variable ends at (frame pointer - frame size + variable size)
+      // We offset from frame pointer as it is static during a scope/call. Stack pointer is always moving.
+      symbol.address = stack_frame_offset{ -(int64_t)get_type_size(typeIndex) };
+
+      identifier id;
+      id.symbol_index = push_symbol(symbol);
+      id.name = name;
+      if (!id.symbol_index.has_value())
+        return false;
+
+      scope &block = scopes.back();
+      block.identifiers.push_back(id);
+      return true;
+    }
+
+    bool program_builder::push_fn_parameter(std::string_view const & name, size_t typeIndex, symbol_flags const & flags) {
       symbol symbol;
       symbol.flags       = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
       symbol.type_index  = typeIndex;
@@ -666,7 +722,7 @@ namespace adder {
       op.code = vm::op_code::load_offset;
       op.load_offset.dst = dst;
       op.load_offset.addr = address;
-      op.load_offset.size = size;
+      op.load_offset.size = (uint8_t)size;
       op.load_offset.offset = offset;
       add_instruction(op);
     }
@@ -677,7 +733,7 @@ namespace adder {
       op.code = vm::op_code::load;
       op.load.dst = dst;
       op.load.src_addr = address;
-      op.load.size = size;
+      op.load.size = (uint8_t)size;
       add_instruction(op);
     }
 
@@ -764,8 +820,7 @@ namespace adder {
       return true;
     }
 
-    bool program_builder::store(vm::register_index src, symbol const & symbol)
-    {
+    bool program_builder::store(vm::register_index src, symbol const & symbol) {
       if (!store(src, symbol.address.value_or(program_address{ 0 }), (uint8_t)get_type_size(types[symbol.type_index])))
         return false;
       if (symbol.address.has_value())
@@ -788,8 +843,7 @@ namespace adder {
       return false;
     }
 
-    bool program_builder::store(vm::register_index src, expression_result const& result)
-    {
+    bool program_builder::store(vm::register_index src, expression_result const& result) {
       if (result.symbol_index.has_value()) {
         return store(src, symbols[result.symbol_index.value()]);
       }
