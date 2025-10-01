@@ -1,0 +1,8 @@
+
+fn test() => int32 {
+    return 0;
+}
+
+fn main() => void {
+    const test: int32 = test();
+}

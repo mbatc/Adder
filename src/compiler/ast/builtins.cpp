@@ -10,7 +10,7 @@ namespace adder {
         auto & arg  = program->symbols[program->symbols.size() - 1];
         std::optional<size_t> selfType = program->unwrap_type(self.type_index);
 
-        if (!(program->is_integer(selfType.value())
+        if (!(program->is_integer(selfType)
           && program->is_integer(arg.type_index)))
           return false;
 
@@ -47,7 +47,7 @@ namespace adder {
       }
     }
 
-    size_t init_i64(ast* tree, size_t refType, std::string_view const & argType) {
+    size_t init_int(ast* tree, size_t refType, std::string_view const & argType) {
       expr::variable_declaration arg0;
       arg0.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
       arg0.name = "self";
@@ -129,11 +129,10 @@ namespace adder {
       scope->statements.insert(
         scope->statements.end(),
         {
-          init_i64(tree, refType, "int64"),
-          init_i64(tree, refType, "int32"),
-          init_i64(tree, refType, "int16"),
-          init_i64(tree, refType, "int8"),
-          
+          init_int(tree, refType, "int64"),
+          init_int(tree, refType, "int8"),
+          init_int(tree, refType, "int32"),
+          init_int(tree, refType, "int16"),
           add_int(tree, valueType)
         }
       );

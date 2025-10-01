@@ -266,12 +266,24 @@ namespace adder {
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::function_return const & statement, size_t statementId) {
+      unused(statementId);
+
       if (!statement.expression.has_value()) {
         return false;
       }
 
-      auto returnSymbol = program->lookup_identifier_symbol("$ret");
-      if (returnSymbol == nullptr) {
+      auto returnSymbol = program->lookup_identifier_symbol_index("$ret");
+      if (!returnSymbol.has_value()) {
+        return false;
+      }
+
+      if (!generate_code(ast, program, statement.expression.value())) {
+        return false;
+      }
+
+      program_builder::expression_result receiver;
+      receiver.symbol_index = returnSymbol.value();
+      if (!initialize_variable(ast, program, receiver, program->results.back())) {
         return false;
       }
 
@@ -311,7 +323,7 @@ namespace adder {
 
       program_builder::symbol symbol;
       symbol.flags      = statement.flags;
-      symbol.name       = symbolName.value();
+      symbol.name       = symbolName.value();;
       symbol.type_index = program->add_function_type(ast, statement, statementId);
 
       if (statement.body.has_value())
