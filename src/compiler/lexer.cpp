@@ -126,12 +126,10 @@ namespace adder {
       /// Parse until the next token is found.
       /// Currently parses out comments.
       bool token_parser::next() {
-        while (_next())
-        {
+        while (_next()) {
           while (current().id == token_id::open_block_comment || current().id == token_id::line_comment) {
             if (current().id == token_id::open_block_comment)
               parseBlockComment();
-          
             if (current().id == token_id::line_comment)
               parseLineComment();
           }

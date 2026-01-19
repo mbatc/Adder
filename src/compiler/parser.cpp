@@ -59,8 +59,7 @@ namespace adder {
         }
 
         std::optional<size_t> expression = consume_expression(tree, tokenizer);
-        tree->add(function_return{ expression });
-        return true;
+        return tree->add(function_return{ expression });
       }
 
       std::optional<size_t> consume_block(ast * tree, lexer::token_parser * tokenizer) {

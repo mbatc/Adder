@@ -115,9 +115,9 @@ namespace adder {
       return tree->add(decl);
     }
 
-    void declare_i32(ast* tree, expr::block *scope) {
+    void declare_integer(ast* tree, expr::block *scope, type_primitive primitive) {
       expr::type_name selfTypeName;
-      selfTypeName.name = "int32";
+      selfTypeName.name = get_primitive_type_name(primitive);
 
       expr::type_modifier selfType;
       selfType.reference = true;
@@ -129,17 +129,28 @@ namespace adder {
       scope->statements.insert(
         scope->statements.end(),
         {
-          init_int(tree, refType, "int64"),
-          init_int(tree, refType, "int8"),
-          init_int(tree, refType, "int32"),
-          init_int(tree, refType, "int16"),
+          init_int(tree, refType, get_primitive_type_name(type_primitive::int64)),
+          init_int(tree, refType, get_primitive_type_name(type_primitive::int32)),
+          init_int(tree, refType, get_primitive_type_name(type_primitive::int16)),
+          init_int(tree, refType, get_primitive_type_name(type_primitive::int8)),
+          init_int(tree, refType, get_primitive_type_name(type_primitive::uint64)),
+          init_int(tree, refType, get_primitive_type_name(type_primitive::uint32)),
+          init_int(tree, refType, get_primitive_type_name(type_primitive::uint16)),
+          init_int(tree, refType, get_primitive_type_name(type_primitive::uint8)),
           add_int(tree, valueType)
         }
       );
     }
 
     void define_builtins(ast* tree, expr::block *scope) {
-      declare_i32(tree, scope);
+      declare_integer(tree, scope, type_primitive::int64);
+      declare_integer(tree, scope, type_primitive::int32);
+      declare_integer(tree, scope, type_primitive::int16);
+      declare_integer(tree, scope, type_primitive::int8);
+      declare_integer(tree, scope, type_primitive::uint64);
+      declare_integer(tree, scope, type_primitive::uint32);
+      declare_integer(tree, scope, type_primitive::uint16);
+      declare_integer(tree, scope, type_primitive::uint8);
     }
   }
 }

@@ -6,3 +6,4 @@ fn test() => int32 {
 fn main() => void {
     const test: int32 = test();
 }
+

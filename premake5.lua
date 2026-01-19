@@ -34,6 +34,7 @@ files {
     "src/**.inl",
     "src/**.hpp",
     "src/**.cpp",
+    "tests/**.ad",
     "adder.natvis"
 }
 defines { "_CRT_SECURE_NO_WARNINGS" }
