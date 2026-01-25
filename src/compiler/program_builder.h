@@ -24,19 +24,20 @@ namespace adder {
 
     struct program_metadata {
       std::vector<type> types = {
-        { "void",    { type_primitive::void_ } },
-        { "int8",    { type_primitive::int8 } },
-        { "int16",   { type_primitive::int16 } },
-        { "int32",   { type_primitive::int32 } },
-        { "int64",   { type_primitive::int64 } },
-        { "uint8",   { type_primitive::int8 } },
-        { "uint16",  { type_primitive::uint16 } },
-        { "uint32",  { type_primitive::uint32 } },
-        { "uint64",  { type_primitive::uint64 } },
-        { "float32", { type_primitive::float32  }},
-        { "float64", { type_primitive::float64 } },
-        { "bool",    { type_primitive::bool_ } }
+        { (std::string)get_primitive_type_name(type_primitive::void_),   { type_primitive::void_ } },
+        { (std::string)get_primitive_type_name(type_primitive::int8),    { type_primitive::int8 } },
+        { (std::string)get_primitive_type_name(type_primitive::int16),   { type_primitive::int16 } },
+        { (std::string)get_primitive_type_name(type_primitive::int32),   { type_primitive::int32 } },
+        { (std::string)get_primitive_type_name(type_primitive::int64),   { type_primitive::int64 } },
+        { (std::string)get_primitive_type_name(type_primitive::uint8),   { type_primitive::uint8 } },
+        { (std::string)get_primitive_type_name(type_primitive::uint16),  { type_primitive::uint16 } },
+        { (std::string)get_primitive_type_name(type_primitive::uint32),  { type_primitive::uint32 } },
+        { (std::string)get_primitive_type_name(type_primitive::uint64),  { type_primitive::uint64 } },
+        { (std::string)get_primitive_type_name(type_primitive::float32), { type_primitive::float32  }},
+        { (std::string)get_primitive_type_name(type_primitive::float64), { type_primitive::float64 } },
+        { (std::string)get_primitive_type_name(type_primitive::bool_),   { type_primitive::bool_ } }
       };
+
 
       size_t get_type_index(std::string_view const & name) const;
       type const * get_type(std::string_view const & name) const;

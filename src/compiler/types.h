@@ -97,5 +97,7 @@ namespace adder {
     bool is_bool(type_primitive const& primitive);
     bool is_void(type_primitive const& primitive);
     bool is_float(type_primitive const& primitive);
+
+    std::string_view get_primitive_type_name(type_primitive const & primitive);
   }
 }
