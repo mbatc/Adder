@@ -22,8 +22,55 @@ namespace adder {
     std::optional<std::string> get_type_name(ast const & ast, size_t statement);
     std::optional<std::string> get_symbol_name(ast const & ast, size_t statement, std::string_view const & identifier);
 
+    struct program_metadata {
+      std::vector<type> types = {
+        { "void",    { type_primitive::void_ } },
+        { "int8",    { type_primitive::int8 } },
+        { "int16",   { type_primitive::int16 } },
+        { "int32",   { type_primitive::int32 } },
+        { "int64",   { type_primitive::int64 } },
+        { "uint8",   { type_primitive::int8 } },
+        { "uint16",  { type_primitive::uint16 } },
+        { "uint32",  { type_primitive::uint32 } },
+        { "uint64",  { type_primitive::uint64 } },
+        { "float32", { type_primitive::float32  }},
+        { "float64", { type_primitive::float64 } },
+        { "bool",    { type_primitive::bool_ } }
+      };
+
+      size_t get_type_index(std::string_view const & name) const;
+      type const * get_type(std::string_view const & name) const;
+
+      size_t get_type_index(ast const & tree, size_t statement) const;
+      type const * get_type(ast const & tree, size_t statement) const;
+
+      std::optional<size_t> unwrap_type(std::optional<size_t> const & type) const;
+      std::optional<size_t> return_type_of(std::optional<size_t> const & func) const;
+      bool is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const;
+      bool is_reference(std::optional<size_t> const & type) const;
+      bool is_const(std::optional<size_t> const & type) const;
+      bool is_function(std::optional<size_t> const & type) const;
+      bool is_integer(std::optional<size_t> const & type) const;
+      bool is_float(std::optional<size_t> const & type) const;
+      bool is_bool(std::optional<size_t> const & type) const;
+      bool is_void(std::optional<size_t> const & type) const;
+
+      size_t get_type_size(type_modifier const & desc) const;
+      size_t get_type_size(type_primitive const & desc) const;
+      size_t get_type_size(type_class const & desc) const;
+      size_t get_type_size(type_function const & desc) const;
+      size_t get_type_size(type_function_decl const & desc) const;
+      size_t get_type_size(type const & type) const;
+      size_t get_type_size(size_t const & typeIndex) const;
+
+      size_t add_type(type const & desc);
+      size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
+    };
+
     struct program_builder {
       program_builder();
+
+      program_metadata meta;
 
       struct Registers {
         std::vector<vm::register_index> free;
@@ -107,54 +154,12 @@ namespace adder {
       std::vector<relocation> relocations;
       std::vector<std::vector<relocation>> scratchRelocations;
 
-      std::vector<type> types = {
-        { "void",    { type_primitive::void_ } },
-        { "int8",    { type_primitive::int8 } },
-        { "int16",   { type_primitive::int16 } },
-        { "int32",   { type_primitive::int32 } },
-        { "int64",   { type_primitive::int64 } },
-        { "uint8",   { type_primitive::int8 } },
-        { "uint16",  { type_primitive::uint16 } },
-        { "uint32",  { type_primitive::uint32 } },
-        { "uint64",  { type_primitive::uint64 } },
-        { "float32", { type_primitive::float32  }},
-        { "float64", { type_primitive::float64 } },
-        { "bool",    { type_primitive::bool_ } }
-      };
-
-      size_t get_type_index(std::string_view const & name) const;
-      type const * get_type(std::string_view const & name) const;
-      
-      size_t get_type_index(ast const & tree, size_t statement) const;
-      type const * get_type(ast const & tree, size_t statement) const;
-
-      std::optional<size_t> unwrap_type(std::optional<size_t> const & type) const;
-      std::optional<size_t> return_type_of(std::optional<size_t> const & func) const;
-      bool is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const;
-      bool is_reference(std::optional<size_t> const & type) const;
-      bool is_const(std::optional<size_t> const & type) const;
-      bool is_function(std::optional<size_t> const & type) const;
-      bool is_integer(std::optional<size_t> const & type) const;
-      bool is_float(std::optional<size_t> const & type) const;
-      bool is_bool(std::optional<size_t> const & type) const;
-      bool is_void(std::optional<size_t> const & type) const;
-
-      size_t get_type_size(type_modifier const & desc) const;
-      size_t get_type_size(type_primitive const & desc) const;
-      size_t get_type_size(type_class const & desc) const;
-      size_t get_type_size(type_function const & desc) const;
-      size_t get_type_size(type_function_decl const & desc) const;
-      size_t get_type_size(type const & type) const;
-      size_t get_type_size(size_t const & typeIndex) const;
-
       std::optional<size_t> find_symbol_index(std::string_view const& identifier) const;
       symbol const * find_symbol(std::string_view const& identifier) const;
       std::optional<size_t> lookup_identifier_symbol_index(std::string_view const& identifier) const;
       symbol const * lookup_identifier_symbol(std::string_view const& identifier) const;
       std::optional<size_t> find_unnamed_initializer(size_t receiverTypeIndex, size_t initializerTypeIndex) const;
 
-      size_t add_type(type const & desc);
-      size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
       bool push_scope(bool newStackFrame);
       bool pop_scope();
       expression_result alloc_temporary_value(size_t typeIndex);
