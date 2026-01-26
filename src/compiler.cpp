@@ -33,7 +33,7 @@ namespace adder {
       program_builder::expression_result result;
       result.constant.emplace(0);
       std::memcpy(&result.constant.value(), &value, sizeof(value));
-      result.type_index = program->get_type_index("bool");
+      result.type_index = program->meta.get_type_index("bool");
       program->push_expression_result(result);
       return true;
     }
@@ -44,7 +44,7 @@ namespace adder {
       program_builder::expression_result result;
       result.constant.emplace(0);
       std::memcpy(&result.constant.value(), &value, sizeof(value));
-      result.type_index = program->get_type_index("int64");
+      result.type_index = program->meta.get_type_index("int64");
       program->push_expression_result(result);
       return true;
     }
@@ -55,7 +55,7 @@ namespace adder {
       program_builder::expression_result result;
       result.constant.emplace(0);
       std::memcpy(&result.constant.value(), &value, sizeof(value));
-      result.type_index = program->get_type_index("float64");
+      result.type_index = program->meta.get_type_index("float64");
       program->push_expression_result(result);
       return true;
     }
@@ -67,7 +67,7 @@ namespace adder {
       // result.constant.emplace(0);
       // result.symbol = program->push_data_symbol(value.data(), value.length());
       // std::memcpy(&result.constant.value(), &value, sizeof(value));
-      result.type_index = program->get_type_index("char[]");
+      result.type_index = program->meta.get_type_index("char[]");
       program->push_expression_result(result);
       return true;
     }
@@ -132,7 +132,7 @@ namespace adder {
       if (!receiver.type_index.has_value())
         receiver.type_index = program->symbols[receiver.symbol_index.value()].type_index;
       
-      if (program->is_reference_of(receiver.type_index.value(), initializer.type_index.value())) {
+      if (program->meta.is_reference_of(receiver.type_index.value(), initializer.type_index.value())) {
         // Explicitly init references to types.
         auto addr = program->pin_address_of(initializer);
         program->store(addr, receiver);
@@ -150,7 +150,7 @@ namespace adder {
 
       size_t start = program->results.size();
       size_t funcType = program->symbols[unnamedInit.symbol_index.value()].type_index;
-      auto returnType = program->return_type_of(funcType);
+      auto returnType = program->meta.return_type_of(funcType);
       if (!returnType.has_value()) {
         // TODO: Push error. Not a callable type. Has no return type.
         return false;
@@ -187,7 +187,7 @@ namespace adder {
         type = initializer->type_index;
       }
 
-      const size_t variableType = program->get_type_index(ast, statement.type.value());
+      const size_t variableType = program->meta.get_type_index(ast, statement.type.value());
       program->push_variable(statement.name, variableType, statement.flags);
 
       program_builder::expression_result receiver = {
@@ -324,11 +324,11 @@ namespace adder {
       program_builder::symbol symbol;
       symbol.flags      = statement.flags;
       symbol.name       = symbolName.value();;
-      symbol.type_index = program->add_function_type(ast, statement, statementId);
+      symbol.type_index = program->meta.add_function_type(ast, statement, statementId);
 
       if (statement.body.has_value())
       {
-        size_t returnType = program->return_type_of(symbol.type_index).value();
+        size_t returnType = program->meta.return_type_of(symbol.type_index).value();
 
         program->push_symbol_prefix(symbol.name);
         program->scopes.emplace_back();
@@ -337,7 +337,7 @@ namespace adder {
         program->push_return_value_alias("$ret", returnType, symbol_flags::none);
         for (auto argId : statement.arguments) {
           auto & arg = ast.get<expr::variable_declaration>(argId);
-          program->push_fn_parameter(arg.name, program->get_type_index(ast, arg.type.value()), arg.flags);
+          program->push_fn_parameter(arg.name, program->meta.get_type_index(ast, arg.type.value()), arg.flags);
         }
 
         symbol.function.emplace();
@@ -444,7 +444,7 @@ namespace adder {
 
       // Push parameters to the stack
       auto & callable  = program->symbols[function.symbol_index.value()];
-      auto & symbolType = program->types[callable.type_index];
+      auto & symbolType = program->meta.types[callable.type_index];
 
       // Pointer to the actual function definition.
       // Allows us to inline the call if possible
@@ -463,7 +463,7 @@ namespace adder {
         return false;
       }
       if (signature == nullptr && func != nullptr) {
-        auto & funcType = program->types[func->type];
+        auto & funcType = program->meta.types[func->type];
         if (!std::holds_alternative<type_function>(funcType.desc)) {
           // Push error: Function declaration does not have a valid type.
           return false;
@@ -584,65 +584,190 @@ namespace adder {
       return result;
     }
 
-    bool evaluate_type_name(ast const & ast, program_builder * program, size_t statementId) {
+    bool evaluate_type_name(ast const & ast, program_metadata * meta, size_t statementId) {
       if (ast.is<expr::type_modifier>(statementId)) {
         expr::type_modifier const & modifier = ast.get<expr::type_modifier>(statementId);
-        evaluate_type_name(ast, program, modifier.modified);
+        evaluate_type_name(ast, meta, modifier.modified);
 
         type_modifier mod;
-        mod.base = program->get_type_index(ast, modifier.modified);
+        mod.base = meta->get_type_index(ast, modifier.modified);
         mod.const_ = modifier.const_;
         mod.reference = modifier.reference;
 
         type t;
         t.desc = mod;
         t.identifier = get_type_name(ast, statementId).value();
-        program->add_type(t);
+        meta->add_type(t);
       }
 
       if (ast.is<expr::type_fn>(statementId)) {
         expr::type_fn const & fn = ast.get<expr::type_fn>(statementId);
         type_function desc;
-        if (!evaluate_type_name(ast, program, fn.return_type)) {
+        if (!evaluate_type_name(ast, meta, fn.return_type)) {
           return false;
         }
 
-        desc.return_type = program->get_type_index(ast, fn.return_type);
+        desc.return_type = meta->get_type_index(ast, fn.return_type);
         for (auto const & arg : fn.argument_list) {
-          if (!evaluate_type_name(ast, program, arg)) {
+          if (!evaluate_type_name(ast, meta, arg)) {
             return false;
           }
-          desc.arguments.push_back(program->get_type_index(ast, arg));
+          desc.arguments.push_back(meta->get_type_index(ast, arg));
         }
 
         type t;
         t.desc = desc;
         t.identifier = get_type_name(ast, statementId).value();
-        program->add_type(t);
+        meta->add_type(t);
       }
 
       return true;
     }
 
-    bool evaluate_type_names(ast const & ast, program_builder * program) {
+    bool evaluate_type_names(ast const & ast, program_metadata * meta) {
       for (size_t i = 0; i < ast.statements.size(); ++i) {
-        evaluate_type_name(ast, program, i);
+        evaluate_type_name(ast, meta, i);
       }
       return true;
     }
 
-    bool evaluate_types(ast const & ast, program_builder * program) {
+    bool evaluate_types(ast const & ast, program_metadata * meta) {
       // TODO: Add user type definitions
       // for (size_t i = 0; i < ast.statements.size(); ++i) {
       // }
 
-      return evaluate_type_names(ast, program);
+      return evaluate_type_names(ast, meta);
+    }
+    
+        // literal,
+        // identifier,
+        // list,
+        // type_fn,
+        // type_name,
+        // type_modifier,
+        // variable_declaration,
+        // init,
+        // function_return,
+        // binary_operator,
+        // block,
+        // byte_code,
+        // function_declaration,
+        // call_parameter,
+        // call,
+        // class_decl,
+        // conversion
+
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, ...) {
+      adder::unused(ast, info);
+      return true;
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::literal const & op) {
+
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::identifier const & op) {
+
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::call const & list) {
+
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::type_fn const & fn) {
+
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::type_name const & name) {
+
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::type_modifier const & modifier) {
+
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::variable_declaration const & decl) {
+
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::init const & init) {
+
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::function_return const & ret) {
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata::statement_meta * info, expr::binary_operator const & op) {
+
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata * meta, size_t id) {
+      return std::visit(
+        [&](auto&& s) {
+          return evaluate_statement_info(ast, &meta->statement_info[id], s);
+        },
+        ast.statements[id]
+      );
+    }
+
+    bool evaluate_statement_info(ast const& ast, program_metadata * meta) {
+      meta->statement_info.clear();
+      meta->statement_info.resize(ast.statements.size(), {});
+
+      for (size_t i = 0; i < ast.statements.size(); ++i) {
+        evaluate_statement_info(ast, meta, i);
+      }
+    }
+
+    bool evaluate_statement_symbols(ast const& ast, program_metadata* meta, size_t scopeId, ...) {
+
+    }
+
+    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t scopeId, expr::variable_declaration const & decl) {
+      program_metadata::symbol symbol;
+      symbol.full_identifier = ;
+      symbol.name = decl.name;
+      if (decl.type.has_value()) {
+        symbol.type = meta->get_type_index(ast, decl.type.value());
+      }
+      else if (decl.initializer.has_value()) {
+        symbol.type = meta->get_type_index(ast, decl.type.value());
+      }
+      else {
+        // TODO: Error. Unable to infer type. No initializer statement.
+      }
+      meta->symbols.push_back(symbol);
+
+      meta->scopes[scopeId];
+    }
+
+    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t scopeId, expr::block const & block) {
+      meta->scopes.push_back();
+    }
+
+    bool evaluate_symbols(ast const & ast, program_metadata * meta, size_t id, size_t scopeId) {
+      return std::visit(
+        [&](auto&& s) {
+          return evaluate_statement_symbols(ast, meta, scopeId, s);
+        },
+        ast.statements[id]
+      );
+      ast.statements[id];
+    }
+
+    bool evaluate_symbols(ast const & ast, program_metadata * meta) {
+      meta->symbols.clear();
+
+      evaluate_symbols(ast, meta, ast.statements.size() - 1);
     }
 
     program generate_code(ast const & ast) {
       program_builder ret;
 
-      evaluate_types(ast, &ret);
+      evaluate_types(ast, &ret.meta);
+      evaluate_symbols(ast, &ret.meta);
+      evaluate_statement_info(ast, &ret.meta);
 
       // TODO: First parse: Add top level symbols
 

@@ -38,6 +38,25 @@ namespace adder {
         { (std::string)get_primitive_type_name(type_primitive::bool_),   { type_primitive::bool_ } }
       };
 
+      struct statement_meta {
+        size_t scope_size;
+        size_t temporary_storage_size;
+        size_t return_type;
+      };
+      std::vector<statement_meta> statement_info;
+
+      struct symbol {
+        std::string name;
+        std::string full_identifier;
+        size_t      type;
+      };
+      std::vector<symbol> symbols;
+
+      struct scope {
+        std::vector<size_t> symbols;
+        size_t parent;
+      };
+      std::vector<scope> scopes;
 
       size_t get_type_index(std::string_view const & name) const;
       type const * get_type(std::string_view const & name) const;
@@ -47,6 +66,7 @@ namespace adder {
 
       std::optional<size_t> unwrap_type(std::optional<size_t> const & type) const;
       std::optional<size_t> return_type_of(std::optional<size_t> const & func) const;
+
       bool is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const;
       bool is_reference(std::optional<size_t> const & type) const;
       bool is_const(std::optional<size_t> const & type) const;
