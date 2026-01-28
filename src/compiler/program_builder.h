@@ -5,6 +5,8 @@
 #include "ast/builtins.h"
 #include "../containers/pool.h"
 
+#include <functional>
+
 namespace adder {
   struct program;
 
@@ -21,8 +23,11 @@ namespace adder {
 
     std::optional<std::string> get_type_name(ast const & ast, size_t statement);
     std::optional<std::string> get_symbol_name(ast const & ast, size_t statement, std::string_view const & identifier);
+    std::string get_symbol_name(std::string_view const & typeName, std::string_view const & identifier);
 
     struct program_metadata {
+      size_t static_storage_size = 0;
+
       std::vector<type> types = {
         { (std::string)get_primitive_type_name(type_primitive::void_),   { type_primitive::void_ } },
         { (std::string)get_primitive_type_name(type_primitive::int8),    { type_primitive::int8 } },
@@ -39,24 +44,39 @@ namespace adder {
       };
 
       struct statement_meta {
+        size_t scope_id;
         size_t scope_size;
         size_t temporary_storage_size;
-        size_t return_type;
       };
       std::vector<statement_meta> statement_info;
 
       struct symbol {
         std::string name;
         std::string full_identifier;
-        size_t      type;
+        size_t      type        = 0;
+
+        /// Flags for the symbol
+        symbol_flags flags = symbol_flags::none;
+
+        /// Address (static/global)
+        ///   * Stack frame offset for local variables
+        ///   * Static address for static/global
+        ///   * Ignored for extern
+        int64_t address = 0;
       };
       std::vector<symbol> symbols;
 
       struct scope {
-        std::vector<size_t> symbols;
-        size_t parent;
+        std::string           prefix;
+        std::vector<size_t>   symbols;
+        std::optional<size_t> parent;
+
+        size_t symbolsSize = 0;
       };
       std::vector<scope> scopes;
+
+      size_t add_type(type const & desc);
+      size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
 
       size_t get_type_index(std::string_view const & name) const;
       type const * get_type(std::string_view const & name) const;
@@ -64,17 +84,21 @@ namespace adder {
       size_t get_type_index(ast const & tree, size_t statement) const;
       type const * get_type(ast const & tree, size_t statement) const;
 
-      std::optional<size_t> unwrap_type(std::optional<size_t> const & type) const;
+      std::optional<size_t> unwrap_type   (std::optional<size_t> const & type) const;
+      std::optional<size_t> decay_type    (std::optional<size_t> const & type) const;
       std::optional<size_t> return_type_of(std::optional<size_t> const & func) const;
 
       bool is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const;
       bool is_reference(std::optional<size_t> const & type) const;
       bool is_const(std::optional<size_t> const & type) const;
+      bool is_function_decl(std::optional<size_t> const& type) const;
       bool is_function(std::optional<size_t> const & type) const;
       bool is_integer(std::optional<size_t> const & type) const;
       bool is_float(std::optional<size_t> const & type) const;
       bool is_bool(std::optional<size_t> const & type) const;
       bool is_void(std::optional<size_t> const & type) const;
+
+      bool is_valid_function_overload(std::optional<size_t> const & a, std::optional<size_t> const & b) const;
 
       size_t get_type_size(type_modifier const & desc) const;
       size_t get_type_size(type_primitive const & desc) const;
@@ -84,8 +108,12 @@ namespace adder {
       size_t get_type_size(type const & type) const;
       size_t get_type_size(size_t const & typeIndex) const;
 
-      size_t add_type(type const & desc);
-      size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
+
+      std::optional<size_t> add_symbol(size_t scopeId, symbol const & s);
+      std::optional<size_t> search_for_symbol_index(size_t scopeId, std::string_view const & identifier) const;
+      std::optional<size_t> search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const;
+
+      std::optional<size_t> get_parent_scope(size_t const & scopeId) const;
     };
 
     struct program_builder {

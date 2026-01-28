@@ -93,17 +93,8 @@ namespace adder {
       };
 
       struct block {
-        // Index of the parent block scope.
-        // Allows us to walk up the tree.
-        std::optional<size_t> parent_scope;
         // Name of this scope. Used to augment local public symbol names
         std::string scope_name = "";
-        // Types that have been parsed
-        std::map<std::string, type> types;
-        // Symbols in the current scope
-        // std::vector<symbol_desc> symbols;
-        // Function bodies
-        std::map<std::string, size_t> functions;
         // Statements in this scope in sequential order.
         // TODO: If we restrict the ast datastructure a bit, perhaps this can be a body start index + count for less allocations.
         std::vector<size_t> statements;

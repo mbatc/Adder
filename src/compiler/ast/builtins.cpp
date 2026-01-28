@@ -8,16 +8,16 @@ namespace adder {
       bool int_init_int(program_builder* program) {
         auto & self = program->symbols[program->symbols.size() - 2];
         auto & arg  = program->symbols[program->symbols.size() - 1];
-        std::optional<size_t> selfType = program->unwrap_type(self.type_index);
+        std::optional<size_t> selfType = program->meta.unwrap_type(self.type_index);
 
-        if (!(program->is_integer(selfType)
-          && program->is_integer(arg.type_index)))
+        if (!(program->meta.is_integer(selfType)
+          && program->meta.is_integer(arg.type_index)))
           return false;
 
         vm::register_index addr  = program->pin_symbol(self);
         vm::register_index value = program->pin_symbol(arg);
 
-        program->store(value, addr, (uint8_t)program->get_type_size(selfType.value())); // Indirect store into address stored in `addr`
+        program->store(value, addr, (uint8_t)program->meta.get_type_size(selfType.value())); // Indirect store into address stored in `addr`
         program->release_register(value);
         program->release_register(addr);
         return true;
@@ -26,8 +26,8 @@ namespace adder {
       bool add_int_int(program_builder* program) {
         auto& self = program->symbols[program->symbols.size() - 2];
         auto& arg = program->symbols[program->symbols.size() - 1];
-        std::optional<size_t> selfType = program->unwrap_type(self.type_index);
-        size_t typeSize = (uint8_t)program->get_type_size(selfType.value());
+        std::optional<size_t> selfType = program->meta.unwrap_type(self.type_index);
+        size_t typeSize = (uint8_t)program->meta.get_type_size(selfType.value());
         if (!selfType.has_value()) {
           return false;
         }

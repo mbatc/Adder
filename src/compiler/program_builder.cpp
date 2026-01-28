@@ -33,6 +33,25 @@ namespace adder {
         return std::nullopt;
     }
 
+    std::optional<size_t> program_metadata::decay_type(std::optional<size_t> const & type) const {
+      if (!type.has_value())
+        return std::nullopt;
+
+      const auto& desc = types[type.value()].desc;
+      if (std::holds_alternative<type_modifier>(desc)) {
+        const auto &modifier = std::get<type_modifier>(desc);
+        if (modifier.const_) {
+          return decay_type(modifier.base);
+        }
+      }
+      else if (std::holds_alternative<type_function_decl>(desc)) {
+        const auto &decl = std::get<type_function_decl>(desc);
+        return decl.type;
+      }
+
+      return type;
+    }
+
     std::optional<size_t> program_metadata::return_type_of(std::optional<size_t> const& func) const {
       if (!func.has_value())
         return std::nullopt;
@@ -63,6 +82,10 @@ namespace adder {
       return type.has_value()
         && std::holds_alternative<type_modifier>(types[*type].desc)
         && std::get<type_modifier>(types[*type].desc).reference;
+    }
+
+    bool program_metadata::is_function_decl(std::optional<size_t> const& type) const {
+      return type.has_value() && std::holds_alternative<type_function_decl>(types[*type].desc);
     }
 
     bool program_metadata::is_function(std::optional<size_t> const& type) const {
@@ -100,6 +123,24 @@ namespace adder {
       return type.has_value()
         && std::holds_alternative<type_primitive>(types[*type].desc)
         && compiler::is_void(std::get<type_primitive>(types[*type].desc));
+    }
+
+    bool program_metadata::is_valid_function_overload(std::optional<size_t> const & a, std::optional<size_t> const & b) const {
+      if (!a.has_value() || !b.has_value()) {
+        return false;
+      }
+
+      if (!is_function(a) || !is_function(b)) {
+        return false;
+      }
+
+      auto decayedA = decay_type(a);
+      auto decayedB = decay_type(b);
+      if (!decayedA.has_value() || !decayedB.has_value()) {
+        return false;
+      }
+
+      return std::get<type_function>(types[decayedA.value()].desc).arguments != std::get<type_function>(types[decayedB.value()].desc).arguments;
     }
 
     size_t program_metadata::get_type_size(type_modifier const & desc) const {
@@ -170,6 +211,58 @@ namespace adder {
       t.desc = fn;
 
       return add_type(t);
+    }
+
+    std::optional<size_t> program_metadata::add_symbol(size_t scopeId, symbol const & s) {
+      if (scopeId >= scopes.size())
+        return std::nullopt;
+
+      for (const size_t existingId : scopes[scopeId].symbols) {
+        const auto& existing = symbols[existingId];
+        if (existing.name != s.name) {
+          continue;
+        }
+
+        if (existing.type == s.type) {
+          return std::nullopt; // Duplicate symbol
+        }
+
+        // TODO: Test if s.type can overload the existing symbol
+        if (!is_valid_function_overload(existing.type, s.type)) {
+          return std::nullopt;
+        }
+      }
+
+      const size_t symbolIndex = symbols.size();
+      symbols.push_back(s);
+      scopes[scopeId].symbols.push_back(symbolIndex);
+
+      return symbolIndex;
+    }
+
+    std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::string_view const & identifier) const {
+      return search_for_symbol_index(scopeId, [&identifier](symbol const& s) {
+        return s.name == identifier;
+      });
+    }
+
+    std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const {
+      auto found = std::find_if(scopes[scopeId].symbols.rbegin(), scopes[scopeId].symbols.rend(), [&](int64_t idx) { return pred(symbols[idx]); });
+      if (found != scopes[scopeId].symbols.rend()) {
+        return *found;
+      }
+
+      if (!scopes[scopeId].parent.has_value())
+        return std::nullopt;
+
+      return search_for_symbol_index(scopes[scopeId].parent.value(), pred);
+    }
+
+    std::optional<size_t> program_metadata::get_parent_scope(size_t const & scopeId) const {
+      if (scopeId < scopes.size())
+        return scopes[scopeId].parent;
+      else
+        return std::nullopt;
     }
 
     program_builder::program_builder() {
@@ -1087,9 +1180,14 @@ namespace adder {
       if (!typeName.has_value())
         return std::nullopt;
 
+      return get_symbol_name(typeName.value(), identifier);
+    }
+
+    std::string get_symbol_name(std::string_view const & typeName, std::string_view const & identifier) {
       return (std::string)adder::format(
-        "%s:%.*s",
-        typeName->c_str(),
+        "%.*s:%.*s",
+        typeName.length(),
+        typeName.data(),
         identifier.length(),
         identifier.data()
       );
