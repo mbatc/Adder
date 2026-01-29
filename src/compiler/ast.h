@@ -12,7 +12,7 @@ namespace adder {
 
       template<typename T>
       std::optional<size_t> id_of(T const * statement) const {
-        int64_t estimate = (uint8_t*)statement - (uint8_t*)statements.data();
+        int64_t estimate = (expr::statement*)statement - statements.data();
         if (estimate < 0 || estimate >= (int64_t)statements.size())
           return std::nullopt;
 

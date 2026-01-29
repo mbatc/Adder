@@ -43,10 +43,11 @@ namespace adder {
         { (std::string)get_primitive_type_name(type_primitive::bool_),   { type_primitive::bool_ } }
       };
 
+      /// Additional metadata for each statement.
+      /// TODO: Undecided if this should just be stored in the AST.
       struct statement_meta {
         size_t scope_id;
-        size_t scope_size;
-        size_t temporary_storage_size;
+        std::optional<size_t> type_id;
       };
       std::vector<statement_meta> statement_info;
 
@@ -78,10 +79,10 @@ namespace adder {
       size_t add_type(type const & desc);
       size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
 
-      size_t get_type_index(std::string_view const & name) const;
+      std::optional<size_t> get_type_index(std::string_view const & name) const;
       type const * get_type(std::string_view const & name) const;
 
-      size_t get_type_index(ast const & tree, size_t statement) const;
+      std::optional<size_t> get_type_index(ast const & tree, size_t statement) const;
       type const * get_type(ast const & tree, size_t statement) const;
 
       std::optional<size_t> unwrap_type   (std::optional<size_t> const & type) const;

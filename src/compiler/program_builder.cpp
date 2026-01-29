@@ -4,25 +4,29 @@
 
 namespace adder {
   namespace compiler {
-    size_t program_metadata::get_type_index(std::string_view const& name) const {
-      auto it = std::find_if(types.begin(), types.end(), [&](type const& t) { return t.identifier == name; });
+    std::optional<size_t> program_metadata::get_type_index(std::string_view const& name) const {
+      const auto it = std::find_if(types.begin(), types.end(), [&](type const& t) { return t.identifier == name; });
+
+      if (it == types.end())
+        return std::nullopt;
+
       return it - types.begin();
     }
 
     type const * program_metadata::get_type(std::string_view const& name) const {
-      auto it = std::find_if(types.begin(), types.end(), [&](type const& t) { return t.identifier == name; });
+      const auto it = std::find_if(types.begin(), types.end(), [&](type const& t) { return t.identifier == name; });
       if (it == types.end())
         return nullptr;
       return &(*it);
     }
 
-    size_t program_metadata::get_type_index(ast const & tree, size_t type) const {
-      auto name = get_type_name(tree, type);
-      return name.has_value() ? get_type_index(name.value()) : 0;
+    std::optional<size_t> program_metadata::get_type_index(ast const & tree, size_t type) const {
+      const auto name = get_type_name(tree, type);
+      return name.has_value() ? get_type_index(name.value()) : std::nullopt;
     }
 
     type const * program_metadata::get_type(ast const & tree, size_t type) const {
-      auto name = get_type_name(tree, type);
+      const auto name = get_type_name(tree, type);
       return name.has_value() ? get_type(name.value()) : nullptr;
     }
 
@@ -188,8 +192,10 @@ namespace adder {
     }
 
     size_t program_metadata::add_type(type const & desc) {
-      if (get_type(desc.identifier) != nullptr)
-        return false;
+      const auto existing = get_type_index(desc.identifier);
+      if (existing.has_value())
+        return existing.value();
+
       types.push_back(desc);
       return types.size() - 1;
     }
@@ -198,7 +204,7 @@ namespace adder {
       type_function_decl fn;
       fn.allowInline;
       fn.function_id = id.value();
-      fn.type = get_type_index(tree, decl.type.value());
+      fn.type = get_type_index(tree, decl.type.value()).value_or(0);
 
       if (fn.type == 0) {
         // TODO: Log error. Invalid funciton type.
@@ -646,7 +652,8 @@ namespace adder {
     }
 
     bool program_builder::push_variable(std::string_view const& identifier, std::string_view const & typeName, symbol_flags const & flags) {
-      return push_variable(identifier, meta.get_type_index(typeName), flags);
+      auto typeIndex = meta.get_type_index(typeName);
+      return typeIndex.has_value() && push_variable(identifier, typeIndex.value(), flags);
     }
 
     bool program_builder::push_identifier(std::string_view const & name, symbol const & symbol) {

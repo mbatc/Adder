@@ -16,6 +16,7 @@ namespace adder {
       fn_parameter = 1 << 2, ///< This variable is a function parameter
       static_      = 1 << 3, ///< This symbol has static storage
       inline_      = 1 << 5, ///< This symbol can be inlined where possible
+      function     = 1 << 6, ///< This symbol is a function definition
     };
   }
 

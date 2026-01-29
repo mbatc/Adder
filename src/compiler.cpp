@@ -187,7 +187,7 @@ namespace adder {
         type = initializer->type_index;
       }
 
-      const size_t variableType = program->meta.get_type_index(ast, statement.type.value());
+      const size_t variableType = program->meta.get_type_index(ast, statement.type.value()).value();
       program->push_variable(statement.name, variableType, statement.flags);
 
       program_builder::expression_result receiver = {
@@ -337,7 +337,7 @@ namespace adder {
         program->push_return_value_alias("$ret", returnType, symbol_flags::none);
         for (auto argId : statement.arguments) {
           auto & arg = ast.get<expr::variable_declaration>(argId);
-          program->push_fn_parameter(arg.name, program->meta.get_type_index(ast, arg.type.value()), arg.flags);
+          program->push_fn_parameter(arg.name, program->meta.get_type_index(ast, arg.type.value()).value(), arg.flags);
         }
 
         symbol.function.emplace();
@@ -584,51 +584,94 @@ namespace adder {
       return result;
     }
 
-    bool evaluate_type_name(ast const & ast, program_metadata * meta, size_t statementId) {
+    /// Evaluate the type index of a ast statement that refers to a type
+    std::optional<size_t> evaluate_type_index(ast const & ast, program_metadata * meta, size_t statementId) {
+      std::optional<size_t> ret;
+      auto& typeId = meta->statement_info[statementId].type_id;
+      if (typeId.has_value()) {
+        return typeId;
+      }
+
       if (ast.is<expr::type_modifier>(statementId)) {
         expr::type_modifier const & modifier = ast.get<expr::type_modifier>(statementId);
-        evaluate_type_name(ast, meta, modifier.modified);
-
+        auto modified = evaluate_type_index(ast, meta, modifier.modified);
+        if (!modified.has_value()) {
+          return std::nullopt;
+        }
         type_modifier mod;
-        mod.base = meta->get_type_index(ast, modifier.modified);
+        mod.base = modified.value();
         mod.const_ = modifier.const_;
         mod.reference = modifier.reference;
 
         type t;
         t.desc = mod;
         t.identifier = get_type_name(ast, statementId).value();
-        meta->add_type(t);
+        typeId = meta->add_type(t);
       }
+
+      // if (ast.is<expr::function_declaration>(statementId)) {
+      //   expr::function_declaration const & decl = ast.get<expr::function_declaration>(statementId);
+      // 
+      //   type_function_decl fn;
+      //   fn.allowInline;
+      //   fn.function_id = statementId;
+      //   fn.type = evaluate_type_index(ast, meta, decl.type.value()).value_or(0);
+      // 
+      //   if (fn.type == 0) {
+      //     // TODO: Log error. Invalid funciton type.
+      //     return std::nullopt;
+      //   }
+      // 
+      //   type t;
+      //   t.identifier = decl.identifier.empty() ? adder::format("__unnamed_fn_%lld", statementId) : decl.identifier;
+      //   t.identifier = adder::format("%s:%s", t.identifier.c_str(), meta->types[fn.type].identifier.c_str());
+      //   t.desc = fn;
+      // 
+      //   typeId = meta->add_type(t);
+      // }
 
       if (ast.is<expr::type_fn>(statementId)) {
         expr::type_fn const & fn = ast.get<expr::type_fn>(statementId);
 
-        if (!evaluate_type_name(ast, meta, fn.return_type)) {
-          return false;
+        auto returnType = evaluate_type_index(ast, meta, fn.return_type);
+        if (!returnType.has_value()) {
+          return std::nullopt;
         }
 
         type_function desc;
-        desc.return_type = meta->get_type_index(ast, fn.return_type);
+        desc.return_type = returnType.value();
         for (auto const & arg : fn.argument_list) {
-          if (!evaluate_type_name(ast, meta, arg)) {
-            return false;
+          auto argType = evaluate_type_index(ast, meta, arg);
+          if (!argType.has_value()) {
+            // TODO: Push error. Unable to evaluate argument type at index
+            return std::nullopt;
           }
-          desc.arguments.push_back(meta->get_type_index(ast, arg));
+          desc.arguments.push_back(argType.value());
         }
         desc.func_type = fn.func_type;
 
         type t;
         t.desc = desc;
         t.identifier = get_type_name(ast, statementId).value();
-        meta->add_type(t);
+
+        typeId = meta->add_type(t);
       }
 
-      return true;
+      if (ast.is<expr::class_decl>(statementId)) {
+        // Parse class definition
+
+      }
+
+      if (!typeId.has_value()) {
+        typeId = meta->get_type_index(ast, statementId);
+      }
+
+      return typeId;
     }
 
     bool evaluate_type_names(ast const & ast, program_metadata * meta) {
       for (size_t i = 0; i < ast.statements.size(); ++i) {
-        evaluate_type_name(ast, meta, i);
+        evaluate_type_index(ast, meta, i);
       }
       return true;
     }
@@ -640,7 +683,7 @@ namespace adder {
     template<typename T>
     size_t evaluate_statement_return_type(ast const & ast, program_metadata const * meta, T const & other) {
       unused(ast, other);
-      return meta->get_type_index(get_primitive_type_name(type_primitive::void_));
+      return meta->get_type_index(get_primitive_type_name(type_primitive::void_)).value();
     }
 
     size_t evaluate_statement_return_type(ast const & ast, program_metadata const * meta, size_t statement) {
@@ -676,19 +719,27 @@ namespace adder {
     bool evaluate_statement_symbols(ast const& ast, program_metadata* meta, size_t scopeId, expr::function_declaration const & decl) {
       program_metadata::symbol symbol;
       symbol.name = decl.identifier;
+      symbol.flags = symbol_flags::function;
 
       if (decl.type.has_value()) {
-        symbol.type = meta->get_type_index(ast, decl.type.value());
+        const auto typeIndex = evaluate_type_index(ast, meta, decl.type.value());
+        if (!typeIndex.has_value()) {
+          // TODO: Error. Expected a type name
+          return false;
+        }
+        symbol.type = typeIndex.value(); // typeIndex.value();
       }
       else {
         // TODO: Function type is unknown
         return false;
       }
 
+      const std::string name = std::string(decl.identifier.empty() ? adder::format("__unnamed_fn_%lld", ast.id_of(&decl).value()) : decl.identifier);
+      symbol.full_identifier = name;
       symbol.full_identifier = adder::format(
         "%s%s",
         meta->scopes[scopeId].prefix.c_str(),
-        get_symbol_name(meta->types[symbol.type].identifier, symbol.name).c_str());
+        get_symbol_name(meta->types[symbol.type].identifier, name).c_str());
 
       if (!meta->add_symbol(scopeId, symbol)) {
         // TODO: Throw error. Probably need to get the failure reason from add_symbol.
@@ -725,7 +776,12 @@ namespace adder {
       program_metadata::symbol symbol;
       symbol.name = decl.name;
       if (decl.type.has_value()) {
-        symbol.type = meta->get_type_index(ast, decl.type.value());
+        const auto typeIndex = evaluate_type_index(ast, meta, decl.type.value());
+        if (!typeIndex.has_value()) {
+          // TODO: Error. Expected a type name
+          return false;
+        }
+        symbol.type = typeIndex.value();
       }
       else if (decl.initializer.has_value()) {
         symbol.type = evaluate_statement_return_type(ast, meta, decl.initializer.value());
@@ -755,6 +811,8 @@ namespace adder {
     }
 
     bool evaluate_symbols(ast const & ast, program_metadata * meta, size_t id, size_t scopeId) {
+      meta->statement_info[id].scope_id = scopeId;
+
       return std::visit(
         [&](auto&& s) {
           return evaluate_statement_symbols(ast, meta, scopeId, s);
@@ -767,6 +825,9 @@ namespace adder {
       meta->symbols.clear();
       meta->scopes.clear();
       meta->scopes.emplace_back(); // Global scope.
+
+      meta->statement_info.clear();
+      meta->statement_info.resize(ast.statements.size());
 
       expr::block const & top = ast.get<expr::block>(ast.statements.size() - 1);
       for (size_t statementId : top.statements) {
@@ -785,13 +846,14 @@ namespace adder {
 
         for (const auto & index : scope.symbols) {
           auto & symbol = meta->symbols[index];
-          if (meta->is_function_decl(symbol.type)) {
+          const bool isParameter = (symbol.flags & symbol_flags::fn_parameter) != symbol_flags::none;
+          const bool isStatic    = (symbol.flags & symbol_flags::static_) != symbol_flags::none;
+          const bool isFunction  = (symbol.flags & symbol_flags::function) != symbol_flags::none;
+          if (isFunction) {
             continue; // Ignore function declarations for this phase.
           }
 
           const size_t sz = meta->get_type_size(symbol.type);
-          const bool isParameter = (symbol.flags & symbol_flags::fn_parameter) != symbol_flags::none;
-          const bool isStatic    = (symbol.flags & symbol_flags::static_) != symbol_flags::none;
           const bool isGlobal    = !scope.parent.has_value();
 
           if (isParameter) {
@@ -812,7 +874,9 @@ namespace adder {
     program generate_code(ast const & ast) {
       program_builder ret;
 
-      evaluate_types(ast, &ret.meta);
+      ret.meta.statement_info.resize(ast.statements.size());
+
+      // evaluate_types(ast, &ret.meta);
       evaluate_symbols(ast, &ret.meta);
       evaluate_variable_addresses(&ret.meta);
 
