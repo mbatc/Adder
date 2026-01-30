@@ -880,6 +880,8 @@ namespace adder {
       evaluate_symbols(ast, &ret.meta);
       evaluate_variable_addresses(&ret.meta);
 
+      generate_code();
+
       // generate_function_code(ast);
 
       // evaluate_function_addresses(&ret.meta);

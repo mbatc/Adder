@@ -128,6 +128,19 @@ namespace adder {
         vm->registers[args.dst].d64 = lhs + rhs;
       }
 
+      void sub_i64(machine * vm, op_code_binary_op_args const & args) {
+        const int64_t lhs = vm->registers[args.lhs].i64;
+        const int64_t rhs = vm->registers[args.rhs].i64;
+        vm->registers[args.dst].i64 = lhs - rhs;
+      }
+
+      void sub_f64(machine * vm, op_code_binary_op_args const & args) {
+        const double lhs = vm->registers[args.lhs].d64;
+        const double rhs = vm->registers[args.rhs].d64;
+        vm->registers[args.dst].d64 = lhs - rhs;
+      }
+
+
       void mul_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
@@ -259,6 +272,12 @@ namespace adder {
         break;
       case op_code::add_f64:
         op::add_f64(vm, inst.add);
+        break;
+      case op_code::sub_i64:
+        op::sub_i64(vm, inst.add);
+        break;
+      case op_code::sub_f64:
+        op::sub_f64(vm, inst.add);
         break;
       case op_code::mul_i64:
         op::mul_i64(vm, inst.add);

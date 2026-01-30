@@ -28,6 +28,8 @@ namespace adder {
       set,              ///< Set the value of a register
       add_i64,          ///< Add two registers as integers
       add_f64,          ///< Add two registers as floats
+      sub_i64,          ///< Add two registers as integers
+      sub_f64,          ///< Add two registers as floats
       mul_i64,          ///< Multiply two registers as integers
       mul_f64,          ///< Multiply two registers as floats
       div_i64,          ///< Set the value of a register as integers
@@ -106,6 +108,8 @@ namespace adder {
 
     template<> struct op_code_args<op_code::add_i64> : op_code_binary_op_args {};
     template<> struct op_code_args<op_code::add_f64> : op_code_binary_op_args {};
+    template<> struct op_code_args<op_code::sub_i64> : op_code_binary_op_args {};
+    template<> struct op_code_args<op_code::sub_f64> : op_code_binary_op_args {};
     template<> struct op_code_args<op_code::mul_i64> : op_code_binary_op_args {};
     template<> struct op_code_args<op_code::mul_f64> : op_code_binary_op_args {};
     template<> struct op_code_args<op_code::div_i64> : op_code_binary_op_args {};
@@ -187,6 +191,7 @@ namespace adder {
         op_code_args<op_code::store_addr> store_addr;
         op_code_args<op_code::set> set;
         op_code_binary_op_args add;
+        op_code_binary_op_args sub;
         op_code_binary_op_args mul;
         op_code_binary_op_args div;
         op_code_args<op_code::alloc_stack> alloc_stack;
@@ -360,6 +365,8 @@ namespace adder {
       case adder::vm::op_code::set: return "set";                           ///< Set the value of a register
       case adder::vm::op_code::add_i64: return "add_i64";                   ///< Add two registers as integers
       case adder::vm::op_code::add_f64: return "add_f64";                   ///< Add two registers as floats
+      case adder::vm::op_code::sub_i64: return "add_i64";                   ///< Subtract two registers as integers
+      case adder::vm::op_code::sub_f64: return "add_f64";                   ///< Subtract two registers as floats
       case adder::vm::op_code::mul_i64: return "mul_i64";                   ///< Multiply two registers as integers
       case adder::vm::op_code::mul_f64: return "mul_f64";                   ///< Multiply two registers as floats
       case adder::vm::op_code::div_i64: return "div_i64";                   ///< Set the value of a register as integers

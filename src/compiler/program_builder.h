@@ -64,6 +64,11 @@ namespace adder {
         ///   * Static address for static/global
         ///   * Ignored for extern
         int64_t address = 0;
+
+        /// Statement that produced this symbol
+        size_t statement_id = 0;
+
+        std::optional<size_t> function_index;
       };
       std::vector<symbol> symbols;
 
@@ -72,7 +77,10 @@ namespace adder {
         std::vector<size_t>   symbols;
         std::optional<size_t> parent;
 
-        size_t symbolsSize = 0;
+        /// If a stack frame was pushed with this scope.
+        bool is_stack_frame = false;
+
+        size_t symbols_size = 0;
       };
       std::vector<scope> scopes;
 
@@ -109,16 +117,17 @@ namespace adder {
       size_t get_type_size(type const & type) const;
       size_t get_type_size(size_t const & typeIndex) const;
 
-
       std::optional<size_t> add_symbol(size_t scopeId, symbol const & s);
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::string_view const & identifier) const;
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const;
+      std::optional<size_t> find_symbol(std::string_view const & fullName) const;
+      std::optional<size_t> find_unnamed_initializer(size_t scopeId, size_t receiverTypeIndex, size_t initializerTypeIndex) const;
 
       std::optional<size_t> get_parent_scope(size_t const & scopeId) const;
     };
 
     struct program_builder {
-      program_builder();
+      program_builder() {}
 
       program_metadata meta;
 
@@ -130,53 +139,12 @@ namespace adder {
         void release(vm::register_index idx);
       } registers;
 
-      struct symbol {
-        /// Full symbol name for linking.
-        std::string name;
-        /// Symbol type information.
-        size_t type_index;
-        /// Flags for the symbol.
-        symbol_flags flags = symbol_flags::none;
-        /// Address of the symbol within the program, if known.
-        std::optional<address_desc> address;
-
-        struct function_block {
-          size_t instruction_offset = 0;
-          size_t instruction_count = 0;
-
-          size_t relocation_start = 0;
-          size_t relocation_end = 0;
-        };
-
-        /// Function instruction offset
-        std::optional<function_block> function;
+      struct function {
+        size_t symbol;
+        std::vector<vm::instruction> instructions;
       };
-
-      struct identifier {
-        /// Name of the identifier
-        std::string name;
-        /// Index of the program resource
-        std::optional<size_t> symbol_index;
-      };
-
-      /// Symbols in the program.
-      adder::pool<symbol> symbols;
-      /// Stack of prefixes for symbols
-      std::vector<std::string> symbolPrefix;
-      /// Instructions in the program.
-      std::vector<vm::instruction> code;
-
-      struct scope {
-        /// Visibile identifiers.
-        std::vector<size_t> localSymbols;
-        /// Visibile identifiers.
-        std::vector<identifier> identifiers;
-        /// If a stack frame was pushed with this scope.
-        bool isStackFrame = false;
-        /// Size of the stack frame.
-        int64_t stackSize = 0;
-      };
-      std::vector<scope> scopes;
+      std::vector<size_t>   function_stack;
+      std::vector<function> functions;
 
       struct expression_result {
         ///< Constant value evaluated
@@ -205,42 +173,48 @@ namespace adder {
       std::vector<std::vector<relocation>> scratchRelocations;
 
       std::optional<size_t> find_symbol_index(std::string_view const& identifier) const;
-      symbol const * find_symbol(std::string_view const& identifier) const;
       std::optional<size_t> lookup_identifier_symbol_index(std::string_view const& identifier) const;
-      symbol const * lookup_identifier_symbol(std::string_view const& identifier) const;
-      std::optional<size_t> find_unnamed_initializer(size_t receiverTypeIndex, size_t initializerTypeIndex) const;
 
-      bool push_scope(bool newStackFrame);
-      bool pop_scope();
+      struct scope {
+        size_t meta_index = 0;
+      };
+
+      void begin_function(size_t symbol);
+      void finish_function();
+
+      bool begin_scope(size_t scopeId);
+      bool end_scope();
+
       expression_result alloc_temporary_value(size_t typeIndex);
       void push_symbol_prefix(std::string const & name);
       void pop_symbol_prefix();
 
       void add_relocation(std::string_view const& symbol, uint64_t offset);
       void begin_relocation_group();
+
       std::pair<size_t, size_t> end_relocation_group();
 
-      void call(symbol const & symbol);
+      void call(program_metadata::symbol const & symbol);
       void call(program_address const & symbol);
       void call_indirect(vm::register_index const & symbol);
       void call_indirect(address_desc const & symbol);
       void ret();
 
-      void jump_to(symbol const & symbol);
+      void jump_to(program_metadata::symbol const & symbol);
       void jump_to(program_address const & address);
       void jump_indirect(address_desc const & addr);
       void jump_indirect(vm::register_index const & address);
+
       void push_return_pointer();
       void push_frame_pointer();
       void pop_return_pointer();
       void pop_frame_pointer();
 
-      std::optional<size_t> push_symbol(symbol desc);
       bool push_return_value_alias(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_fn_parameter(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
       bool push_variable(std::string_view const& identifier, std::string_view const & type_name, symbol_flags const & flags);
-      bool push_identifier(std::string_view const& identifier, symbol const & symbol);
+      bool push_identifier(std::string_view const& identifier, program_metadata::symbol const & symbol);
       void push_expression_result(expression_result result);
       
       /// Push a register value to the stack
@@ -249,7 +223,7 @@ namespace adder {
       void pop(vm::register_index const & dst);
 
       vm::register_index pin_register();
-      vm::register_index pin_symbol(symbol const& symbol);
+      vm::register_index pin_symbol(program_metadata::symbol const & symbol);
       vm::register_index pin_constant(vm::register_value value);
       vm::register_index pin_address(program_address address, size_t size);
       vm::register_index pin_address(stack_frame_offset stack, size_t size);
@@ -257,9 +231,10 @@ namespace adder {
       vm::register_index pin_address(uint64_t address, size_t size);
       vm::register_index pin_stack_frame_offset(int64_t offset, size_t size);
       vm::register_index pin_result(expression_result const & value);
-      vm::register_index pin_address_of(symbol const& symbol);
+      vm::register_index pin_address_of(program_metadata::symbol const & symbol);
       vm::register_index pin_address_of(expression_result const & result);
       vm::register_index pin_relocation(std::string_view identifier, size_t size);
+
       void load(vm::register_index dst, vm::register_index address, size_t size, int64_t offset);
       void load(vm::register_index dst, vm::register_index address, size_t size);
       void release_register(vm::register_index reg);
@@ -282,7 +257,7 @@ namespace adder {
       bool store(vm::register_index src, program_address const & addr, uint8_t sz);
       bool store(vm::register_index src, stack_frame_offset const & addr, uint8_t sz);
       bool store(vm::register_index src, address_desc const & addr, uint8_t sz);
-      bool store(vm::register_index src, symbol const & symbol);
+      bool store(vm::register_index src, program_metadata::symbol const & symbol);
       bool store(vm::register_index src, expression_result const & result);
 
       void addi(vm::register_index dst, vm::register_index a, vm::register_index b);
