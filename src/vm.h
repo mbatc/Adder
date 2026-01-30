@@ -406,3 +406,5 @@ namespace adder {
     return idx >= adder::vm::register_names::count ? "unknown" : names[idx];
   }
 }
+
+#define AD_IOFFSET(member) ((size_t)&((vm::instruction*)0)->member);

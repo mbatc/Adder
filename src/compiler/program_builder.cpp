@@ -330,6 +330,11 @@ namespace adder {
       return true;
     }
 
+    size_t program_builder::current_scope_id() const
+    {
+      return ;
+    }
+
     program_builder::expression_result program_builder::alloc_temporary_value(size_t typeIndex) {
       const size_t typeSize = meta.get_type_size(typeIndex);
 
@@ -364,12 +369,13 @@ namespace adder {
       scratchRelocations.emplace_back();
     }
 
-    void program_builder::begin_function(size_t symbol) {
+    void program_builder::begin_function(size_t symbol, size_t scope_id) {
       meta.symbols[symbol].function_index = function_stack.back();
-
+      
       function_stack.push_back(functions.size());
       functions.emplace_back();
-      functions.back().symbol = symbol;
+      functions.back().symbol   = symbol;
+      functions.back().scope_id = scope_id;
     }
 
     void program_builder::finish_function() {
@@ -390,10 +396,12 @@ namespace adder {
       if (!meta.is_function(symbol.type))
         return;
 
+      constexpr size_t offset = (size_t)&((vm::instruction*)0)->jump.addr;
+
       if (symbol.function_index.has_value()) {
         call(program_address{ 0 });
+        add_relocation(symbol.name, AD_IOFFSET(jump.addr));
         uint64_t offset = (uint8_t*)&code.back().jump.addr - (uint8_t*)code.data();
-        add_relocation(symbol.name, offset);
       }
       else {
         vm::register_index addr = pin_symbol(symbol);
@@ -427,11 +435,11 @@ namespace adder {
       add_instruction(op);
     }
 
-    void program_builder::jump_to(symbol const& symbol) {
-      if (!meta.is_function(symbol.type_index))
+    void program_builder::jump_to(program_metadata::symbol const& symbol) {
+      if (!meta.is_function(symbol.type))
         return;
 
-      if (meta.is_reference(symbol.type_index)) {
+      if (meta.is_reference(symbol.type)) {
          vm::register_index addr = pin_symbol(symbol);
          jump_indirect(addr);
          release_register(addr);

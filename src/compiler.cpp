@@ -84,7 +84,11 @@ namespace adder {
 
     bool generate_code(ast const & ast, program_builder * program, expr::identifier const & statement, size_t statementId) {
       unused(ast, statement, statementId);
-      std::optional<size_t> symbolIndex = program->lookup_identifier_symbol_index(statement.name);
+      std::optional<size_t> symbolIndex = program->meta.search_for_symbol_index(
+        program->meta.statement_info[statementId].scope_id,
+        statement.name
+      );
+
       if (!symbolIndex.has_value()) {
         // Push Error: Undeclared identifier `statement.name`
         return false;
@@ -123,14 +127,14 @@ namespace adder {
 
       std::optional<size_t> initializerType = initializer.type_index;
       if (initializer.symbol_index.has_value())
-        initializerType = program->symbols[initializer.symbol_index.has_value()].type_index;
+        initializerType = program->meta.symbols[initializer.symbol_index.has_value()].type;
 
       if (!initializerType.has_value()) {
         return false;
       }
 
       if (!receiver.type_index.has_value())
-        receiver.type_index = program->symbols[receiver.symbol_index.value()].type_index;
+        receiver.type_index = program->meta.symbols[receiver.symbol_index.value()].type;
       
       if (program->meta.is_reference_of(receiver.type_index.value(), initializer.type_index.value())) {
         // Explicitly init references to types.
@@ -141,7 +145,11 @@ namespace adder {
       }
 
       program_builder::expression_result unnamedInit;
-      unnamedInit.symbol_index = program->find_unnamed_initializer(receiver.type_index.value(), initializerType.value());
+      unnamedInit.symbol_index = program->meta.find_unnamed_initializer(
+        program->current_scope_id(),
+        receiver.type_index.value(),
+        initializerType.value()
+      );
 
       if (!unnamedInit.symbol_index.has_value()) {
         // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
@@ -149,7 +157,7 @@ namespace adder {
       }
 
       size_t start = program->results.size();
-      size_t funcType = program->symbols[unnamedInit.symbol_index.value()].type_index;
+      size_t funcType = program->meta.symbols[unnamedInit.symbol_index.value()].type;
       auto returnType = program->meta.return_type_of(funcType);
       if (!returnType.has_value()) {
         // TODO: Push error. Not a callable type. Has no return type.
@@ -841,7 +849,7 @@ namespace adder {
     void evaluate_variable_addresses(program_metadata * meta) {
       meta->static_storage_size = 0;
       for (auto & scope : meta->scopes) {
-        scope.symbolsSize = 0;
+        scope.symbols_size = 0;
         size_t paramsSize = 0;
 
         for (const auto & index : scope.symbols) {
@@ -865,7 +873,8 @@ namespace adder {
             meta->static_storage_size += sz;
           }
           else {
-            symbol.address = scope.symbolsSize;
+            symbol.address = scope.symbols_size;
+            scope.symbols_size += sz;
           }
         }
       }
@@ -880,7 +889,7 @@ namespace adder {
       evaluate_symbols(ast, &ret.meta);
       evaluate_variable_addresses(&ret.meta);
 
-      generate_code();
+      // generate_code();
 
       // generate_function_code(ast);
 

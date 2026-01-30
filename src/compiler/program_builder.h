@@ -46,7 +46,7 @@ namespace adder {
       /// Additional metadata for each statement.
       /// TODO: Undecided if this should just be stored in the AST.
       struct statement_meta {
-        size_t scope_id;
+        size_t                scope_id;
         std::optional<size_t> type_id;
       };
       std::vector<statement_meta> statement_info;
@@ -63,7 +63,7 @@ namespace adder {
         ///   * Stack frame offset for local variables
         ///   * Static address for static/global
         ///   * Ignored for extern
-        int64_t address = 0;
+        address_desc address;
 
         /// Statement that produced this symbol
         size_t statement_id = 0;
@@ -141,6 +141,8 @@ namespace adder {
 
       struct function {
         size_t symbol;
+        size_t scope_id;
+
         std::vector<vm::instruction> instructions;
       };
       std::vector<size_t>   function_stack;
@@ -172,22 +174,18 @@ namespace adder {
       std::vector<relocation> relocations;
       std::vector<std::vector<relocation>> scratchRelocations;
 
-      std::optional<size_t> find_symbol_index(std::string_view const& identifier) const;
-      std::optional<size_t> lookup_identifier_symbol_index(std::string_view const& identifier) const;
-
       struct scope {
         size_t meta_index = 0;
       };
 
-      void begin_function(size_t symbol);
+      void begin_function(size_t symbol, size_t scope_id);
       void finish_function();
 
       bool begin_scope(size_t scopeId);
       bool end_scope();
+      size_t current_scope_id() const;
 
       expression_result alloc_temporary_value(size_t typeIndex);
-      void push_symbol_prefix(std::string const & name);
-      void pop_symbol_prefix();
 
       void add_relocation(std::string_view const& symbol, uint64_t offset);
       void begin_relocation_group();
