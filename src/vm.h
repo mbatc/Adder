@@ -407,4 +407,4 @@ namespace adder {
   }
 }
 
-#define AD_IOFFSET(member) ((size_t)&((vm::instruction*)0)->member);
+#define AD_IOFFSET(member) ((size_t)&((adder::vm::instruction*)0)->member)

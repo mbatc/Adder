@@ -167,6 +167,7 @@ namespace adder {
       struct relocation {
         std::string_view symbol;
         uint64_t         offset;
+
       };
 
       /// Identifiers whose location needs to be resolved.

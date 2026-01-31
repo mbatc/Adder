@@ -330,9 +330,8 @@ namespace adder {
       return true;
     }
 
-    size_t program_builder::current_scope_id() const
-    {
-      return ;
+    size_t program_builder::current_scope_id() const {
+      return functions[function_stack.back()].scope_id;
     }
 
     program_builder::expression_result program_builder::alloc_temporary_value(size_t typeIndex) {
