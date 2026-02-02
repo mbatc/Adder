@@ -85,7 +85,7 @@ namespace adder {
       }
 
       void load_offset(machine * vm, op_code_args<op_code::load_offset> const & args) {
-        const void * addr = vm->registers[args.addr].ptr;
+        const void * addr = vm->registers[args.src_addr].ptr;
         const uint8_t *mem  = (const uint8_t*)addr + args.offset;
         vm->registers[args.dst].u64 = 0;
         memcpy(&vm->registers[args.dst], mem, args.size);

@@ -71,7 +71,7 @@ namespace adder {
 
     template<> struct op_code_args<op_code::load_offset> {
       register_index dst;
-      register_index addr;
+      register_index src_addr;
       uint8_t        size;
       int64_t        offset;
     };
@@ -355,7 +355,7 @@ namespace adder {
 
   inline static std::string op_code_to_string(vm::op_code op) {
     switch (op) {
-      case adder::vm::op_code::exit: return "exit";                         ///< Load a value from a memory address
+      case adder::vm::op_code::exit: return "exit";                         ///< Stop program execution
       case adder::vm::op_code::load: return "load";                         ///< Load a value from a memory address
       case adder::vm::op_code::load_addr: return "load_addr";               ///< Load a value from a constant address
       case adder::vm::op_code::load_offset: return "load_offset";           ///< Load a value from an address (stored in a register) with some offset
@@ -382,9 +382,9 @@ namespace adder {
       case adder::vm::op_code::compare_f64: return "compare_f64";           ///< Compare the values in two registers as floats
       case adder::vm::op_code::conditional_jump: return "conditional_jump"; ///< Set the program counter if the specified comparison bits are set.
       case adder::vm::op_code::conditional_move: return "conditional_move"; ///< Compare the specified register with a value. Move if equal
-      case adder::vm::op_code::call: return "call"; ///< Compare the specified register with a value. Move if equal
-      case adder::vm::op_code::call_indirect: return "call_indirect"; ///< Compare the specified register with a value. Move if equal
-      case adder::vm::op_code::ret: return "ret"; ///< Compare the specified register with a value. Move if equal
+      case adder::vm::op_code::call: return "call";                         ///< Compare the specified register with a value. Move if equal
+      case adder::vm::op_code::call_indirect: return "call_indirect";       ///< Compare the specified register with a value. Move if equal
+      case adder::vm::op_code::ret: return "ret";                           ///< Compare the specified register with a value. Move if equal
       default: return "unknown";
     }
   }

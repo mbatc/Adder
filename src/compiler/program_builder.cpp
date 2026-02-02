@@ -304,25 +304,8 @@ namespace adder {
       free.push_back(idx);
     }
 
-    void program_builder::pop_result() {
-      auto r = results.back();
-      results.pop_back();
-
-      if (r.alloc_size.has_value()) {
-        vm::instruction alloc;
-        alloc.code = vm::op_code::free_stack;
-        alloc.alloc_stack.bytes = (uint32_t)r.alloc_size.value();
-        add_instruction(alloc);
-
-        // TODO: Destroy value
-      }
-    }
-
-    void program_builder::push_result(expression_result r) {
-      results.push_back(r);
-    }
-
     bool program_builder::begin_scope(size_t scopeId) {
+      unused(scopeId);
       return true;
     }
 
@@ -334,38 +317,12 @@ namespace adder {
       return functions[function_stack.back()].scope_id;
     }
 
-    program_builder::expression_result program_builder::alloc_temporary_value(size_t typeIndex) {
-      const size_t typeSize = meta.get_type_size(typeIndex);
-
-      vm::instruction op;
-      op.code = vm::op_code::alloc_stack;
-      op.alloc_stack.bytes = (uint32_t)typeSize;
-
-      if (op.alloc_stack.bytes != 0)
-        add_instruction(op);
-
-      scope &block = scopes.back();
-
-      expression_result r;
-      r.address = stack_frame_offset{ block.stackSize };
-      r.type_index = typeIndex;
-      r.alloc_size = typeSize;
-      block.stackSize += typeSize;
-
-      return r;
-    }
-
     void program_builder::add_relocation(std::string_view const & symbol, uint64_t offset) {
-      if (scratchRelocations.empty()) {
-        relocations.push_back({ symbol, offset });
-      }
-      else {
-        scratchRelocations.back().push_back({ symbol, offset });
-      }
-    }
-
-    void program_builder::begin_relocation_group() {
-      scratchRelocations.emplace_back();
+      const size_t funcId = function_stack.back();
+      const auto pLast = functions[funcId].instructions.data() + functions[funcId].instructions.size() - 1;
+      const uint64_t base = (uint64_t)((uint8_t const*)pLast);
+      const uint64_t addr = base + offset;
+      relocations.push_back({ symbol, addr, function_stack.back() });
     }
 
     void program_builder::begin_function(size_t symbol, size_t scope_id) {
@@ -381,44 +338,26 @@ namespace adder {
       function_stack.pop_back();
     }
 
-    std::pair<size_t, size_t> program_builder::end_relocation_group() {
-      std::pair<size_t, size_t> range = { relocations.size(), relocations.size() + scratchRelocations.back().size() };
-      relocations.insert(
-        relocations.end(),
-        scratchRelocations.back().begin(),
-        scratchRelocations.back().end());
-      scratchRelocations.pop_back();
-      return range;
-    }
-
     void program_builder::call(program_metadata::symbol const & symbol) {
       if (!meta.is_function(symbol.type))
         return;
 
-      constexpr size_t offset = (size_t)&((vm::instruction*)0)->jump.addr;
-
       if (symbol.function_index.has_value()) {
-        call(program_address{ 0 });
-        add_relocation(symbol.name, AD_IOFFSET(jump.addr));
-        uint64_t offset = (uint8_t*)&code.back().jump.addr - (uint8_t*)code.data();
+        call(0);
+        add_relocation(symbol.name, AD_IOFFSET(call.addr));
       }
       else {
-        vm::register_index addr = pin_symbol(symbol);
+        const auto addr = load_value_of(symbol);
         call_indirect(addr);
+        registers.release(addr);
       }
     }
-
-    void program_builder::call(program_address const & address) {
+    
+    void program_builder::call(uint64_t address) {
       vm::instruction op;
       op.code = vm::op_code::call;
-      op.call.addr = address.addr;
+      op.call.addr = address;
       add_instruction(op);
-    }
-
-    void program_builder::call_indirect(address_desc const & addr) {
-      vm::register_index idx = pin_address(addr, sizeof(vm::address_t));
-      call_indirect(idx);
-      release_register(idx);
     }
 
     void program_builder::ret() {
@@ -434,47 +373,29 @@ namespace adder {
       add_instruction(op);
     }
 
-    void program_builder::jump_to(program_metadata::symbol const& symbol) {
+    void program_builder::jump_to(program_metadata::symbol const & symbol) {
       if (!meta.is_function(symbol.type))
         return;
 
       if (meta.is_reference(symbol.type)) {
-         vm::register_index addr = pin_symbol(symbol);
+         vm::register_index addr = load_value_of(symbol);
          jump_indirect(addr);
          release_register(addr);
          return;
       }
-
-      if (symbol.address.has_value()) {
-      }
-      else {
-        if (symbol.function.has_value()) {
-          jump_to(program_address{ 0 });
-          uint64_t offset = (uint8_t*)&code.back().jump.addr - (uint8_t*)code.data();
-          add_relocation(symbol.name, offset);
-        }
-        else if (meta.is_reference(symbol.type_index)) {
-        }
-      }
+      
+      jump_to(0);
+      add_relocation(symbol.name, AD_IOFFSET(jump.addr));
     }
 
-    void program_builder::jump_to(program_address const& address)
-    {
+    void program_builder::jump_to(uint64_t address) {
       vm::instruction op;
       op.code = vm::op_code::jump;
-      op.jump.addr = address.addr;
+      op.jump.addr = address;
       add_instruction(op);
     }
 
-    void program_builder::jump_indirect(address_desc const & addr)
-    {
-      vm::register_index idx = pin_address(addr, sizeof(vm::address_t));
-      jump_indirect(idx);
-      release_register(idx);
-    }
-
-    void program_builder::jump_indirect(vm::register_index const & address)
-    {
+    void program_builder::jump_indirect(vm::register_index const & address) {
       vm::instruction op;
       op.code = vm::op_code::jump_indirect;
       op.jump_indirect.addr = address;
@@ -500,127 +421,12 @@ namespace adder {
     {
       pop(vm::register_names::fp);
     }
-
-    // std::vector<Registers> registerStack;
-    // /// Push current register state
-    // bool push_registers() {
-    //   registers.free;
-    //   registerStack.push_back(registers);
-    // }
-    // 
-    // /// Pop a previously pushed register state
-    // bool pop_registers() {
-    //   auto& state = registerStack.back();
-    // 
-    //   registers = state;
-    //   registerStack.pop_back();
-    // }
-
-    bool program_builder::push_return_value_alias(std::string_view const & name, size_t typeIndex, symbol_flags const & flags) {
-      symbol symbol;
-      symbol.flags       = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
-      symbol.type_index  = typeIndex;
-      symbol.name        = name;
-
-      // Variable starts at the bottom of the stack (so frame pointer - frame size)
-      // Variable ends at (frame pointer - frame size + variable size)
-      // We offset from frame pointer as it is static during a scope/call. Stack pointer is always moving.
-      symbol.address = stack_frame_offset{ -(int64_t)meta.get_type_size(typeIndex) };
-
-      identifier id;
-      id.symbol_index = push_symbol(symbol);
-      id.name = name;
-      if (!id.symbol_index.has_value())
-        return false;
-
-      scope &block = scopes.back();
-      block.identifiers.push_back(id);
-      return true;
-    }
-
-    bool program_builder::push_fn_parameter(std::string_view const & name, size_t typeIndex, symbol_flags const & flags) {
-      symbol symbol;
-      symbol.flags       = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
-      symbol.type_index  = typeIndex;
-      symbol.name        = name;
-
-      scope &block = scopes.back();
-      block.stackSize += meta.get_type_size(typeIndex);
-
-      // Variable starts at the bottom of the stack (so frame pointer - frame size)
-      // Variable ends at (frame pointer - frame size + variable size)
-      // We offset from frame pointer as it is static during a scope/call. Stack pointer is always moving.
-      symbol.address = stack_frame_offset{ block.stackSize };
-
-      identifier id;
-      id.symbol_index = push_symbol(symbol);
-      id.name = name;
-      if (!id.symbol_index.has_value())
-        return false;
-
-      block.identifiers.push_back(id);
-      return true;
-    }
-
-    bool program_builder::push_variable(std::string_view const& name, size_t typeIndex, symbol_flags const & flags) {
-      auto const& type = meta.types[typeIndex];
-
-      vm::instruction alloc;
-      alloc.code = vm::op_code::alloc_stack;
-      alloc.alloc_stack.bytes = (uint32_t)meta.get_type_size(type);
-      add_instruction(alloc);
-
-      symbol symbol;
-      symbol.flags       = flags;
-      symbol.type_index  = typeIndex;
-      symbol.name        = name; // TODO: Generate more unique symbol names
-
-      scope &block = scopes.back();
-      symbol.address = stack_frame_offset{ block.stackSize };
-      block.stackSize += meta.get_type_size(type);
-
-      identifier id;
-      id.symbol_index = push_symbol(symbol);
-      id.name = name;
-      if (!id.symbol_index.has_value())
-        return false;
-
-      block.identifiers.push_back(id);
-      return true;
-    }
-
-    bool program_builder::push_variable(std::string_view const& identifier, std::string_view const & typeName, symbol_flags const & flags) {
-      auto typeIndex = meta.get_type_index(typeName);
-      return typeIndex.has_value() && push_variable(identifier, typeIndex.value(), flags);
-    }
-
-    bool program_builder::push_identifier(std::string_view const & name, symbol const & symbol) {
-      scope &block = scopes.back();
-
-      identifier id;
-      id.symbol_index = push_symbol(symbol);
-      id.name = name;
-      if (!id.symbol_index.has_value())
-        return false;
-
-      if (!name.empty())
-        block.identifiers.push_back(id);
-      return true;
-    }
-
-    void program_builder::push_expression_result(expression_result result) {
-      results.push_back(result);
-    }
-
     void program_builder::push(vm::register_index const& src) {
       vm::instruction op;
       op.code = vm::op_code::push;
       op.push.size = sizeof(vm::register_value);
       op.push.src  = src;
       add_instruction(op);
-
-      scope& block = scopes.back();
-      block.stackSize += op.push.size;
     }
 
     void program_builder::pop(vm::register_index const& dst) {
@@ -629,56 +435,17 @@ namespace adder {
       op.pop.size = sizeof(vm::register_value);
       op.pop.dst  = dst;
       add_instruction(op);
-
-      scope& block = scopes.back();
-      block.stackSize += op.push.size;
     }
 
     vm::register_index program_builder::pin_register() {
       return registers.pin();
     }
 
-    vm::register_index program_builder::pin_symbol(program_metadata::symbol const& symbol) {
-      const size_t sz = meta.get_type_size(meta.types[symbol.type_index]);
-      if (sz > sizeof(vm::register_value)) {
-        // Error: Cannot pin `symbol` to register. Too large.
-      }
-
-      if (symbol.address.has_value()) {
-        return pin_address(symbol.address.value(), sz);
-      }
-      else {
-        return pin_relocation(symbol.name, sz);
-      }
-    }
-
-    vm::register_index program_builder::pin_constant(vm::register_value value) {
-      vm::register_index idx = registers.pin();
-      vm::instruction op;
-      op.code = vm::op_code::set;
-      op.set.val = value;
-      op.set.dst = idx;
-      add_instruction(op);
-      return idx;
-    }
-
-    vm::register_index program_builder::pin_address(program_address address, size_t size) {
-      return pin_address(address.addr, size);
-    }
-
-    vm::register_index program_builder::pin_address(stack_frame_offset stack, size_t size) {
-      return pin_stack_frame_offset(stack.offset, size);
-    }
-
-    vm::register_index program_builder::pin_address(address_desc address, size_t size) {
-      return std::visit([=](auto&& o) { return pin_address(o, size); }, address);
-    }
-
-    vm::register_index program_builder::pin_stack_frame_offset(int64_t offset, size_t size) {
+    vm::register_index program_builder::load_stack_frame_offset(int64_t offset, size_t size) {
       vm::register_index idx = registers.pin();
       vm::instruction op;
       op.code = vm::op_code::load_offset;
-      op.load_offset.addr   = (uint8_t)vm::register_names::fp;
+      op.load_offset.src_addr   = (uint8_t)vm::register_names::fp;
       op.load_offset.offset = offset;
       op.load_offset.size   = (uint8_t)size;
       op.load_offset.dst    = idx;
@@ -686,7 +453,7 @@ namespace adder {
       return idx;
     }
 
-    vm::register_index program_builder::pin_address(uint64_t address, size_t size) {
+    vm::register_index program_builder::load_value_of(uint64_t address, size_t size) {
       vm::register_index idx = registers.pin();
       vm::instruction op;
       op.code = vm::op_code::load_addr;
@@ -696,49 +463,53 @@ namespace adder {
       add_instruction(op);
       return idx;
     }
+    
+    vm::register_index program_builder::load_value_of(program_metadata::symbol const & symbol) {
+      const size_t sz = meta.get_type_size(meta.types[symbol.type]);
+      if (sz > sizeof(vm::register_value)) {
+        // Error: Cannot pin `symbol` to register. Too large.
+      }
 
-    vm::register_index program_builder::pin_result(expression_result const & value) {
-      if (value.constant.has_value()) {
-        return pin_constant(value.constant.value());
+      if (symbol.stack_offset.has_value()) {
+        const auto ret = registers.pin();
+        load(ret, vm::register_names::fp, sz, symbol.stack_offset.value());
+        return ret;
       }
-      else if (value.address.has_value()) {
-        return pin_address(value.address.value(), meta.get_type_size(value.type_index.value()));
+      else {
+        const auto addr = load_address_of(symbol.name, sz);
+        const auto ret  = load_value_of(addr, sz);
+        registers.release(addr);
+        return ret;
       }
-      else if (value.symbol_index.has_value()) {
-        return pin_symbol(symbols[value.symbol_index.value()]);
-      }
-      return registers.pin();
     }
 
-    vm::register_index program_builder::pin_address_of(program_metadata::symbol const & symbol) {
-      if (symbol.address.has_value()) {
-        vm::register_index dst = pin_register();
-        set(dst, symbol.address.value());
+    vm::register_index program_builder::load_constant(vm::register_value value) {
+      vm::register_index idx = registers.pin();
+      vm::instruction op;
+      op.code = vm::op_code::set;
+      op.set.val = value;
+      op.set.dst = idx;
+      add_instruction(op);
+      return idx;
+    }
+
+    vm::register_index program_builder::load_address_of(program_metadata::symbol const & symbol) {
+      vm::register_index dst = pin_register();
+      if (symbol.stack_offset.has_value()) {
+        vm::register_index scratch = pin_register();
+        set(scratch, symbol.stack_offset.value());
+        addi(dst, vm::register_names::fp, scratch);
+        registers.release(scratch);
         return dst;
       }
       else {
-        vm::register_index dst = pin_register();
-        set(dst, program_address{ 0 });
-        uint64_t offset = (uint8_t*)&code.back().set.val - (uint8_t*)code.data();
-        add_relocation(symbol.name, offset);
-        return dst;
+        set(dst, 0);
+        add_relocation(symbol.name, AD_IOFFSET(set.val));
       }
+      return dst;
     }
-
-    vm::register_index program_builder::pin_address_of(expression_result const & result) {
-      if (result.address.has_value()) {
-        vm::register_index dst = pin_register();
-        set(dst, result.address.value());
-        return dst;
-      }
-      else if (result.symbol_index.has_value()) {
-        return pin_address_of(symbols[result.symbol_index.value()]);
-      }
-
-      return false;
-    }
-
-    vm::register_index program_builder::pin_relocation(std::string_view identifier, size_t size) {
+    
+    vm::register_index program_builder::load_address_of(std::string_view identifier, size_t size) {
       vm::register_index idx = registers.pin();
 
       vm::instruction op;
@@ -747,26 +518,21 @@ namespace adder {
       op.load_addr.size = (uint8_t)size;
       op.load_addr.dst  = idx;
       add_instruction(op);
-
-      // Record that this instruction will require `load_addr.addr` to be relocated.
-      uint64_t offset = (uint8_t*)&code.back().load_addr.addr - (uint8_t*)code.data();
-      add_relocation(identifier, offset);
+      add_relocation(identifier, AD_IOFFSET(load_addr.addr));
       return idx;
     }
     
-    void program_builder::load(vm::register_index dst, vm::register_index address, size_t size, int64_t offset)
-    {
+    void program_builder::load(vm::register_index dst, vm::register_index address, size_t size, int64_t offset) {
       vm::instruction op;
       op.code = vm::op_code::load_offset;
       op.load_offset.dst = dst;
-      op.load_offset.addr = address;
+      op.load_offset.src_addr = address;
       op.load_offset.size = (uint8_t)size;
       op.load_offset.offset = offset;
       add_instruction(op);
     }
 
-    void program_builder::load(vm::register_index dst, vm::register_index address, size_t size)
-    {
+    void program_builder::load(vm::register_index dst, vm::register_index address, size_t size) {
       vm::instruction op;
       op.code = vm::op_code::load;
       op.load.dst = dst;
@@ -779,14 +545,7 @@ namespace adder {
       return registers.release(reg);
     }
 
-    program_builder::expression_result program_builder::pop_expression_result() {
-      expression_result ret = results.back();
-      results.pop_back();
-      return ret;
-    }
-
-    void program_builder::move(vm::register_index dst, vm::register_index src)
-    {
+    void program_builder::move(vm::register_index dst, vm::register_index src) {
       vm::instruction i;
       i.code = vm::op_code::move;
       i.move.dst = dst;
@@ -802,103 +561,19 @@ namespace adder {
       add_instruction(i);
     }
 
-    void program_builder::set(vm::register_index dst, program_address const& addr) {
-      set(dst, addr.addr);
-    }
-
-    void program_builder::set(vm::register_index dst, stack_frame_offset const& addr) {
-      set(dst, addr.offset);
-
-      vm::instruction add;
-      add.code = vm::op_code::add_i64;
-      add.add.dst = dst;
-      add.add.lhs = dst;
-      add.add.rhs = (uint8_t)vm::register_names::fp;
-      add_instruction(add);
-    }
-
-    void program_builder::set(vm::register_index dst, address_desc const& addr) {
-      std::visit([=](auto&& o) { return set(dst, o); }, addr);
-    }
-
-    bool program_builder::store(vm::register_index src, program_address const & addr, uint8_t sz) {
-      vm::instruction instr;
-      instr.code = vm::op_code::store_addr;
-      instr.store_addr.addr = addr.addr;
-      instr.store_addr.src      = src;
-      instr.store_addr.size     = sz;
-      add_instruction(instr);
-      return true;
-    }
-
-    bool program_builder::store(vm::register_index src, stack_frame_offset const & addr, uint8_t sz) {
-      vm::instruction instr;
-      instr.code = vm::op_code::store_offset;
-      instr.store_offset.addr   = (uint8_t)vm::register_names::fp;
-      instr.store_offset.offset = addr.offset;
-      instr.store_offset.src    = src;
-      instr.store_offset.size   = sz;
-      add_instruction(instr);
-      return true;
-    }
-
-    bool program_builder::store(vm::register_index src, address_desc const & addr, uint8_t sz) {
-      return std::visit([=](auto&& o) { return store(src, o, sz); }, addr);
-    }
-
-    bool program_builder::store(vm::register_index src, vm::register_index dst, uint8_t sz) {
+    bool program_builder::store(vm::register_index src, vm::register_index addr, uint8_t sz) {
       if (sz > sizeof(vm::address_t))
         return false; // Too large.
       vm::instruction str;
       str.code       = vm::op_code::store;
       str.store.src  = src;
-      str.store.addr = dst;
+      str.store.addr = addr;
       str.store.size = sz;
       add_instruction(str);
       return true;
     }
 
-    bool program_builder::store(vm::register_index src, program_metadata::symbol const & symbol) {
-      if (!store(src, symbol.address.value_or(program_address{ 0 }), (uint8_t)meta.get_type_size(meta.types[symbol.type_index])))
-        return false;
-      if (symbol.address.has_value())
-        return true;
-
-      // Add relocation
-      vm::instruction &op = code.back();
-      vm::register_value *pAddr = 0;
-      switch (op.code)
-      {
-      case vm::op_code::store_addr:
-        pAddr = &op.store_addr.addr;
-        break;
-      }
-
-      add_relocation(
-        symbol.name,
-        (uint8_t*)pAddr - (uint8_t*)code.data()
-      );
-      return false;
-    }
-
-    bool program_builder::store(vm::register_index src, expression_result const& result) {
-      if (result.symbol_index.has_value()) {
-        return store(src, symbols[result.symbol_index.value()]);
-      }
-      else if (result.type_index.has_value()) {
-        if (result.address.has_value()) {
-          return store(src, result.address.value(), (uint8_t)meta.get_type_size(result.type_index.value()));
-        }
-        else if (result.constant.has_value()) {
-          return false;
-        }
-      }
-
-      return false;
-    }
-
-    void program_builder::addi(vm::register_index dst, vm::register_index a, vm::register_index b)
-    {
+    void program_builder::addi(vm::register_index dst, vm::register_index a, vm::register_index b) {
       vm::instruction op;
       op.code = vm::op_code::add_i64;
       op.add.dst = dst;
@@ -907,8 +582,7 @@ namespace adder {
       add_instruction(op);
     }
     
-    void program_builder::addf(vm::register_index dst, vm::register_index a, vm::register_index b)
-    {
+    void program_builder::addf(vm::register_index dst, vm::register_index a, vm::register_index b) {
       vm::instruction op;
       op.code = vm::op_code::add_f64;
       op.add.dst = dst;
@@ -917,9 +591,232 @@ namespace adder {
       add_instruction(op);
     }
 
-    void program_builder::add_instruction(vm::instruction inst) {
-      current_function.instructions.push_back(inst);
+    void program_builder::subi(vm::register_index dst, vm::register_index a, vm::register_index b) {
+      vm::instruction op;
+      op.code = vm::op_code::sub_i64;
+      op.sub.dst = dst;
+      op.sub.lhs = a;
+      op.sub.rhs = b;
+      add_instruction(op);
     }
+
+    void program_builder::subf(vm::register_index dst, vm::register_index a, vm::register_index b) {
+      vm::instruction op;
+      op.code = vm::op_code::sub_f64;
+      op.sub.dst = dst;
+      op.sub.lhs = a;
+      op.sub.rhs = b;
+      add_instruction(op);
+    }
+
+    void program_builder::divi(vm::register_index dst, vm::register_index a, vm::register_index b) {
+      vm::instruction op;
+      op.code = vm::op_code::div_i64;
+      op.div.dst = dst;
+      op.div.lhs = a;
+      op.div.rhs = b;
+      add_instruction(op);
+    }
+
+    void program_builder::divf(vm::register_index dst, vm::register_index a, vm::register_index b) {
+      vm::instruction op;
+      op.code = vm::op_code::div_f64;
+      op.div.dst = dst;
+      op.div.lhs = a;
+      op.div.rhs = b;
+      add_instruction(op);
+    }
+
+    void program_builder::muli(vm::register_index dst, vm::register_index a, vm::register_index b) {
+      vm::instruction op;
+      op.code = vm::op_code::mul_i64;
+      op.mul.dst = dst;
+      op.mul.lhs = a;
+      op.mul.rhs = b;
+      add_instruction(op);
+    }
+
+    void program_builder::mulf(vm::register_index dst, vm::register_index a, vm::register_index b) {
+      vm::instruction op;
+      op.code = vm::op_code::mul_f64;
+      op.mul.dst = dst;
+      op.mul.lhs = a;
+      op.mul.rhs = b;
+      add_instruction(op);
+    }
+
+    void program_builder::add_instruction(vm::instruction inst) {
+      functions[function_stack.back()].instructions.push_back(inst);
+    }
+    
+
+    // void program_builder::pop_result() {
+    //   auto r = results.back();
+    //   results.pop_back();
+    // 
+    //   if (r.alloc_size.has_value()) {
+    //     vm::instruction alloc;
+    //     alloc.code = vm::op_code::free_stack;
+    //     alloc.alloc_stack.bytes = (uint32_t)r.alloc_size.value();
+    //     add_instruction(alloc);
+    // 
+    //     // TODO: Destroy value
+    //   }
+    // }
+
+    // void program_builder::push_result(expression_result r) {
+    //   results.push_back(r);
+    // }
+    
+    // program_builder::expression_result program_builder::alloc_temporary_value(size_t typeIndex) {
+    //   const size_t typeSize = meta.get_type_size(typeIndex);
+    // 
+    //   vm::instruction op;
+    //   op.code = vm::op_code::alloc_stack;
+    //   op.alloc_stack.bytes = (uint32_t)typeSize;
+    // 
+    //   if (op.alloc_stack.bytes != 0)
+    //     add_instruction(op);
+    // 
+    //   scope &block = scopes.back();
+    // 
+    //   expression_result r;
+    //   r.address = stack_frame_offset{ block.stackSize };
+    //   r.type_index = typeIndex;
+    //   r.alloc_size = typeSize;
+    //   block.stackSize += typeSize;
+    // 
+    //   return r;
+    // }
+    
+
+    // bool program_builder::push_return_value_alias(std::string_view const & name, size_t typeIndex, symbol_flags const & flags) {
+    //   program_metadata::symbol symbol;
+    //   symbol.flags = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
+    //   symbol.type  = typeIndex;
+    //   symbol.name  = name;
+    // 
+    //   // Variable starts at the bottom of the stack (so frame pointer - frame size)
+    //   // Variable ends at (frame pointer - frame size + variable size)
+    //   // We offset from frame pointer as it is static during a scope/call. Stack pointer is always moving.
+    //   symbol.address = stack_frame_offset{ -(int64_t)meta.get_type_size(typeIndex) };
+    // 
+    //   expr::identifier id;
+    //   id.symbol_index = push_symbol(symbol);
+    //   id.name = name;
+    //   if (!id.symbol_index.has_value())
+    //     return false;
+    // 
+    //   scope &block = scopes.back();
+    //   block.identifiers.push_back(id);
+    //   return true;
+    // }
+    // 
+    // bool program_builder::push_fn_parameter(std::string_view const & name, size_t typeIndex, symbol_flags const & flags) {
+    //   symbol symbol;
+    //   symbol.flags       = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
+    //   symbol.type_index  = typeIndex;
+    //   symbol.name        = name;
+    // 
+    //   scope &block = scopes.back();
+    //   block.stackSize += meta.get_type_size(typeIndex);
+    // 
+    //   // Variable starts at the bottom of the stack (so frame pointer - frame size)
+    //   // Variable ends at (frame pointer - frame size + variable size)
+    //   // We offset from frame pointer as it is static during a scope/call. Stack pointer is always moving.
+    //   symbol.address = stack_frame_offset{ block.stackSize };
+    // 
+    //   identifier id;
+    //   id.symbol_index = push_symbol(symbol);
+    //   id.name = name;
+    //   if (!id.symbol_index.has_value())
+    //     return false;
+    // 
+    //   block.identifiers.push_back(id);
+    //   return true;
+    // }
+    // 
+    // bool program_builder::push_variable(std::string_view const& name, size_t typeIndex, symbol_flags const & flags) {
+    //   auto const& type = meta.types[typeIndex];
+    // 
+    //   vm::instruction alloc;
+    //   alloc.code = vm::op_code::alloc_stack;
+    //   alloc.alloc_stack.bytes = (uint32_t)meta.get_type_size(type);
+    //   add_instruction(alloc);
+    // 
+    //   symbol symbol;
+    //   symbol.flags       = flags;
+    //   symbol.type_index  = typeIndex;
+    //   symbol.name        = name; // TODO: Generate more unique symbol names
+    // 
+    //   scope &block = scopes.back();
+    //   symbol.address = stack_frame_offset{ block.stackSize };
+    //   block.stackSize += meta.get_type_size(type);
+    // 
+    //   identifier id;
+    //   id.symbol_index = push_symbol(symbol);
+    //   id.name = name;
+    //   if (!id.symbol_index.has_value())
+    //     return false;
+    // 
+    //   block.identifiers.push_back(id);
+    //   return true;
+    // }
+    //
+    // bool program_builder::push_variable(std::string_view const& identifier, std::string_view const & typeName, symbol_flags const & flags) {
+    //   auto typeIndex = meta.get_type_index(typeName);
+    //   return typeIndex.has_value() && push_variable(identifier, typeIndex.value(), flags);
+    // }
+    // 
+    // bool program_builder::push_identifier(std::string_view const & name, program_metadata::symbol const & symbol) {
+    //   scope &block = scopes.back();
+    // 
+    //   identifier id;
+    //   id.symbol_index = push_symbol(symbol);
+    //   id.name = name;
+    //   if (!id.symbol_index.has_value())
+    //     return false;
+    // 
+    //   if (!name.empty())
+    //     block.identifiers.push_back(id);
+    //   return true;
+    // }
+    //
+    // vm::register_index program_builder::pin_result(expression_result const & value) {
+    //   if (value.constant.has_value()) {
+    //     return pin_constant(value.constant.value());
+    //   }
+    //   else if (value.address.has_value()) {
+    //     return pin_address(value.address.value(), meta.get_type_size(value.type_index.value()));
+    //   }
+    //   else if (value.symbol_index.has_value()) {
+    //     return pin_symbol(symbols[value.symbol_index.value()]);
+    //   }
+    //   return registers.pin();
+    // }
+    //
+    // vm::register_index program_builder::pin_address_of(expression_result const & result) {
+    //   if (result.address.has_value()) {
+    //     vm::register_index dst = pin_register();
+    //     set(dst, result.address.value());
+    //     return dst;
+    //   }
+    //   else if (result.symbol_index.has_value()) {
+    //     return pin_address_of(symbols[result.symbol_index.value()]);
+    //   }
+    // 
+    //   return false;
+    // }
+    //
+    // void program_builder::push_expression_result(expression_result result) {
+    //   results.push_back(result);
+    // }
+    //
+    // program_builder::expression_result program_builder::pop_expression_result() {
+    //   expression_result ret = results.back();
+    //   results.pop_back();
+    //   return ret;
+    // }
 
     program program_builder::binary() const {
       // Compiled Program Layout
