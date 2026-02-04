@@ -16,7 +16,7 @@ namespace adder {
         if (estimate < 0 || estimate >= (int64_t)statements.size())
           return std::nullopt;
 
-        for (int64_t i = estimate; i < statements.size(); ++i)
+        for (size_t i = (size_t)estimate; i < statements.size(); ++i)
           if (std::holds_alternative<T>(statements[i]) && &std::get<T>(statements[i]) == statement)
             return i;
 

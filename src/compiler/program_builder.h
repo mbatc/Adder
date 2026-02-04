@@ -46,7 +46,13 @@ namespace adder {
       /// Additional metadata for each statement.
       /// TODO: Undecided if this should just be stored in the AST.
       struct statement_meta {
-        size_t                scope_id;
+        /// Parent scope of this statement is 
+        size_t parent_scope_id;
+        /// Scope created by this statement
+        std::optional<size_t> scope_id;
+        /// Symbol the statement is associated with (if any)
+        std::optional<size_t> symbol_index;
+        /// Type that this statement is associated with (if any)
         std::optional<size_t> type_id;
       };
       std::vector<statement_meta> statement_info;
@@ -69,7 +75,16 @@ namespace adder {
         /// Statement that produced this symbol
         size_t statement_id = 0;
 
+        /// Scope that declared this symbol
+        size_t scope_id = 0;
+
+        /// Function declaration associated with this symbol
         std::optional<size_t> function_index;
+
+        bool is_parameter() const { return (flags & symbol_flags::fn_parameter) != symbol_flags::none; }
+        bool is_static()    const { return (flags & symbol_flags::static_) != symbol_flags::none; }
+        bool is_function()  const { return (flags & symbol_flags::function) != symbol_flags::none; }
+        bool is_local()     const { return scope_id != 0; };
       };
       std::vector<symbol> symbols;
 
@@ -118,7 +133,7 @@ namespace adder {
       size_t get_type_size(type const & type) const;
       size_t get_type_size(size_t const & typeIndex) const;
 
-      std::optional<size_t> add_symbol(size_t scopeId, symbol const & s);
+      std::optional<size_t> add_symbol(symbol const & s);
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::string_view const & identifier) const;
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const;
       std::optional<size_t> find_symbol(std::string_view const & fullName) const;
@@ -155,21 +170,35 @@ namespace adder {
       std::vector<size_t>   function_stack;
       std::vector<function> functions;
 
-      // struct expression_result {
-      //   ///< Constant value evaluated
-      //   std::optional<vm::register_value> constant;
-      //   ///< Address of the value
-      //   std::optional<address_desc> address;
-      //   ///< Index of the symbol
-      //   std::optional<size_t> symbol_index;
-      //   ///< Type of the value
-      //   std::optional<size_t> type_index;
-      //   ///< Size of temporary storage allocated for this result
-      //   std::optional<size_t> alloc_size;
-      // };
-      // std::vector<expression_result>  results;
-      // void pop_result();
-      // void push_result(expression_result r);
+      struct value {
+        /// Constant value evaluated
+        std::optional<vm::register_value> constant;
+        /// Index of the symbol
+        std::optional<size_t> stack_frame_offset;
+        /// Index of the symbol
+        std::optional<size_t> symbol_index;
+        /// Type of the value
+        std::optional<size_t> type_index;
+        /// Base address offset to the value (if applicable)
+        size_t address_offset;
+      };
+      std::vector<value> results;
+
+      struct identifier {
+        std::string name;
+        value reference;
+      };
+
+      struct scope {
+        size_t meta_index  = 0;
+        size_t stack_bytes = 0;
+        std::vector<identifier> identifiers;
+      };
+
+      std::vector<scope> scopes;
+
+      void push_result(value r);
+      std::optional<program_builder::value> pop_result();
 
       struct relocation {
         std::string_view symbol;
@@ -181,16 +210,28 @@ namespace adder {
       /// [identifier] -> list of offsets into instructions. Offset is in bytes
       std::vector<relocation> relocations;
 
-      struct scope {
-        size_t meta_index = 0;
-      };
+      bool begin_function(size_t symbol);
+      void end_function();
 
-      void begin_function(size_t symbol, size_t scope_id);
-      void finish_function();
-
-      bool begin_scope(size_t scopeId);
+      bool begin_scope();
       bool end_scope();
+
+      void push_return_handler(const std::function<void(program_builder*)>& handler);
+      void pop_return_handler();
+      std::vector<std::function<void(program_builder*)>> return_handler_stack;
+
+      /// Add an identifier to the current scope
+      void add_identifier(std::string_view const & name, value const & reference);
+
+      /// Find a symbol by identifier. Searches from the inner most scope outwards.
+      std::optional<value> find_value_by_identifier(std::string_view const & name) const;
+      std::optional<value> find_value_by_identifier(std::string_view const & name, size_t scopeIndex) const;
+
+      /// Allocate space for a return value and push an expression_result to the result stack.
+      program_builder::value allocate_value(size_t typeIndex);
+
       size_t current_scope_id() const;
+      size_t current_scope_stack_size() const;
 
       // expression_result alloc_temporary_value(size_t typeIndex);
 
@@ -204,6 +245,7 @@ namespace adder {
       void jump_to(program_metadata::symbol const & symbol);
       void jump_to(uint64_t address);
       void jump_indirect(vm::register_index const & address);
+      void jump_relative(int64_t offset);
 
       void push_return_pointer();
       void push_frame_pointer();
@@ -216,7 +258,10 @@ namespace adder {
       // bool push_variable(std::string_view const& identifier, std::string_view const & type_name, symbol_flags const & flags);
       // bool push_identifier(std::string_view const& identifier, program_metadata::symbol const & symbol);
       // void push_expression_result(expression_result result);
-      
+
+      void alloc_stack(size_t bytes);
+      void free_stack(size_t bytes);
+
       /// Push a register value to the stack
       void push(vm::register_index const & src);
       /// Pop a register value from the stack
@@ -230,13 +275,13 @@ namespace adder {
       vm::register_index load_constant(vm::register_value value);
       vm::register_index load_value_of(program_metadata::symbol const & symbol);
       vm::register_index load_value_of(uint64_t address, size_t size);
+      vm::register_index load_value_of(program_builder::value value);
       vm::register_index load_address_of(program_metadata::symbol const & symbol);
       vm::register_index load_address_of(std::string_view identifier, size_t size);
-
+      vm::register_index load_address_of(program_builder::value value);
       void release_register(vm::register_index reg);
 
       // expression_result pop_expression_result();
-
       void load(vm::register_index dst, vm::register_index address, size_t size, int64_t offset);
       void load(vm::register_index dst, vm::register_index address, size_t size);
       void move(vm::register_index dst, vm::register_index src);

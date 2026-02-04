@@ -196,6 +196,10 @@ namespace adder {
         vm->registers[register_names::pc] = vm->registers[args.addr];
       }
 
+      void jump_relative(machine * vm, op_code_args<op_code::jump_relative> const & args) {
+        vm->registers[register_names::pc].u64 += args.offset;
+      }
+
       void move(machine * vm, op_code_args<op_code::move> const & args) {
         vm->registers[args.dst] = vm->registers[args.src];
       }
@@ -350,9 +354,9 @@ namespace adder {
       stub.push_return_pointer();
       stub.push_frame_pointer();
       stub.move(register_names::fp, register_names::sp);
-      stub.push_scope(true);
-      stub.call(adder::compiler::program_address{ symbol.data_address });
-      stub.pop_scope();
+      stub.begin_scope();
+      stub.call(symbol.data_address);
+      stub.end_scope();
       stub.pop_frame_pointer();
       stub.pop_return_pointer();
 
@@ -361,9 +365,8 @@ namespace adder {
       stub.add_instruction(op);
 
       adder::program entry_program = stub.binary();
-
-      void * ret = vm->heap_allocator->allocate(stub.code.size() * sizeof(adder::vm::instruction));
-      memcpy(ret, (uint8_t*)stub.code.data(), stub.code.size() * sizeof(adder::vm::instruction));
+      void * ret = vm->heap_allocator->allocate(entry_program.data.size() * sizeof(adder::vm::instruction));
+      memcpy(ret, (uint8_t*)entry_program.data.data(), entry_program.data.size() * sizeof(adder::vm::instruction));
       return ret;
     }
 

@@ -5,17 +5,17 @@
 namespace adder {
   namespace compiler {
     namespace builtin {
-      bool int_init_int(program_builder* program) {
-        auto & self = program->symbols[program->symbols.size() - 2];
-        auto & arg  = program->symbols[program->symbols.size() - 1];
+      bool int_init_int(program_builder * program) {
+        auto & self = program->results[program->results.size() - 2];
+        auto & arg  = program->results[program->results.size() - 1];
         std::optional<size_t> selfType = program->meta.unwrap_type(self.type_index);
 
         if (!(program->meta.is_integer(selfType)
           && program->meta.is_integer(arg.type_index)))
           return false;
 
-        vm::register_index addr  = program->pin_symbol(self);
-        vm::register_index value = program->pin_symbol(arg);
+        vm::register_index addr  = program->load_address_of(self);
+        vm::register_index value = program->load_value_of(arg);
 
         program->store(value, addr, (uint8_t)program->meta.get_type_size(selfType.value())); // Indirect store into address stored in `addr`
         program->release_register(value);
@@ -24,16 +24,16 @@ namespace adder {
       }
       
       bool add_int_int(program_builder* program) {
-        auto& self = program->symbols[program->symbols.size() - 2];
-        auto& arg = program->symbols[program->symbols.size() - 1];
+        auto& self = program->results[program->results.size() - 2];
+        auto& arg  = program->results[program->results.size() - 1];
         std::optional<size_t> selfType = program->meta.unwrap_type(self.type_index);
         size_t typeSize = (uint8_t)program->meta.get_type_size(selfType.value());
         if (!selfType.has_value()) {
           return false;
         }
 
-        vm::register_index addr = program->pin_symbol(self);
-        vm::register_index rhs  = program->pin_symbol(arg);
+        vm::register_index addr = program->load_address_of(self);
+        vm::register_index rhs  = program->load_value_of(arg);
         vm::register_index lhs  = program->pin_register();
 
         program->load(lhs, addr, typeSize);

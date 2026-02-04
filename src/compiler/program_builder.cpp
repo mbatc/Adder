@@ -219,11 +219,11 @@ namespace adder {
       return add_type(t);
     }
 
-    std::optional<size_t> program_metadata::add_symbol(size_t scopeId, symbol const & s) {
-      if (scopeId >= scopes.size())
+    std::optional<size_t> program_metadata::add_symbol(symbol const & s) {
+      if (s.scope_id >= scopes.size())
         return std::nullopt;
 
-      for (const size_t existingId : scopes[scopeId].symbols) {
+      for (const size_t existingId : scopes[s.scope_id].symbols) {
         const auto& existing = symbols[existingId];
         if (existing.name != s.name) {
           continue;
@@ -241,7 +241,7 @@ namespace adder {
 
       const size_t symbolIndex = symbols.size();
       symbols.push_back(s);
-      scopes[scopeId].symbols.push_back(symbolIndex);
+      scopes[s.scope_id].symbols.push_back(symbolIndex);
 
       return symbolIndex;
     }
@@ -304,17 +304,69 @@ namespace adder {
       free.push_back(idx);
     }
 
-    bool program_builder::begin_scope(size_t scopeId) {
-      unused(scopeId);
+    bool program_builder::begin_scope() {
+      scopes.emplace_back();
       return true;
     }
 
     bool program_builder::end_scope() {
+      assert(!scopes.empty());
+      assert(scopes.back().stack_bytes == 0);
+      scopes.pop_back();
       return true;
+    }
+
+    void program_builder::push_return_handler(const std::function<void(program_builder*)> &handler) {
+      return_handler_stack.push_back(handler);
+    }
+
+    void program_builder::pop_return_handler() {
+      return_handler_stack.pop_back();
+    }
+
+    void program_builder::add_identifier(std::string_view const & name, program_builder::value const & val) {
+      assert(!scopes.empty());
+
+      scopes.back().identifiers.push_back(identifier{
+        std::string(name),
+        val
+      });
+    }
+
+    std::optional<program_builder::value> program_builder::find_value_by_identifier(std::string_view const& name) const {
+      assert(!scopes.empty());
+
+      return find_value_by_identifier(name, scopes.size() - 1);
+    }
+
+    std::optional<program_builder::value> program_builder::find_value_by_identifier(std::string_view const& name, size_t scopeIndex) const {
+      assert(scopeIndex < scopes.size());
+      const auto& scope = scopes[scopeIndex];
+      const auto& ids = scope.identifiers;
+      auto found = std::find_if(ids.rbegin(), ids.rend(), [&](identifier const& id) { return id.name == name; });
+      if (found != ids.rend())
+        return found->reference;
+      if (scopeIndex == 0)
+        return std::nullopt;
+      return find_value_by_identifier(name, scopeIndex - 1);
+    }
+
+    program_builder::value program_builder::allocate_value(size_t typeIndex) {
+      const size_t sz = meta.get_type_size(typeIndex);
+      value result;
+      result.stack_frame_offset = current_scope_stack_size();
+      result.type_index = typeIndex;
+      alloc_stack(sz);
+      push_result(result);
+      return result;
     }
 
     size_t program_builder::current_scope_id() const {
       return functions[function_stack.back()].scope_id;
+    }
+
+    size_t program_builder::current_scope_stack_size() const {
+      return scopes.back().stack_bytes;
     }
 
     void program_builder::add_relocation(std::string_view const & symbol, uint64_t offset) {
@@ -325,16 +377,37 @@ namespace adder {
       relocations.push_back({ symbol, addr, function_stack.back() });
     }
 
-    void program_builder::begin_function(size_t symbol, size_t scope_id) {
-      meta.symbols[symbol].function_index = function_stack.back();
-      
+    void program_builder::push_result(value r) {
+      results.push_back(r);
+    }
+
+    std::optional<program_builder::value> program_builder::pop_result() {
+      if (results.empty())
+        return std::nullopt;
+
+      auto ret = results.back();
+      results.pop_back();
+      return ret;
+    }
+
+    bool program_builder::begin_function(size_t symbol) {
+      const auto& statementMeta = meta.statement_info[meta.symbols[symbol].statement_id];
+      if (!statementMeta.scope_id.has_value()) {
+        // TODO: Push error. Cannot begin function body. No scope assocated with declaration. (possibly forward decl).
+        return false;
+      }
+
       function_stack.push_back(functions.size());
       functions.emplace_back();
       functions.back().symbol   = symbol;
-      functions.back().scope_id = scope_id;
+      functions.back().scope_id = statementMeta.scope_id.value();
+
+      meta.symbols[symbol].function_index = function_stack.back();
+
+      return true;
     }
 
-    void program_builder::finish_function() {
+    void program_builder::end_function() {
       function_stack.pop_back();
     }
 
@@ -402,26 +475,52 @@ namespace adder {
       add_instruction(op);
     }
 
-    void program_builder::push_return_pointer()
-    {
+    void program_builder::jump_relative(int64_t offset) {
+      vm::instruction op;
+      op.code = vm::op_code::jump_relative;
+      op.jump_relative.offset = offset;
+      add_instruction(op);
+    }
+
+    void program_builder::push_return_pointer() {
       push(vm::register_names::rp);
     }
 
-    void program_builder::push_frame_pointer()
-    {
+    void program_builder::push_frame_pointer() {
       push(vm::register_names::fp);
     }
 
-    void program_builder::pop_return_pointer()
-    {
+    void program_builder::pop_return_pointer() {
       pop(vm::register_names::rp);
     }
 
-    void program_builder::pop_frame_pointer()
-    {
+    void program_builder::pop_frame_pointer() {
       pop(vm::register_names::fp);
     }
-    void program_builder::push(vm::register_index const& src) {
+
+    void program_builder::alloc_stack(size_t bytes) {
+      assert(!scopes.empty());
+
+      vm::instruction op;
+      op.code = vm::op_code::alloc_stack;
+      op.alloc_stack.bytes = (uint32_t)bytes;
+      add_instruction(op);
+
+      scopes.back().stack_bytes += bytes;
+    }
+
+    void program_builder::free_stack(size_t bytes) {
+      assert(!scopes.empty());
+
+      vm::instruction op;
+      op.code = vm::op_code::free_stack;
+      op.free_stack.bytes = (uint32_t)bytes;
+      add_instruction(op);
+
+      scopes.back().stack_bytes -= bytes;
+    }
+
+    void program_builder::push(vm::register_index const & src) {
       vm::instruction op;
       op.code = vm::op_code::push;
       op.push.size = sizeof(vm::register_value);
@@ -429,7 +528,7 @@ namespace adder {
       add_instruction(op);
     }
 
-    void program_builder::pop(vm::register_index const& dst) {
+    void program_builder::pop(vm::register_index const & dst) {
       vm::instruction op;
       op.code     = vm::op_code::pop;
       op.pop.size = sizeof(vm::register_value);
@@ -463,6 +562,12 @@ namespace adder {
       add_instruction(op);
       return idx;
     }
+
+    vm::register_index program_builder::load_value_of(program_builder::value value) {
+      value;
+      // TODO: Implement
+      return vm::register_index();
+    }
     
     vm::register_index program_builder::load_value_of(program_metadata::symbol const & symbol) {
       const size_t sz = meta.get_type_size(meta.types[symbol.type]);
@@ -484,6 +589,7 @@ namespace adder {
     }
 
     vm::register_index program_builder::load_constant(vm::register_value value) {
+      value;
       vm::register_index idx = registers.pin();
       vm::instruction op;
       op.code = vm::op_code::set;
@@ -520,6 +626,12 @@ namespace adder {
       add_instruction(op);
       add_relocation(identifier, AD_IOFFSET(load_addr.addr));
       return idx;
+    }
+
+    vm::register_index program_builder::load_address_of(program_builder::value value) {
+      value;
+      // TODO: Implement
+      return vm::register_index();
     }
     
     void program_builder::load(vm::register_index dst, vm::register_index address, size_t size, int64_t offset) {
@@ -964,7 +1076,7 @@ namespace adder {
       // 
       // return executable;
 
-      return {};
+      return program({});
     }
 
     std::optional<std::string> get_type_name(ast const& ast, size_t statement) {

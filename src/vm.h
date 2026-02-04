@@ -39,6 +39,7 @@ namespace adder {
       push,             ///< Push a register to the stack
       pop,              ///< Pop a register value from the stack. Store in named register
       jump,             ///< Set the program counter.
+      jump_relative,    ///< Add a value to the program counter
       jump_indirect,    ///< Set the program counter to a value stored in a register
       move,             ///< Move a value from a register
       compare_i64,      ///< Compare the values in two registers as integers
@@ -141,6 +142,10 @@ namespace adder {
       register_index addr; // [reg]
     };
 
+    template<> struct op_code_args<op_code::jump_relative> {
+      int64_t offset;
+    };
+
     template<> struct op_code_args<op_code::move> {
       register_index dst;
       register_index src;
@@ -200,6 +205,7 @@ namespace adder {
         op_code_args<op_code::pop> pop;
         op_code_args<op_code::jump> jump;
         op_code_args<op_code::jump_indirect> jump_indirect;
+        op_code_args<op_code::jump_relative> jump_relative;
         op_code_args<op_code::move> move;
         op_code_binary_op_args compare;
         op_code_args<op_code::conditional_jump> conditional_jump;
