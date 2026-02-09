@@ -706,9 +706,13 @@ namespace adder {
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t scopeId, expr::block const & block) {
       const size_t thisBlockScopeId = meta->scopes.size();
-      meta->scopes.emplace_back();
-      meta->scopes.back().parent = scopeId;
-      meta->scopes.back().prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
+      auto const& parentScope = meta->scopes[scopeId];
+
+      program_metadata::scope newScope;
+      newScope.function_scope = parentScope.function_scope;
+      newScope.parent = scopeId;
+      newScope.prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
+      meta->scopes.push_back(newScope);
 
       for (auto & statement : block.statements) {
         if (!evaluate_symbols(ast, meta, statement, thisBlockScopeId)) {

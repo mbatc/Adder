@@ -93,18 +93,20 @@ namespace adder {
       struct scope {
         std::string           prefix;
         std::vector<size_t>   symbols;
-
+        /// The direct parent of this scope.
         std::optional<size_t> parent;
-
         /// Scope ID of the function that contains this scope.
         /// If nullopt, this is the root scope of a function.
         std::optional<size_t> function_scope;
 
-        /// If a stack frame was pushed with this scope.
-        bool is_stack_frame = false;
-
-        size_t stack_size = 0;
-        size_t temp_size = 0;
+        /// Upper bound of space allocated for this function.
+        /// Includes variables in all nested scopes.
+        size_t max_stack_size = 0;
+        /// Used when generating scope metadata to track the required stack space at the current scope.
+        size_t stack_size_temp = 0;
+        /// Max size of temporary space needed to evaluate an expression.
+        /// A function scope must allocate the max_stack_size + max_temp_size for the stack frame.
+        size_t max_temp_size = 0;
       };
       std::vector<scope> scopes;
 
