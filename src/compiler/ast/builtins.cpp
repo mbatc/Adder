@@ -6,8 +6,8 @@ namespace adder {
   namespace compiler {
     namespace builtin {
       bool int_init_int(program_builder * program) {
-        auto & self = program->results[program->results.size() - 2];
-        auto & arg  = program->results[program->results.size() - 1];
+        auto & self = program->value_stack[program->value_stack.size() - 2];
+        auto & arg  = program->value_stack[program->value_stack.size() - 1];
         std::optional<size_t> selfType = program->meta.unwrap_type(self.type_index);
 
         if (!(program->meta.is_integer(selfType)
@@ -24,8 +24,8 @@ namespace adder {
       }
       
       bool add_int_int(program_builder* program) {
-        auto& self = program->results[program->results.size() - 2];
-        auto& arg  = program->results[program->results.size() - 1];
+        auto& self = program->value_stack[program->value_stack.size() - 2];
+        auto& arg  = program->value_stack[program->value_stack.size() - 1];
         std::optional<size_t> selfType = program->meta.unwrap_type(self.type_index);
         size_t typeSize = (uint8_t)program->meta.get_type_size(selfType.value());
         if (!selfType.has_value()) {

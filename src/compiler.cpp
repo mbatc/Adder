@@ -8,6 +8,7 @@
 #include "compiler/parser.h"
 #include "compiler/ast/expressions.h"
 #include "compiler/program_builder.h"
+#include "compiler/program_metadata.h"
 
 #include <memory>
 #include <map>
@@ -34,7 +35,7 @@ namespace adder {
       result.constant.emplace(0);
       std::memcpy(&result.constant.value(), &value, sizeof(value));
       result.type_index = program->meta.get_type_index("bool");
-      program->push_result(result);
+      program->push_value(result);
       return true;
     }
 
@@ -45,7 +46,7 @@ namespace adder {
       result.constant.emplace(0);
       std::memcpy(&result.constant.value(), &value, sizeof(value));
       result.type_index = program->meta.get_type_index("int64");
-      program->push_result(result);
+      program->push_value(result);
       return true;
     }
 
@@ -56,7 +57,7 @@ namespace adder {
       result.constant.emplace(0);
       std::memcpy(&result.constant.value(), &value, sizeof(value));
       result.type_index = program->meta.get_type_index("float64");
-      program->push_result(result);
+      program->push_value(result);
       return true;
     }
 
@@ -68,7 +69,7 @@ namespace adder {
       // result.symbol = program->push_data_symbol(value.data(), value.length());
       // std::memcpy(&result.constant.value(), &value, sizeof(value));
       result.type_index = program->meta.get_type_index("char[]");
-      program->push_result(result);
+      program->push_value(result);
       return true;
     }
 
@@ -91,7 +92,7 @@ namespace adder {
         return false;
       }
 
-      program->push_result(value.value());
+      program->push_value(value.value());
       return true;
     }
 
@@ -196,7 +197,7 @@ namespace adder {
         variableType
       };
 
-      auto& func = program->current_function();
+      // auto& func = program->current_function();
       receiver.identifier = statement.name;
 
       program->add_variable(receiver);
@@ -236,7 +237,7 @@ namespace adder {
         return false;
       }
 
-      auto receiver = program->results.back();
+      auto receiver = program->value_stack.back();
       if (!receiver.type_index.has_value()) {
         return false;
       }
@@ -253,7 +254,7 @@ namespace adder {
         return false;
       }
 
-      if (!initialize_variable(ast, program, receiver, program->results.back())) {
+      if (!initialize_variable(ast, program, receiver, program->value_stack.back())) {
         return false;
       }
 
@@ -267,7 +268,7 @@ namespace adder {
       // Allow `generate_code` to push all matching identifiers to `results`.
       // generate_call can then match the correct overload.
       // size_t overloadsEnd = program->results.size();
-      size_t startResult = program->results.size();
+      size_t startResult = program->value_stack.size();
       generate_code(ast, program, statement.left.value());
       if (statement.right.has_value())
         generate_code(ast, program, statement.right.value());
@@ -306,10 +307,10 @@ namespace adder {
 
         program->begin_scope();
 
-        program->results.push_back(program->get_return_value(returnType));
+        program->value_stack.push_back(program->get_return_value(returnType));
 
         auto &func = program->current_function();
-        int64_t nextArgOffset = -func.args_size;
+        int64_t nextArgOffset = -(int64_t)func.args_size;
 
         for (auto argId : statement.arguments) {
           const auto & decl = ast.get<expr::variable_declaration>(argId);
@@ -371,14 +372,14 @@ namespace adder {
           program->add_variable(cpy);
         }
         else {
-          auto receiver = program->allocate_value(argType);
+          auto receiver = program->allocate_temporary_value(argType);
           receiver.identifier = name;
           program->add_variable(receiver);
           return initialize_variable(ast, program, receiver, src);
         }
       }
       else {
-        auto receiver = program->allocate_value(argType);
+        auto receiver = program->allocate_temporary_value(argType);
         receiver.identifier = name;
         program->add_variable(receiver);
 
@@ -391,10 +392,10 @@ namespace adder {
             return false;
           }
 
-          size_t start = program->results.size();
-          program->push_result(unnamedInit);
-          program->push_result(receiver);
-          program->push_result(src);
+          size_t start = program->value_stack.size();
+          program->push_value(unnamedInit);
+          program->push_value(receiver);
+          program->push_value(src);
           return generate_call(ast, program, start);
         }
         else {
@@ -406,7 +407,7 @@ namespace adder {
 
     /// Generate a call using expressions pushed to the builders result stack.
     bool generate_call(ast const & ast, program_builder * program, size_t startResult) {
-      program_builder::value function = program->results[startResult];
+      program_builder::value function = program->value_stack[startResult];
 
       if (!function.symbol_index.has_value()) {
         // Push error: First expression must be a callable symbol.
@@ -442,7 +443,7 @@ namespace adder {
         signature = &std::get<type_function>(funcType.desc);
       }
 
-      if (signature->arguments.size() != program->results.size() - startResult - 1) {
+      if (signature->arguments.size() != program->value_stack.size() - startResult - 1) {
         // Push error: Invalid argument count
         return false;
       }
@@ -455,7 +456,7 @@ namespace adder {
 
       // TODO: This needs to happen before any parameter expressions are evaluated.
       //       They might allocate temporary storage which will be freed before this temporary.
-      program_builder::value returnResult = program->allocate_value(signature->return_type);
+      program_builder::value returnResult = program->allocate_temporary_value(signature->return_type);
 
       if (inlineCall) {
         program->begin_scope();
@@ -473,7 +474,7 @@ namespace adder {
           int64_t resultIdx = startResult + i + 1;
           auto &decl = ast.get<expr::function_declaration>(func->function_id);
           auto &var  = ast.get<expr::variable_declaration>(decl.arguments[i]);
-          push_argument(ast, program, var.name, program->results[resultIdx], signature->arguments[i], inlineCall);
+          push_argument(ast, program, var.name, program->value_stack[resultIdx], signature->arguments[i], inlineCall);
         }
 
         auto &decl = ast.get<expr::function_declaration>(func->function_id);
@@ -493,7 +494,7 @@ namespace adder {
 
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
           int64_t resultIdx = startResult + i + 1;
-          push_argument(ast, program, "", program->results[resultIdx], signature->arguments[i], inlineCall);
+          push_argument(ast, program, "", program->value_stack[resultIdx], signature->arguments[i], inlineCall);
         }
 
         program->call(callable);
@@ -503,17 +504,17 @@ namespace adder {
         program->pop_return_pointer();
       }
 
-      while (program->results.size() > startResult)
+      while (program->value_stack.size() > startResult)
         program->pop_result();
 
-      program->push_result(returnResult);
+      program->push_value(returnResult);
       return true;
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::call const& statement, size_t statementId) {
       unused(statementId);
 
-      size_t first = program->results.size();
+      size_t first = program->value_stack.size();
 
       generate_code(ast, program, statement.functor);
 
@@ -549,10 +550,11 @@ namespace adder {
       }
 
       program->begin_scope();
-      auto scope_meta = program->meta.scopes[scope_id.value()];
 
-      if (scope_meta.symbols_size > 0) {
-        program->alloc_stack(scope_meta.symbols_size);
+      auto scope_meta = program->meta.scopes[scope_id.value()];
+      if (!scope_meta.parent_function_scope.has_value()) {
+        // Is function stack frame
+        program->alloc_stack(scope_meta.max_stack_size + scope_meta.max_temp_size);
       }
 
       for (size_t statementId : scope.statements)
@@ -560,13 +562,13 @@ namespace adder {
           return false;
 
       for (auto symbol_id : scope_meta.symbols) {
-        if (program->meta.symbols[symbol_id].is_local()) {
+        if (program->meta.symbols[symbol_id].is_global()) {
           destroy_symbol(ast, program, symbol_id);
         }
       }
 
-      if (scope_meta.symbols_size > 0) {
-        program->free_stack(scope_meta.symbols_size);
+      if (scope_meta.parent_function_scope > 0) {
+        program->free_stack(scope_meta.max_stack_size + scope_meta.max_temp_size);
       }
 
       program->end_scope();
@@ -705,14 +707,15 @@ namespace adder {
     }
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t scopeId, expr::block const & block) {
-      const size_t thisBlockScopeId = meta->scopes.size();
-      auto const& parentScope = meta->scopes[scopeId];
+      auto const & parentScope = meta->scopes[scopeId];
 
-      program_metadata::scope newScope;
-      newScope.function_scope = parentScope.function_scope;
-      newScope.parent = scopeId;
-      newScope.prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
-      meta->scopes.push_back(newScope);
+      const size_t thisBlockScopeId = meta->new_scope(scopeId);
+
+      {
+        program_metadata::scope & newScope = meta->scopes[thisBlockScopeId];
+        newScope.parent_function_scope = parentScope.parent_function_scope;
+        newScope.prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
+      }
 
       for (auto & statement : block.statements) {
         if (!evaluate_symbols(ast, meta, statement, thisBlockScopeId)) {
@@ -723,7 +726,7 @@ namespace adder {
       return true;
     }
 
-    bool evaluate_statement_symbols(ast const& ast, program_metadata * meta, size_t scopeId, expr::function_declaration const & decl) {
+    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t scopeId, expr::function_declaration const & decl) {
       program_metadata::symbol symbol;
       symbol.name     = decl.identifier;
       symbol.scope_id = scopeId;
@@ -760,25 +763,26 @@ namespace adder {
 
       if (decl.body.has_value()) {
         if (ast.is<expr::block>(decl.body.value())) {
-          const auto& block = ast.get<expr::block>(decl.body.value());
-          const size_t thisBlockScopeId = meta->scopes.size();
-          program_metadata::scope functionScope;
-          functionScope.function_scope = std::nullopt;
-          functionScope.parent = scopeId;
-          functionScope.prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
-          meta->scopes.push_back(functionScope);
+          const auto & block = ast.get<expr::block>(decl.body.value());
+          const size_t thisBlockScopeId = meta->new_scope(scopeId);
+
+          {
+            program_metadata::scope& functionScope = meta->scopes[thisBlockScopeId];
+            functionScope.parent_function_scope = std::nullopt;
+            functionScope.prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
+          }
 
           meta->statement_info[decl.body.value()].parent_scope_id = scopeId;
           meta->statement_info[decl.body.value()].scope_id        = thisBlockScopeId;
 
-          for (const size_t& statement : decl.arguments) {
+          for (const size_t statement : decl.arguments) {
             // TODO: Should arguments be part of the "block" statement?
             if (!evaluate_symbols(ast, meta, statement, thisBlockScopeId)) {
               return false;
             }
           }
 
-          for (const size_t& statement : block.statements) {
+          for (const size_t statement : block.statements) {
             if (!evaluate_symbols(ast, meta, statement, thisBlockScopeId)) {
               return false;
             }
@@ -861,41 +865,51 @@ namespace adder {
       return true;
     }
 
-    bool evaluate_stack_space(ast const & ast, program_metadata * meta) {
-      // meta->scopes[func.scope_id].stack_size;
-      // func.stack_size =
-      //   std::max(func.stack_size, program->meta.symbols[symbolIndex].stack_offset.value() + program->meta.get_type_size(variableType));
+    void evaluate_stack_allocations(program_metadata * meta, const size_t rootId = 0, const size_t allocatedStackSpace = 0) {
+      program_metadata::scope & root = meta->scopes[rootId];
+      size_t stackSize = root.parent_function_scope.has_value() ? allocatedStackSpace : 0;
+      for (size_t symbolId : root.symbols) {
+        program_metadata::symbol & symbol = meta->symbols[symbolId];
+        if (!symbol.has_local_storage()) {
+          continue;
+        }
+
+        symbol.stack_offset = stackSize;
+        stackSize += meta->get_type_size(symbol.type);
+      }
+
+      if (root.parent_function_scope.has_value()) {
+        program_metadata::scope & storageScope = meta->scopes[root.parent_function_scope.value()];
+        storageScope.max_stack_size = std::max(storageScope.max_stack_size, stackSize);
+      }
+      else {
+        root.max_stack_size = stackSize;
+      }
+
+      meta->for_each_child_scope(rootId, [&](size_t childId) {
+        evaluate_stack_allocations(meta, childId, stackSize);
+      });
     }
 
     void evaluate_variable_addresses(program_metadata * meta) {
       meta->static_storage_size = 0;
       for (auto & scope : meta->scopes) {
-        scope.symbols_size = 0;
-        size_t paramsSize = 0;
-
         for (const auto & index : scope.symbols) {
-          auto & symbol = meta->symbols[index];
-          const bool isParameter = (symbol.flags & symbol_flags::fn_parameter) != symbol_flags::none;
-          const bool isStatic    = (symbol.flags & symbol_flags::static_) != symbol_flags::none;
-          const bool isFunction  = (symbol.flags & symbol_flags::function) != symbol_flags::none;
-          if (isFunction) {
+          program_metadata::symbol & symbol = meta->symbols[index];
+
+          const bool isParameter = symbol.is_parameter();
+          const bool isStatic    = symbol.is_static();
+          const bool isFunction  = symbol.is_function();
+
+          if (isFunction || isParameter) {
             continue; // Ignore function declarations for this phase.
           }
 
           const size_t sz = meta->get_type_size(symbol.type);
-          const bool isGlobal = symbol.scope_id == 0;
-
-          if (isParameter) {
-            symbol.stack_offset = -(int64_t)(paramsSize + sz);
-            paramsSize += sz;
-          }
-          else if (isStatic || isGlobal) {
+          const bool isGlobal = !symbol.is_global();
+          if (isStatic || isGlobal) {
             symbol.global_address = meta->static_storage_size;
             meta->static_storage_size += sz;
-          }
-          else {
-            symbol.stack_offset = scope.symbols_size;
-            scope.symbols_size += sz;
           }
         }
       }
@@ -906,9 +920,8 @@ namespace adder {
 
       ret.meta.statement_info.resize(ast.statements.size());
 
-      // evaluate_types(ast, &ret.meta);
       evaluate_symbols(ast, &ret.meta);
-      evaluate_stack_space(ast, &ret.meta);
+      evaluate_stack_allocations(&ret.meta);
       evaluate_variable_addresses(&ret.meta);
 
       // generate_code();

@@ -54,8 +54,6 @@ namespace adder {
         std::optional<size_t> symbol_index;
         /// Type that this statement is associated with (if any)
         std::optional<size_t> type_id;
-        /// How many bytes of temp storage are required for this statement.
-        size_t temp_storage = 0;
       };
       std::vector<statement_meta> statement_info;
 
@@ -86,29 +84,36 @@ namespace adder {
         bool is_parameter() const { return (flags & symbol_flags::fn_parameter) != symbol_flags::none; }
         bool is_static()    const { return (flags & symbol_flags::static_) != symbol_flags::none; }
         bool is_function()  const { return (flags & symbol_flags::function) != symbol_flags::none; }
-        bool is_local()     const { return scope_id != 0; };
+        bool is_global()     const { return scope_id == 0; };
+        bool has_local_storage() const { return !is_global() && !is_static(); }
       };
       std::vector<symbol> symbols;
 
       struct scope {
+        /// Unique symbol prefix for this scope.
         std::string           prefix;
+        /// Symbols declared in this scope
         std::vector<size_t>   symbols;
         /// The direct parent of this scope.
         std::optional<size_t> parent;
+        /// Next sibling of this scope.
+        std::optional<size_t> sibling;
+        /// First child of this scope.
+        std::optional<size_t> first_child;
         /// Scope ID of the function that contains this scope.
         /// If nullopt, this is the root scope of a function.
-        std::optional<size_t> function_scope;
-
+        std::optional<size_t> parent_function_scope;
         /// Upper bound of space allocated for this function.
         /// Includes variables in all nested scopes.
         size_t max_stack_size = 0;
-        /// Used when generating scope metadata to track the required stack space at the current scope.
-        size_t stack_size_temp = 0;
         /// Max size of temporary space needed to evaluate an expression.
         /// A function scope must allocate the max_stack_size + max_temp_size for the stack frame.
         size_t max_temp_size = 0;
       };
       std::vector<scope> scopes;
+
+      size_t new_scope(size_t parent);
+      void for_each_child_scope(size_t root, std::function<void(size_t)> const& cb);
 
       size_t add_type(type const & desc);
       size_t add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
@@ -175,9 +180,8 @@ namespace adder {
         size_t symbol;
         size_t scope_id;
 
-        size_t args_size = 0; ///< Size of the function parameters.
-        size_t stack_size = 0;
-        size_t temp_symbols_size = 0;
+        size_t args_size = 0;         ///< Size of the function parameters.
+        size_t temp_storage_used = 0; ///< Max temp storage allocated while evaluating this function
 
         std::vector<vm::instruction> instructions;
       };
@@ -185,10 +189,11 @@ namespace adder {
       std::vector<function> functions;
 
       struct value {
+        /// TODO: Most of these are mutually exclusive. Could be a union.
         std::optional<std::string> identifier;
         /// Constant value evaluated
         std::optional<vm::register_value> constant;
-        /// Index of the symbol
+        /// Stack frame offset of the value
         std::optional<size_t> stack_frame_offset;
         /// Index of the symbol
         std::optional<size_t> symbol_index;
@@ -196,18 +201,16 @@ namespace adder {
         std::optional<size_t> type_index;
         /// Base address offset to the value (if applicable)
         size_t address_offset;
+        /// If the value uses temporary storage space.
+        bool is_temporary = false;
       };
-      std::vector<value> results;
+      std::vector<value> value_stack;
 
       struct scope {
-        size_t stack_bytes = 0;
-
         std::vector<value> variables;
+        std::vector<value> temporaries;
       };
       std::vector<scope> scopes;
-
-      void push_result(value r);
-      std::optional<value> pop_result();
 
       struct relocation {
         std::string_view symbol;
@@ -218,6 +221,9 @@ namespace adder {
       /// Identifiers whose location needs to be resolved.
       /// [identifier] -> list of offsets into instructions. Offset is in bytes
       std::vector<relocation> relocations;
+
+      void push_value(value r);
+      std::optional<value> pop_result();
 
       bool begin_function(size_t symbol);
       void end_function();
@@ -236,18 +242,16 @@ namespace adder {
 
       /// Add an identifier to the current scope
       void add_variable(program_builder::value const & val);
-
       /// Find a symbol by identifier. Searches from the inner most scope outwards.
       std::optional<value> find_value_by_identifier(std::string_view const & name) const;
       std::optional<value> find_value_by_identifier(std::string_view const & name, size_t scopeIndex) const;
 
-      /// Allocate space for a return value and push an expression_result to the result stack.
-      program_builder::value allocate_value(size_t typeIndex);
+      /// Allocate space for a temporary and push a value to the value_stack
+      program_builder::value allocate_temporary_value(size_t typeIndex);
+      void free_temporary_value();
+      void destroy_value(value * value);
 
       size_t current_scope_id() const;
-      size_t current_scope_stack_size() const;
-
-      // expression_result alloc_temporary_value(size_t typeIndex);
 
       void add_relocation(std::string_view const& symbol, uint64_t offset);
 

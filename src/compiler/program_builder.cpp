@@ -191,6 +191,38 @@ namespace adder {
         }, type.desc);
     }
 
+    size_t program_metadata::new_scope(size_t parent) {
+      const size_t newScopeId = scopes.size();
+      scopes.emplace_back();
+
+      scope & newScope = scopes.back();
+      newScope.parent = parent;
+
+      scope & parentScope = scopes[parent];
+      if (!parentScope.first_child.has_value()) {
+        parentScope.first_child = newScopeId;
+        return newScopeId;
+      }
+
+      size_t lastSibling = parentScope.first_child.value();
+      for (; scopes[lastSibling].sibling.has_value(); lastSibling = scopes[lastSibling].sibling.value());
+      scopes[lastSibling].sibling = newScopeId;
+
+      return newScopeId;
+    }
+
+    void program_metadata::for_each_child_scope(size_t rootId, std::function<void(size_t)> const & cb) {
+      scope & root = scopes[rootId];
+      if (!root.first_child.has_value()) {
+        return;
+      }
+
+      size_t next = root.first_child.value();
+      cb(next);
+      for (; scopes[next].sibling.has_value(); next = scopes[next].sibling.value())
+        cb(scopes[next].sibling.value());
+    }
+
     size_t program_metadata::add_type(type const & desc) {
       const auto existing = get_type_index(desc.identifier);
       if (existing.has_value())
@@ -311,7 +343,7 @@ namespace adder {
 
     bool program_builder::end_scope() {
       assert(!scopes.empty());
-      assert(scopes.back().stack_bytes == 0);
+      assert(scopes.back().temporaries.size() == 0);
       scopes.pop_back();
       return true;
     }
@@ -363,22 +395,38 @@ namespace adder {
       return find_value_by_identifier(name, scopeIndex - 1);
     }
 
-    program_builder::value program_builder::allocate_value(size_t typeIndex) {
+    program_builder::value program_builder::allocate_temporary_value(size_t typeIndex) {
       const size_t sz = meta.get_type_size(typeIndex);
       value result;
-      result.stack_frame_offset = current_scope_stack_size();
+      auto & func = current_function();
+      auto& scopeMeta = meta.scopes[current_function().scope_id];
+
+      const size_t offset = meta.scopes[current_function().scope_id].max_stack_size + func.temp_storage_used;
+      func.temp_storage_used += sz;
+
+      // TODO: Would be nice to eval this ahead of time, same as max_stack_size.
+      //       A bit annoying having this evaluated during code gen. Ideally, meta evaled should be complete before code-gen
+      scopeMeta.max_temp_size = std::max(scopeMeta.max_temp_size, func.temp_storage_used);
+      result.stack_frame_offset =  offset;
       result.type_index = typeIndex;
-      alloc_stack(sz);
-      push_result(result);
+
+      scopes.back().temporaries.push_back(result);
+
+      push_value(std::move(result));
       return result;
+    }
+
+    void program_builder::free_temporary_value() {
+      destroy_value(&scopes.back().temporaries.back());
+      scopes.back().temporaries.pop_back();
+    }
+
+    void program_builder::destroy_value(value * value) {
+      unused(value);
     }
 
     size_t program_builder::current_scope_id() const {
       return functions[function_stack.back()].scope_id;
-    }
-
-    size_t program_builder::current_scope_stack_size() const {
-      return scopes.back().stack_bytes;
     }
 
     void program_builder::add_relocation(std::string_view const & symbol, uint64_t offset) {
@@ -389,16 +437,16 @@ namespace adder {
       relocations.push_back({ symbol, addr, function_stack.back() });
     }
 
-    void program_builder::push_result(value r) {
-      results.push_back(r);
+    void program_builder::push_value(value r) {
+      value_stack.push_back(std::move(r));
     }
 
     std::optional<program_builder::value> program_builder::pop_result() {
-      if (results.empty())
+      if (value_stack.empty())
         return std::nullopt;
 
-      auto ret = results.back();
-      results.pop_back();
+      auto ret = value_stack.back();
+      value_stack.pop_back();
       return ret;
     }
 
@@ -416,13 +464,10 @@ namespace adder {
         func.args_size += meta.get_type_size(argTypes);
       }
 
-      func.symbol            = symbol;
-      func.scope_id          = statementMeta.scope_id.value();
-      func.temp_symbols_size = statementMeta.temp_storage;
-      func.stack_size        = 0;
+      func.symbol   = symbol;
+      func.scope_id = statementMeta.scope_id.value();
       functions.push_back(func);
       function_stack.push_back(functions.size());
-      
 
       meta.symbols[symbol].function_index = function_stack.back();
 
@@ -526,25 +571,17 @@ namespace adder {
     }
 
     void program_builder::alloc_stack(size_t bytes) {
-      assert(!scopes.empty());
-
       vm::instruction op;
       op.code = vm::op_code::alloc_stack;
       op.alloc_stack.bytes = (uint32_t)bytes;
       add_instruction(op);
-
-      scopes.back().stack_bytes += bytes;
     }
 
     void program_builder::free_stack(size_t bytes) {
-      assert(!scopes.empty());
-
       vm::instruction op;
       op.code = vm::op_code::free_stack;
       op.free_stack.bytes = (uint32_t)bytes;
       add_instruction(op);
-
-      scopes.back().stack_bytes -= bytes;
     }
 
     void program_builder::push(vm::register_index const & src) {
