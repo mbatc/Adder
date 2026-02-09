@@ -54,6 +54,8 @@ namespace adder {
         std::optional<size_t> symbol_index;
         /// Type that this statement is associated with (if any)
         std::optional<size_t> type_id;
+        /// How many bytes of temp storage are required for this statement.
+        size_t temp_storage = 0;
       };
       std::vector<statement_meta> statement_info;
 
@@ -91,12 +93,18 @@ namespace adder {
       struct scope {
         std::string           prefix;
         std::vector<size_t>   symbols;
+
         std::optional<size_t> parent;
+
+        /// Scope ID of the function that contains this scope.
+        /// If nullopt, this is the root scope of a function.
+        std::optional<size_t> function_scope;
 
         /// If a stack frame was pushed with this scope.
         bool is_stack_frame = false;
 
-        size_t symbols_size = 0;
+        size_t stack_size = 0;
+        size_t temp_size = 0;
       };
       std::vector<scope> scopes;
 
@@ -165,12 +173,17 @@ namespace adder {
         size_t symbol;
         size_t scope_id;
 
+        size_t args_size = 0; ///< Size of the function parameters.
+        size_t stack_size = 0;
+        size_t temp_symbols_size = 0;
+
         std::vector<vm::instruction> instructions;
       };
       std::vector<size_t>   function_stack;
       std::vector<function> functions;
 
       struct value {
+        std::optional<std::string> identifier;
         /// Constant value evaluated
         std::optional<vm::register_value> constant;
         /// Index of the symbol
@@ -184,21 +197,15 @@ namespace adder {
       };
       std::vector<value> results;
 
-      struct identifier {
-        std::string name;
-        value reference;
-      };
-
       struct scope {
-        size_t meta_index  = 0;
         size_t stack_bytes = 0;
-        std::vector<identifier> identifiers;
-      };
 
+        std::vector<value> variables;
+      };
       std::vector<scope> scopes;
 
       void push_result(value r);
-      std::optional<program_builder::value> pop_result();
+      std::optional<value> pop_result();
 
       struct relocation {
         std::string_view symbol;
@@ -212,16 +219,21 @@ namespace adder {
 
       bool begin_function(size_t symbol);
       void end_function();
+      function& current_function();
 
       bool begin_scope();
       bool end_scope();
 
       void push_return_handler(const std::function<void(program_builder*)>& handler);
       void pop_return_handler();
+      void return_with_return_handler();
       std::vector<std::function<void(program_builder*)>> return_handler_stack;
 
+      /// Get a value that describes the return value.
+      value get_return_value(size_t typeIndex) const;
+
       /// Add an identifier to the current scope
-      void add_identifier(std::string_view const & name, value const & reference);
+      void add_variable(program_builder::value const & val);
 
       /// Find a symbol by identifier. Searches from the inner most scope outwards.
       std::optional<value> find_value_by_identifier(std::string_view const & name) const;

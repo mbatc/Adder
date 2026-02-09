@@ -324,13 +324,25 @@ namespace adder {
       return_handler_stack.pop_back();
     }
 
-    void program_builder::add_identifier(std::string_view const & name, program_builder::value const & val) {
-      assert(!scopes.empty());
+    void program_builder::return_with_return_handler() {
+      assert(!return_handler_stack.empty());
 
-      scopes.back().identifiers.push_back(identifier{
-        std::string(name),
-        val
-      });
+      return_handler_stack.back()(this);
+    }
+
+    program_builder::value program_builder::get_return_value(size_t typeIndex) const {
+      assert(!function_stack.empty());
+      auto const & func = functions[function_stack.back()];
+
+      value ret;
+      ret.stack_frame_offset = -(int64_t)meta.get_type_size(typeIndex) - func.args_size;
+      ret.type_index         = typeIndex;
+      return ret;
+    }
+
+    void program_builder::add_variable(program_builder::value const & val) {
+      assert(!scopes.empty());
+      scopes.back().variables.push_back(val);
     }
 
     std::optional<program_builder::value> program_builder::find_value_by_identifier(std::string_view const& name) const {
@@ -341,11 +353,11 @@ namespace adder {
 
     std::optional<program_builder::value> program_builder::find_value_by_identifier(std::string_view const& name, size_t scopeIndex) const {
       assert(scopeIndex < scopes.size());
-      const auto& scope = scopes[scopeIndex];
-      const auto& ids = scope.identifiers;
-      auto found = std::find_if(ids.rbegin(), ids.rend(), [&](identifier const& id) { return id.name == name; });
-      if (found != ids.rend())
-        return found->reference;
+      const auto& scope     = scopes[scopeIndex];
+      const auto& variables = scope.variables;
+      auto found = std::find_if(variables.rbegin(), variables.rend(), [&](value const& val) { return val.identifier == name; });
+      if (found != variables.rend())
+        return *found;
       if (scopeIndex == 0)
         return std::nullopt;
       return find_value_by_identifier(name, scopeIndex - 1);
@@ -392,15 +404,25 @@ namespace adder {
 
     bool program_builder::begin_function(size_t symbol) {
       const auto& statementMeta = meta.statement_info[meta.symbols[symbol].statement_id];
+
       if (!statementMeta.scope_id.has_value()) {
         // TODO: Push error. Cannot begin function body. No scope assocated with declaration. (possibly forward decl).
         return false;
       }
 
+      function func;
+      auto const & type = meta.types[meta.symbols[symbol].type];
+      for (size_t const & argTypes : std::get<type_function>(type.desc).arguments) {
+        func.args_size += meta.get_type_size(argTypes);
+      }
+
+      func.symbol            = symbol;
+      func.scope_id          = statementMeta.scope_id.value();
+      func.temp_symbols_size = statementMeta.temp_storage;
+      func.stack_size        = 0;
+      functions.push_back(func);
       function_stack.push_back(functions.size());
-      functions.emplace_back();
-      functions.back().symbol   = symbol;
-      functions.back().scope_id = statementMeta.scope_id.value();
+      
 
       meta.symbols[symbol].function_index = function_stack.back();
 
@@ -409,6 +431,11 @@ namespace adder {
 
     void program_builder::end_function() {
       function_stack.pop_back();
+    }
+
+    program_builder::function& program_builder::current_function() {
+      assert(!function_stack.empty());
+      return functions[function_stack.back()];
     }
 
     void program_builder::call(program_metadata::symbol const & symbol) {

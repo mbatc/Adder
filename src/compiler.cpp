@@ -188,6 +188,7 @@ namespace adder {
 
       const size_t variableType = program->meta.get_type_index(ast, statement.type.value()).value();
       const size_t symbolIndex  = program->meta.statement_info[statementId].symbol_index.value();
+
       program_builder::value receiver = {
         std::nullopt,
         std::nullopt,
@@ -195,7 +196,10 @@ namespace adder {
         variableType
       };
 
-      program->add_identifier(statement.name, receiver);
+      auto& func = program->current_function();
+      receiver.identifier = statement.name;
+
+      program->add_variable(receiver);
 
       if (initializer.has_value())
         initialize_variable(ast, program, receiver, initializer.value());
@@ -302,6 +306,11 @@ namespace adder {
 
         program->begin_scope();
 
+        program->results.push_back(program->get_return_value(returnType));
+
+        auto &func = program->current_function();
+        int64_t nextArgOffset = -func.args_size;
+
         for (auto argId : statement.arguments) {
           const auto & decl = ast.get<expr::variable_declaration>(argId);
           const auto & argSymbol = program->meta.statement_info[argId].symbol_index;
@@ -313,9 +322,12 @@ namespace adder {
           program_builder::value val;
           val.symbol_index = argSymbol;
           val.type_index = program->meta.symbols[argSymbol.value()].type;
-          program->add_identifier(decl.name, val);
+          val.stack_frame_offset = nextArgOffset;
+          val.identifier = decl.name;
+          nextArgOffset += program->meta.get_type_size(val.type_index.value());
+
+          program->add_variable(val);
         }
-        program->allocate_value(returnType);
 
         if (!generate_code(ast, program, statement.body.value())) {
           // TODO: Report error. Failed to generate code for function.
@@ -331,7 +343,8 @@ namespace adder {
       program_builder::value val;
       val.symbol_index = symbolIndex;
       val.type_index = program->meta.symbols[symbolIndex.value()].type;
-      program->add_identifier(statement.identifier, val);
+      val.identifier = statement.identifier;
+      program->add_variable(val);
 
       unused(ast, program, statement);
       return true;
@@ -353,17 +366,21 @@ namespace adder {
 
       if (isInline) {
         if (src.type_index == argType) {
-          program->add_identifier(name, src);
+          auto cpy = src;
+          cpy.identifier = name;
+          program->add_variable(cpy);
         }
         else {
           auto receiver = program->allocate_value(argType);
-          program->add_identifier(name, receiver);
+          receiver.identifier = name;
+          program->add_variable(receiver);
           return initialize_variable(ast, program, receiver, src);
         }
       }
       else {
         auto receiver = program->allocate_value(argType);
-        program->add_identifier(name, receiver);
+        receiver.identifier = name;
+        program->add_variable(receiver);
 
         if (src.type_index == argType) {
           program_builder::value unnamedInit;
@@ -741,9 +758,11 @@ namespace adder {
         if (ast.is<expr::block>(decl.body.value())) {
           const auto& block = ast.get<expr::block>(decl.body.value());
           const size_t thisBlockScopeId = meta->scopes.size();
-          meta->scopes.emplace_back();
-          meta->scopes.back().parent = scopeId;
-          meta->scopes.back().prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
+          program_metadata::scope functionScope;
+          functionScope.function_scope = std::nullopt;
+          functionScope.parent = scopeId;
+          functionScope.prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
+          meta->scopes.push_back(functionScope);
 
           meta->statement_info[decl.body.value()].parent_scope_id = scopeId;
           meta->statement_info[decl.body.value()].scope_id        = thisBlockScopeId;
@@ -838,6 +857,12 @@ namespace adder {
       return true;
     }
 
+    bool evaluate_stack_space(ast const & ast, program_metadata * meta) {
+      // meta->scopes[func.scope_id].stack_size;
+      // func.stack_size =
+      //   std::max(func.stack_size, program->meta.symbols[symbolIndex].stack_offset.value() + program->meta.get_type_size(variableType));
+    }
+
     void evaluate_variable_addresses(program_metadata * meta) {
       meta->static_storage_size = 0;
       for (auto & scope : meta->scopes) {
@@ -879,6 +904,7 @@ namespace adder {
 
       // evaluate_types(ast, &ret.meta);
       evaluate_symbols(ast, &ret.meta);
+      evaluate_stack_space(ast, &ret.meta);
       evaluate_variable_addresses(&ret.meta);
 
       // generate_code();
