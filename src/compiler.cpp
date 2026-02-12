@@ -8,7 +8,6 @@
 #include "compiler/parser.h"
 #include "compiler/ast/expressions.h"
 #include "compiler/program_builder.h"
-#include "compiler/program_metadata.h"
 
 #include <memory>
 #include <map>
@@ -307,7 +306,8 @@ namespace adder {
 
         program->begin_scope();
 
-        program->value_stack.push_back(program->get_return_value(returnType));
+        program->current_function().return = program->get_return_value(returnType);
+        program->value_stack.push_back();
 
         auto &func = program->current_function();
         int64_t nextArgOffset = -(int64_t)func.args_size;
@@ -385,6 +385,8 @@ namespace adder {
 
         if (src.type_index == argType) {
           program_builder::value unnamedInit;
+          program->find_unnamed_initializer(argType, argType);
+          program->find_value_by_identifier("");
           unnamedInit.symbol_index = program->meta.find_unnamed_initializer(program->current_scope_id(), argType, argType);
 
           if (!unnamedInit.symbol_index.has_value()) {
@@ -543,32 +545,32 @@ namespace adder {
     bool generate_code(ast const & ast, program_builder * program, expr::block const & scope, size_t blockId) {
       unused(blockId);
 
-      auto scope_id = program->meta.statement_info[blockId].scope_id;
-      if (!scope_id.has_value()) {
-        // Error: Block is not associated with a scope.
+      auto scopeId = program->meta.statement_info[blockId].scope_index;
+      if (scopeId.has_value()) {
+        // No associated scope
         return false;
       }
 
       program->begin_scope();
 
-      auto scope_meta = program->meta.scopes[scope_id.value()];
-      if (!scope_meta.parent_function_scope.has_value()) {
+      auto scopeMeta = program->meta.scopes[scopeId.value()];
+      if (!scopeMeta.parent_function_scope.has_value()) {
         // Is function stack frame
-        program->alloc_stack(scope_meta.max_stack_size + scope_meta.max_temp_size);
+        program->alloc_stack(scopeMeta.max_stack_size + scopeMeta.max_temp_size);
       }
 
       for (size_t statementId : scope.statements)
         if (!generate_code(ast, program, statementId))
           return false;
 
-      for (auto symbol_id : scope_meta.symbols) {
-        if (program->meta.symbols[symbol_id].is_global()) {
-          destroy_symbol(ast, program, symbol_id);
+      for (auto symbolId : scopeMeta.symbols) {
+        if (program->meta.symbols[symbolId].is_global()) {
+          destroy_symbol(ast, program, symbolId);
         }
       }
 
-      if (scope_meta.parent_function_scope > 0) {
-        program->free_stack(scope_meta.max_stack_size + scope_meta.max_temp_size);
+      if (scopeMeta.parent_function_scope > 0) {
+        program->free_stack(scopeMeta.max_stack_size + scopeMeta.max_temp_size);
       }
 
       program->end_scope();
@@ -707,14 +709,22 @@ namespace adder {
     }
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t scopeId, expr::block const & block) {
-      auto const & parentScope = meta->scopes[scopeId];
+      auto & statementInfo = meta->statement_info[ast.id_of(&block).value()];
+      size_t thisBlockScopeId = 0;
+      if (statementInfo.scope_index.has_value()) {
+        // Already have a scope index.
+        // This is the root scope of a function declaration.
+        thisBlockScopeId = statementInfo.scope_index.value();
+      } else {
+        thisBlockScopeId = meta->new_scope(scopeId);
+        statementInfo.scope_index = thisBlockScopeId;
 
-      const size_t thisBlockScopeId = meta->new_scope(scopeId);
-
-      {
         program_metadata::scope & newScope = meta->scopes[thisBlockScopeId];
-        newScope.parent_function_scope = parentScope.parent_function_scope;
-        newScope.prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
+        if (newScope.parent.has_value()) {
+          program_metadata::scope& parentScope = meta->scopes[newScope.parent.value()];
+          newScope.parent_function_scope = parentScope.parent_function_scope;
+        }
+        newScope.prefix = adder::format("%s/%s/", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
       }
 
       for (auto & statement : block.statements) {
@@ -762,34 +772,28 @@ namespace adder {
       meta->statement_info[funcStatementId].symbol_index = symbol_index;
 
       if (decl.body.has_value()) {
-        if (ast.is<expr::block>(decl.body.value())) {
-          const auto & block = ast.get<expr::block>(decl.body.value());
-          const size_t thisBlockScopeId = meta->new_scope(scopeId);
+        const size_t thisBlockScopeId = meta->new_scope(scopeId);
+        meta->statement_info[funcStatementId].scope_index = thisBlockScopeId;
+        meta->statement_info[decl.body.value()].scope_index = thisBlockScopeId;
 
-          {
-            program_metadata::scope& functionScope = meta->scopes[thisBlockScopeId];
-            functionScope.parent_function_scope = std::nullopt;
-            functionScope.prefix = adder::format("%s%s>", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
-          }
-
-          meta->statement_info[decl.body.value()].parent_scope_id = scopeId;
-          meta->statement_info[decl.body.value()].scope_id        = thisBlockScopeId;
-
-          for (const size_t statement : decl.arguments) {
-            // TODO: Should arguments be part of the "block" statement?
-            if (!evaluate_symbols(ast, meta, statement, thisBlockScopeId)) {
-              return false;
-            }
-          }
-
-          for (const size_t statement : block.statements) {
-            if (!evaluate_symbols(ast, meta, statement, thisBlockScopeId)) {
-              return false;
-            }
-          }
-
-          meta->statement_info[funcStatementId].scope_id = thisBlockScopeId;
+        {
+          program_metadata::scope& functionScope = meta->scopes[thisBlockScopeId];
+          functionScope.parent_function_scope = std::nullopt;
+          functionScope.prefix = adder::format("%.*s/",
+            symbol.full_identifier.length(),
+            symbol.full_identifier.data()
+          );
         }
+        meta->symbols[symbol_index.value()].function_root_scope_id = thisBlockScopeId;
+
+        for (const size_t statement : decl.arguments) {
+          // TODO: Should arguments be part of the "block" statement?
+          if (!evaluate_symbols(ast, meta, statement, thisBlockScopeId)) {
+            return false;
+          }
+        }
+
+        evaluate_symbols(ast, meta, decl.body.value(), thisBlockScopeId);
       }
 
       return true;
@@ -838,8 +842,7 @@ namespace adder {
     }
 
     bool evaluate_symbols(ast const & ast, program_metadata * meta, size_t id, size_t parentScopeId) {
-      meta->statement_info[id].parent_scope_id = parentScopeId;
-
+      // meta->statement_info[id].parent_scope_id = parentScopeId;
       return std::visit(
         [&](auto&& s) {
           return evaluate_statement_symbols(ast, meta, parentScopeId, s);

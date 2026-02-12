@@ -377,22 +377,43 @@ namespace adder {
       scopes.back().variables.push_back(val);
     }
 
-    std::optional<program_builder::value> program_builder::find_value_by_identifier(std::string_view const& name) const {
-      assert(!scopes.empty());
+    std::optional<program_builder::value> program_builder::find_unnamed_initializer(size_t receiver, size_t initializer) {
+      std::string_view symbolName = adder::format(
+        "init ([ref]%.*s,%.*s)=>void:",
+        meta.types[receiver].identifier.length(), meta.types[receiver].identifier.data(),
+        meta.types[initializer].identifier.length(), meta.types[initializer].identifier.data()
+      );
 
+      return find_value([=](program_builder::value const & candidate) {
+        if (!candidate.symbol_index.has_value())
+          return false;
+        const auto & symbol = meta.symbols[candidate.symbol_index.value()];
+        return symbol.full_identifier == symbolName;
+      });
+    }
+
+    std::optional<program_builder::value> program_builder::find_value_by_identifier(std::string_view const& name) const {
       return find_value_by_identifier(name, scopes.size() - 1);
     }
 
     std::optional<program_builder::value> program_builder::find_value_by_identifier(std::string_view const& name, size_t scopeIndex) const {
+      return find_value([name](value const& val) { return val.identifier == name; }, scopeIndex);
+    }
+
+    std::optional<program_builder::value> program_builder::find_value(std::function<bool(value const&)> const & predicate) const {
+      return find_value(predicate, scopes.size() - 1);
+    }
+
+    std::optional<program_builder::value> program_builder::find_value(std::function<bool(value const&)> const & predicate, size_t scopeIndex) const {
       assert(scopeIndex < scopes.size());
       const auto& scope     = scopes[scopeIndex];
       const auto& variables = scope.variables;
-      auto found = std::find_if(variables.rbegin(), variables.rend(), [&](value const& val) { return val.identifier == name; });
+      auto found = std::find_if(variables.rbegin(), variables.rend(), predicate);
       if (found != variables.rend())
         return *found;
       if (scopeIndex == 0)
         return std::nullopt;
-      return find_value_by_identifier(name, scopeIndex - 1);
+      return find_value(predicate, scopeIndex - 1);
     }
 
     program_builder::value program_builder::allocate_temporary_value(size_t typeIndex) {
@@ -411,8 +432,6 @@ namespace adder {
       result.type_index = typeIndex;
 
       scopes.back().temporaries.push_back(result);
-
-      push_value(std::move(result));
       return result;
     }
 
@@ -450,26 +469,27 @@ namespace adder {
       return ret;
     }
 
-    bool program_builder::begin_function(size_t symbol) {
-      const auto& statementMeta = meta.statement_info[meta.symbols[symbol].statement_id];
+    bool program_builder::begin_function(size_t symbolId) {
+      program_metadata::symbol & symbol = meta.symbols[symbolId];
+      symbol.function_root_scope_id;
 
-      if (!statementMeta.scope_id.has_value()) {
+      if (!symbol.function_root_scope_id.has_value()) {
         // TODO: Push error. Cannot begin function body. No scope assocated with declaration. (possibly forward decl).
         return false;
       }
 
       function func;
-      auto const & type = meta.types[meta.symbols[symbol].type];
+      auto const & type = meta.types[symbol.type];
       for (size_t const & argTypes : std::get<type_function>(type.desc).arguments) {
         func.args_size += meta.get_type_size(argTypes);
       }
 
-      func.symbol   = symbol;
-      func.scope_id = statementMeta.scope_id.value();
-      functions.push_back(func);
+      func.symbol   = symbolId;
+      func.scope_id = symbol.function_root_scope_id.value();
       function_stack.push_back(functions.size());
+      functions.push_back(func);
 
-      meta.symbols[symbol].function_index = function_stack.back();
+      symbol.function_index = function_stack.back();
 
       return true;
     }
@@ -489,7 +509,7 @@ namespace adder {
 
       if (symbol.function_index.has_value()) {
         call(0);
-        add_relocation(symbol.name, AD_IOFFSET(call.addr));
+        add_relocation(symbol.full_identifier, AD_IOFFSET(call.addr));
       }
       else {
         const auto addr = load_value_of(symbol);
@@ -530,7 +550,7 @@ namespace adder {
       }
       
       jump_to(0);
-      add_relocation(symbol.name, AD_IOFFSET(jump.addr));
+      add_relocation(symbol.full_identifier, AD_IOFFSET(jump.addr));
     }
 
     void program_builder::jump_to(uint64_t address) {
@@ -645,7 +665,7 @@ namespace adder {
         return ret;
       }
       else {
-        const auto addr = load_address_of(symbol.name, sz);
+        const auto addr = load_address_of(symbol.full_identifier, sz);
         const auto ret  = load_value_of(addr, sz);
         registers.release(addr);
         return ret;
@@ -674,7 +694,7 @@ namespace adder {
       }
       else {
         set(dst, 0);
-        add_relocation(symbol.name, AD_IOFFSET(set.val));
+        add_relocation(symbol.full_identifier, AD_IOFFSET(set.val));
       }
       return dst;
     }

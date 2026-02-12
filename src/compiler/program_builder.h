@@ -46,10 +46,8 @@ namespace adder {
       /// Additional metadata for each statement.
       /// TODO: Undecided if this should just be stored in the AST.
       struct statement_meta {
-        /// Parent scope of this statement is 
-        size_t parent_scope_id;
-        /// Scope created by this statement
-        std::optional<size_t> scope_id;
+        /// Scope associated with this symbol (if any)
+        std::optional<size_t> scope_index;
         /// Symbol the statement is associated with (if any)
         std::optional<size_t> symbol_index;
         /// Type that this statement is associated with (if any)
@@ -60,25 +58,22 @@ namespace adder {
       struct symbol {
         std::string name;
         std::string full_identifier;
-        size_t      type        = 0;
+        size_t type = 0;
 
         /// Flags for the symbol
         symbol_flags flags = symbol_flags::none;
-
         /// Stack frame offset for local variables
         std::optional<uint64_t> stack_offset;
-
         /// Static address for static/global.
         /// Cannot be resolved until program data area has been compiled.
         std::optional<uint64_t> global_address;
-
-        /// Statement that produced this symbol
+        /// Statement that produced this symbol.
         size_t statement_id = 0;
-
-        /// Scope that declared this symbol
+        /// Scope that declared this symbol.
         size_t scope_id = 0;
-
-        /// Function declaration associated with this symbol
+        /// Function declaration root scope id.
+        std::optional<size_t> function_root_scope_id;
+        /// Function declaration associated with this symbol.
         std::optional<size_t> function_index;
 
         bool is_parameter() const { return (flags & symbol_flags::fn_parameter) != symbol_flags::none; }
@@ -163,18 +158,30 @@ namespace adder {
       program_metadata meta;
 
       struct Registers {
-        // struct State {
-        //   vm::register_index index;
-        //   std::optional<uint64_t> address;
-        //   std::optional<uint64_t> value;
-        //   std::optional<uint64_t> constant;
-        // };
         std::vector<vm::register_index> free;
         vm::register_index next = 0;
 
         vm::register_index pin();
         void release(vm::register_index idx);
       } registers;
+
+      struct value {
+        /// TODO: Most of these are mutually exclusive. Could be a union.
+        std::optional<std::string> identifier;
+        /// Constant value evaluated
+        std::optional<vm::register_value> constant;
+        /// Stack frame offset of the value
+        std::optional<int64_t> stack_frame_offset;
+        /// Index of the symbol
+        std::optional<size_t> symbol_index;
+        /// Type of the value
+        std::optional<size_t> type_index;
+        /// Base address offset to the value (if applicable)
+        int64_t address_offset = 0;
+        /// If the value uses temporary storage space.
+        bool is_temporary = false;
+      };
+      std::vector<value> value_stack;
 
       struct function {
         size_t symbol;
@@ -184,27 +191,12 @@ namespace adder {
         size_t temp_storage_used = 0; ///< Max temp storage allocated while evaluating this function
 
         std::vector<vm::instruction> instructions;
+
+        value return_value;
+        std::vector<value> parameters;
       };
       std::vector<size_t>   function_stack;
       std::vector<function> functions;
-
-      struct value {
-        /// TODO: Most of these are mutually exclusive. Could be a union.
-        std::optional<std::string> identifier;
-        /// Constant value evaluated
-        std::optional<vm::register_value> constant;
-        /// Stack frame offset of the value
-        std::optional<size_t> stack_frame_offset;
-        /// Index of the symbol
-        std::optional<size_t> symbol_index;
-        /// Type of the value
-        std::optional<size_t> type_index;
-        /// Base address offset to the value (if applicable)
-        size_t address_offset;
-        /// If the value uses temporary storage space.
-        bool is_temporary = false;
-      };
-      std::vector<value> value_stack;
 
       struct scope {
         std::vector<value> variables;
@@ -242,9 +234,14 @@ namespace adder {
 
       /// Add an identifier to the current scope
       void add_variable(program_builder::value const & val);
+
+      std::optional<value> find_unnamed_initializer(size_t receiver, size_t initializer);
+
       /// Find a symbol by identifier. Searches from the inner most scope outwards.
       std::optional<value> find_value_by_identifier(std::string_view const & name) const;
       std::optional<value> find_value_by_identifier(std::string_view const & name, size_t scopeIndex) const;
+      std::optional<value> find_value(std::function<bool(value const &)> const & predicate) const;
+      std::optional<value> find_value(std::function<bool(value const &)> const & predicate, size_t scopeIndex) const;
 
       /// Allocate space for a temporary and push a value to the value_stack
       program_builder::value allocate_temporary_value(size_t typeIndex);
