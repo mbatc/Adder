@@ -294,8 +294,6 @@ namespace adder {
       const auto &symbol = program->meta.symbols[symbolIndex.value()];
 
       if (statement.body.has_value()) {
-        const size_t returnType = program->meta.return_type_of(symbol.type).value();
-
         program->begin_function(symbolIndex.value());
 
         program->push_return_handler([](auto* program) {
@@ -305,9 +303,6 @@ namespace adder {
         });
 
         program->begin_scope();
-
-        program->current_function().return = program->get_return_value(returnType);
-        program->value_stack.push_back();
 
         auto &func = program->current_function();
         int64_t nextArgOffset = -(int64_t)func.args_size;

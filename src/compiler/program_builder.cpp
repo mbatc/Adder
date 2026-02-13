@@ -362,14 +362,25 @@ namespace adder {
       return_handler_stack.back()(this);
     }
 
-    program_builder::value program_builder::get_return_value(size_t typeIndex) const {
+    program_builder::value program_builder::get_return_value() const {
       assert(!function_stack.empty());
       auto const & func = functions[function_stack.back()];
-
       value ret;
-      ret.stack_frame_offset = -(int64_t)meta.get_type_size(typeIndex) - func.args_size;
-      ret.type_index         = typeIndex;
+      ret.stack_frame_offset = -(int64_t)meta.get_type_size(func.return_type) - func.args_size;
+      ret.type_index         = func.return_type;
       return ret;
+    }
+    
+    size_t program_builder::get_value_type(value const & val) const {
+      if (val.type_index.has_value()) {
+        return val.type_index.value();
+      }
+
+      if (val.symbol_index.has_value()) {
+        return meta.symbols[val.symbol_index.value()].type;
+      }
+
+      return 0;
     }
 
     void program_builder::add_variable(program_builder::value const & val) {
@@ -471,7 +482,6 @@ namespace adder {
 
     bool program_builder::begin_function(size_t symbolId) {
       program_metadata::symbol & symbol = meta.symbols[symbolId];
-      symbol.function_root_scope_id;
 
       if (!symbol.function_root_scope_id.has_value()) {
         // TODO: Push error. Cannot begin function body. No scope assocated with declaration. (possibly forward decl).
@@ -480,12 +490,14 @@ namespace adder {
 
       function func;
       auto const & type = meta.types[symbol.type];
-      for (size_t const & argTypes : std::get<type_function>(type.desc).arguments) {
+      auto const& funcDesc = std::get<type_function>(type.desc);
+      for (size_t const & argTypes : funcDesc.arguments) {
         func.args_size += meta.get_type_size(argTypes);
       }
+      func.return_type = funcDesc.return_type;
+      func.symbol      = symbolId;
+      func.scope_id    = symbol.function_root_scope_id.value();
 
-      func.symbol   = symbolId;
-      func.scope_id = symbol.function_root_scope_id.value();
       function_stack.push_back(functions.size());
       functions.push_back(func);
 

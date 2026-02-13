@@ -6,16 +6,20 @@ namespace adder {
   namespace compiler {
     namespace builtin {
       bool int_init_int(program_builder * program) {
-        auto & self = program->value_stack[program->value_stack.size() - 2];
-        auto & arg  = program->value_stack[program->value_stack.size() - 1];
-        std::optional<size_t> selfType = program->meta.unwrap_type(self.type_index);
+        auto self = program->find_value_by_identifier("self");
+        auto arg  = program->find_value_by_identifier("a");
+        if (!self.has_value() || !arg.has_value()) {
+          return false;
+        }
 
-        if (!(program->meta.is_integer(selfType)
-          && program->meta.is_integer(arg.type_index)))
+        std::optional<size_t> selfType = program->get_value_type(self.value());
+        std::optional<size_t> argType = program->get_value_type(arg.value());
+        if (!(program->meta.is_integer(program->meta.unwrap_type(selfType))
+          && program->meta.is_integer(argType)))
           return false;
 
-        vm::register_index addr  = program->load_address_of(self);
-        vm::register_index value = program->load_value_of(arg);
+        vm::register_index addr  = program->load_address_of(self.value());
+        vm::register_index value = program->load_value_of(arg.value());
 
         program->store(value, addr, (uint8_t)program->meta.get_type_size(selfType.value())); // Indirect store into address stored in `addr`
         program->release_register(value);
@@ -23,22 +27,21 @@ namespace adder {
         return true;
       }
       
-      bool add_int_int(program_builder* program) {
-        auto& self = program->value_stack[program->value_stack.size() - 2];
-        auto& arg  = program->value_stack[program->value_stack.size() - 1];
-        std::optional<size_t> selfType = program->meta.unwrap_type(self.type_index);
-        size_t typeSize = (uint8_t)program->meta.get_type_size(selfType.value());
-        if (!selfType.has_value()) {
+      bool add_int_int(program_builder * program) {
+        auto a = program->find_value_by_identifier("a");
+        auto b = program->find_value_by_identifier("b");
+        if (!a.has_value() || !b.has_value()) {
           return false;
         }
 
-        vm::register_index addr = program->load_address_of(self);
-        vm::register_index rhs  = program->load_value_of(arg);
-        vm::register_index lhs  = program->pin_register();
-
-        program->load(lhs, addr, typeSize);
+        size_t sz = program->meta.get_type_size(a->type_index.value());
+        auto ret = program->get_return_value();
+        vm::register_index lhs  = program->load_value_of(a.value());
+        vm::register_index rhs  = program->load_value_of(b.value());
+        vm::register_index addr = program->load_address_of(ret);
+        
         program->addi(lhs, lhs, rhs);
-        program->store(lhs, addr, (uint8_t)typeSize);
+        program->store(lhs, addr, (uint8_t)sz);
 
         program->release_register(addr);
         program->release_register(rhs);
@@ -58,7 +61,7 @@ namespace adder {
 
       expr::variable_declaration arg1;
       arg1.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
-      arg1.name = "$1";
+      arg1.name = "a";
       arg1.type = tree->add(arg1TypeName);
 
       expr::byte_code code;
@@ -87,12 +90,12 @@ namespace adder {
     size_t add_int(ast* tree, size_t valueType) {
       expr::variable_declaration arg0;
       arg0.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
-      arg0.name = "$0";
+      arg0.name = "a";
       arg0.type = valueType;
 
       expr::variable_declaration arg1;
       arg1.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
-      arg1.name = "$1";
+      arg1.name = "b";
       arg1.type = valueType;
 
       expr::byte_code code;

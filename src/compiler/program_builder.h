@@ -186,14 +186,13 @@ namespace adder {
       struct function {
         size_t symbol;
         size_t scope_id;
+        size_t return_type;
 
         size_t args_size = 0;         ///< Size of the function parameters.
+        size_t arg_count = 0;         ///< Number of arguments to this function.
         size_t temp_storage_used = 0; ///< Max temp storage allocated while evaluating this function
 
         std::vector<vm::instruction> instructions;
-
-        value return_value;
-        std::vector<value> parameters;
       };
       std::vector<size_t>   function_stack;
       std::vector<function> functions;
@@ -230,7 +229,11 @@ namespace adder {
       std::vector<std::function<void(program_builder*)>> return_handler_stack;
 
       /// Get a value that describes the return value.
-      value get_return_value(size_t typeIndex) const;
+      /// TODO: Might need to "push" return value for handling inline calls
+      value get_return_value() const;
+
+      /// Get the type of a value
+      size_t get_value_type(value const & val) const;
 
       /// Add an identifier to the current scope
       void add_variable(program_builder::value const & val);
