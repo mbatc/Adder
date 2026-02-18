@@ -68,7 +68,7 @@ namespace adder {
         /// Cannot be resolved until program data area has been compiled.
         std::optional<uint64_t> global_address;
         /// Statement that produced this symbol.
-        size_t statement_id = 0;
+        /// size_t statement_id = 0;
         /// Scope that declared this symbol.
         size_t scope_id = 0;
         /// Function declaration root scope id.
@@ -144,6 +144,8 @@ namespace adder {
       size_t get_type_size(size_t const & typeIndex) const;
 
       std::optional<size_t> add_symbol(symbol const & s);
+      size_t get_symbol_size(size_t const & symbolIndex) const;
+
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::string_view const & identifier) const;
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const;
       std::optional<size_t> find_symbol(std::string_view const & fullName) const;
@@ -165,9 +167,19 @@ namespace adder {
         void release(vm::register_index idx);
       } registers;
 
+      enum class value_flags {
+        none = 0,
+        temporary = 1 << 0,
+        /// Treat as if it has reference semantics.
+        /// Used when aliasing references for inline functions.
+        eval_as_reference = 1 << 1
+      };
+
       struct value {
         /// TODO: Most of these are mutually exclusive. Could be a union.
         std::optional<std::string> identifier;
+        /// Value stored in a register
+        std::optional<vm::register_index> register_index;
         /// Constant value evaluated
         std::optional<vm::register_value> constant;
         /// Stack frame offset of the value
@@ -178,20 +190,30 @@ namespace adder {
         std::optional<size_t> type_index;
         /// Base address offset to the value (if applicable)
         int64_t address_offset = 0;
-        /// If the value uses temporary storage space.
-        bool is_temporary = false;
+
+        value_flags flags = value_flags::none;
       };
       std::vector<value> value_stack;
+
+      enum class instruction_tag : uint8_t {
+        none,
+        return_jmp ///< Set jump instruction address to the start of the function return section
+      };
 
       struct function {
         size_t symbol;
         size_t scope_id;
         size_t return_type;
 
+        size_t declaration_id; ///< ID of the declaration statement
+
         size_t args_size = 0;         ///< Size of the function parameters.
         size_t arg_count = 0;         ///< Number of arguments to this function.
         size_t temp_storage_used = 0; ///< Max temp storage allocated while evaluating this function
 
+        size_t return_section_start = 0;
+
+        std::vector<instruction_tag> instruction_tags;
         std::vector<vm::instruction> instructions;
       };
       std::vector<size_t>   function_stack;
@@ -214,11 +236,11 @@ namespace adder {
       std::vector<relocation> relocations;
 
       void push_value(value r);
-      std::optional<value> pop_result();
+      std::optional<value> pop_value();
 
-      bool begin_function(size_t symbol);
+      bool begin_function(size_t symbol, size_t declarationStatementId);
       void end_function();
-      function& current_function();
+      function & current_function();
 
       bool begin_scope();
       bool end_scope();
@@ -255,12 +277,13 @@ namespace adder {
 
       void add_relocation(std::string_view const& symbol, uint64_t offset);
 
-      void call(program_metadata::symbol const & symbol);
+      void call(value const & func);
       void call(uint64_t address);
       void call_indirect(vm::register_index const & symbol);
       void ret();
 
-      void jump_to(program_metadata::symbol const & symbol);
+      void jump_to(value const & location);
+      // void jump_to(program_metadata::symbol const & symbol);
       void jump_to(uint64_t address);
       void jump_indirect(vm::register_index const & address);
       void jump_relative(int64_t offset);
@@ -291,20 +314,22 @@ namespace adder {
       // vm::register_index load_address_of(expression_result const & result);
 
       vm::register_index load_constant(vm::register_value value);
-      vm::register_index load_value_of(program_metadata::symbol const & symbol);
-      vm::register_index load_value_of(uint64_t address, size_t size);
-      vm::register_index load_value_of(program_builder::value value);
-      vm::register_index load_address_of(program_metadata::symbol const & symbol);
-      vm::register_index load_address_of(std::string_view identifier, size_t size);
-      vm::register_index load_address_of(program_builder::value value);
+      // vm::register_index load_value_of(program_metadata::symbol const & symbol);
+      // vm::register_index load_value_of(uint64_t address, size_t size);
+      vm::register_index load_value_of(program_builder::value const & value);
+      // vm::register_index load_address_of(program_metadata::symbol const & symbol);
+      // vm::register_index load_address_of(std::string_view identifier, size_t size);
+      vm::register_index load_address_of(program_builder::value const & value);
       void release_register(vm::register_index reg);
 
       // expression_result pop_expression_result();
       void load(vm::register_index dst, vm::register_index address, size_t size, int64_t offset);
       void load(vm::register_index dst, vm::register_index address, size_t size);
+      void load_from_constant_address(vm::register_index dst, vm::register_value address, size_t size);
       void move(vm::register_index dst, vm::register_index src);
       void set(vm::register_index dst, vm::register_value value);
-      bool store(vm::register_index src, vm::register_index dst, uint8_t sz);
+      bool store(vm::register_index src, vm::register_index address, uint8_t sz);
+      bool store(vm::register_index src, vm::register_index address, uint8_t sz, int64_t offset);
       void addi(vm::register_index dst, vm::register_index a, vm::register_index b);
       void addf(vm::register_index dst, vm::register_index a, vm::register_index b);
       void subi(vm::register_index dst, vm::register_index a, vm::register_index b);
@@ -315,9 +340,13 @@ namespace adder {
       void mulf(vm::register_index dst, vm::register_index a, vm::register_index b);
 
       void add_instruction(vm::instruction inst);
+      void set_instruction_tag(instruction_tag tag);
 
       /// Convert the program to a binary
       program binary() const;
     };
   }
+
+  template<>
+  struct enable_bitwise_ops<compiler::program_builder::value_flags> : std::true_type {};
 }

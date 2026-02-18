@@ -120,11 +120,11 @@ namespace adder {
         size_t                expression;
         std::optional<size_t> next;
       };
-
-      struct call {
-        size_t                functor;
-        std::optional<size_t> parameters;
-      };
+      
+      // struct call {
+      //   size_t                functor;
+      //   std::optional<size_t> parameters;
+      // };
 
       struct class_decl {
         std::string_view identifier;
@@ -149,7 +149,7 @@ namespace adder {
         byte_code,
         function_declaration,
         call_parameter,
-        call,
+        // call,
         class_decl,
         conversion
       >;

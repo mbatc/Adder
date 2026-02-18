@@ -14,11 +14,11 @@ namespace adder {
 
         std::optional<size_t> selfType = program->get_value_type(self.value());
         std::optional<size_t> argType = program->get_value_type(arg.value());
-        if (!(program->meta.is_integer(program->meta.unwrap_type(selfType))
-          && program->meta.is_integer(argType)))
-          return false;
+        // if (!(program->meta.is_integer(program->meta.unwrap_type(selfType))
+        //   && program->meta.is_integer(argType)))
+        //   return false;
 
-        vm::register_index addr  = program->load_address_of(self.value());
+        vm::register_index addr  = program->load_value_of(self.value()); // self is a reference, so load the address it points to.
         vm::register_index value = program->load_value_of(arg.value());
 
         program->store(value, addr, (uint8_t)program->meta.get_type_size(selfType.value())); // Indirect store into address stored in `addr`
@@ -39,7 +39,6 @@ namespace adder {
         vm::register_index lhs  = program->load_value_of(a.value());
         vm::register_index rhs  = program->load_value_of(b.value());
         vm::register_index addr = program->load_address_of(ret);
-        
         program->addi(lhs, lhs, rhs);
         program->store(lhs, addr, (uint8_t)sz);
 

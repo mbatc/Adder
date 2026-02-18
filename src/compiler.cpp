@@ -19,8 +19,25 @@
 namespace adder {
   // Compiler implementation
   namespace compiler {
-    bool generate_call(ast const& ast, program_builder* program, size_t startResult);
-    bool generate_copy(ast const& ast, program_builder* program, size_t statementId) {
+    size_t eval_decltype(ast const& ast, program_metadata * meta, size_t statementId);
+    size_t eval_decltype_impl(ast const& ast, program_metadata * meta, size_t statementId, ...) {
+      auto metaTypeId = meta->statement_info[statementId].type_id;
+      return metaTypeId.value_or(meta->get_type_index(get_primitive_type_name(type_primitive::void_)));
+    }
+
+    size_t eval_decltype_impl(ast const& ast, program_metadata * meta, size_t statementId, expr::binary_operator const & call) {
+
+      meta->is_valid_function_overload();
+      call.left;
+      call.right;
+    }
+
+    size_t eval_decltype(ast const & ast, program_metadata * meta, size_t statementId) {
+      return std::visit([=](auto&& o) { return eval_decltype_impl(ast, meta, statementId, o); }, ast.statements[statementId]);
+    }
+
+    bool generate_call(ast const & ast, program_builder * program, program_builder::value const & function, size_t argsStartIndex);
+    bool generate_copy(ast const & ast, program_builder * program, size_t statementId) {
       unused(ast, program, statementId);
       return false;
     }
@@ -115,65 +132,47 @@ namespace adder {
       return false;
     }
 
-    bool initialize_variable(ast const & ast, program_builder * program, program_builder::value receiver, program_builder::value initializer) {
-      unused(ast, program, receiver, initializer);
-      return false;
-      // if (!receiver.symbol_index.has_value()) {
-      //   return false;
-      // }
-      // 
-      // std::optional<size_t> initializerType = initializer.type_index;
-      // if (initializer.symbol_index.has_value())
-      //   initializerType = program->meta.symbols[initializer.symbol_index.has_value()].type;
-      // 
-      // if (!initializerType.has_value()) {
-      //   return false;
-      // }
-      // 
-      // if (!receiver.type_index.has_value())
-      //   receiver.type_index = program->meta.symbols[receiver.symbol_index.value()].type;
-      // 
-      // if (program->meta.is_reference_of(receiver.type_index.value(), initializer.type_index.value())) {
-      //   // Explicitly init references to types.
-      //   auto addr = program->pin_address_of(initializer);
-      //   program->store(addr, receiver);
-      //   program->release_register(addr);
-      //   return true;
-      // }
-      // 
-      // program_builder::expression_result unnamedInit;
-      // unnamedInit.symbol_index = program->meta.find_unnamed_initializer(
-      //   program->current_scope_id(),
-      //   receiver.type_index.value(),
-      //   initializerType.value()
-      // );
-      // 
-      // if (!unnamedInit.symbol_index.has_value()) {
-      //   // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
-      //   return false;
-      // }
-      // 
-      // size_t start = program->results.size();
-      // size_t funcType = program->meta.symbols[unnamedInit.symbol_index.value()].type;
-      // auto returnType = program->meta.return_type_of(funcType);
-      // if (!returnType.has_value()) {
-      //   // TODO: Push error. Not a callable type. Has no return type.
-      //   return false;
-      // }
-      // 
-      // program->alloc_temporary_value(returnType.value());
-      // program->push_expression_result(unnamedInit);
-      // program->push_expression_result(receiver);
-      // program->push_expression_result(initializer);
-      // return generate_call(ast, program, start);
+    bool initialize_variable(ast const & ast, program_builder * program, program_builder::value const & receiver, program_builder::value const & initializer) {
+      assert(receiver.type_index.has_value());
+      assert(!receiver.constant.has_value());
+      assert(initializer.type_index.has_value());
+
+      if (program->meta.is_reference_of(receiver.type_index.value(), initializer.type_index.value())) {
+        // Explicitly init references to types.
+        auto address  = program->load_address_of(initializer);
+        auto variable = program->load_address_of(receiver);
+        program->store(address, variable, sizeof(vm::register_value));
+        program->release_register(variable);
+        program->release_register(address);
+        return true;
+      }
+      
+      std::optional<program_builder::value> unnamedInit = program->find_unnamed_initializer(receiver.type_index.value(), initializer.type_index.value());
+
+      if (!unnamedInit.has_value()) {
+        // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
+        return false;
+      }
+
+      // program->allocate_temporary_value(returnType.value());
+      size_t start = program->value_stack.size();
+      program->push_value({}); // Null return value
+      program->push_value(receiver);
+      program->push_value(initializer);
+      bool result = generate_call(ast, program, unnamedInit.value(), start);
+      program->pop_value();
+      program->pop_value();
+      program->pop_value();
+      return result;
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::variable_declaration const & statement, size_t statementId) {
-      unused(statementId);
       std::optional<program_builder::value> initializer;
       if (statement.initializer.has_value()) {
+        size_t count = program->value_stack.size();
         generate_code(ast, program, statement.initializer.value());
-        initializer = program->pop_result();
+        assert(count < program->value_stack.size());
+        initializer = program->pop_value();
       }
 
       std::optional<size_t> type = statement.type;
@@ -195,14 +194,13 @@ namespace adder {
         symbolIndex,
         variableType
       };
-
-      // auto& func = program->current_function();
       receiver.identifier = statement.name;
 
       program->add_variable(receiver);
 
-      if (initializer.has_value())
+      if (initializer.has_value()) {
         initialize_variable(ast, program, receiver, initializer.value());
+      }
 
       return true;
     }
@@ -236,12 +234,12 @@ namespace adder {
         return false;
       }
 
-      auto receiver = program->value_stack.back();
+      auto receiver = program->get_return_value();
       if (!receiver.type_index.has_value()) {
         return false;
       }
 
-      if (!program->meta.is_void(receiver.type_index)) {
+      if (program->meta.is_void(receiver.type_index)) {
         if (statement.expression.has_value()) {
           // TODO: Push error. Unexpected expression for function that returns void.
           return false;
@@ -253,11 +251,119 @@ namespace adder {
         return false;
       }
 
-      if (!initialize_variable(ast, program, receiver, program->value_stack.back())) {
+      auto expressionResult = program->pop_value();
+      if (!expressionResult.has_value()) {
         return false;
       }
 
-      program->ret();
+      if (!initialize_variable(ast, program, receiver, expressionResult.value())) {
+        return false;
+      }
+
+      program->return_with_return_handler();
+      return true;
+    }
+
+    bool prepare_call(ast const & ast, program_builder * program, program_builder::value const & function, std::optional<size_t> const & parameters) {
+      if (parameters.has_value()) {
+        auto currentParam = parameters;
+        while (currentParam.has_value()) {
+          auto param = ast.get<expr::call_parameter>(parameters.value());
+          generate_code(ast, program, param.expression);
+          program->meta.statement_info[param.expression].type_id;
+          currentParam = param.next;
+        }
+      }
+
+      if (!function.symbol_index.has_value()) {
+        // Push error: First expression must be a callable symbol.
+        return false;
+      }
+
+      // Push parameters to the stack
+      auto & callable   = program->meta.symbols[function.symbol_index.value()];
+      auto & symbolType = program->meta.types[callable.type];
+
+      // Pointer to the actual function definition.
+      // Allows us to inline the call if possible
+      expr::function_declaration const * func =
+        callable.function_index.has_value()
+        ? &ast.get<expr::function_declaration>(program->functions[callable.function_index.value()].declaration_id)
+        : nullptr;
+
+      type_function * signature =
+        std::holds_alternative<type_function>(symbolType.desc)
+        ? &std::get<type_function>(symbolType.desc)
+        : nullptr;
+
+      if (signature == nullptr) {
+        // Push error: Type is not callable.
+        return false;
+      }
+
+      size_t returnResultIdx = valuesStartIndex;
+      size_t argsStartIndex = valuesStartIndex + 1;
+      if (signature->arguments.size() != program->value_stack.size() - argsStartIndex) {
+        // Push error: Invalid argument count
+        return false;
+      }
+
+      const bool inlineCall = func != nullptr &&
+        (func->flags & symbol_flags::inline_) == symbol_flags::inline_ && callable.function_index.has_value();
+
+      if (inlineCall) {
+        program->begin_scope();
+
+        size_t rootScope = program->scopes.size();
+        program->push_return_handler([rootScope](auto* program) {
+          for (size_t scope = program->scopes.size() - 1; scope >= rootScope; --scope) {
+            for (auto const & value : program->scopes[scope].variables) {
+              value;
+              // TODO:
+              // program->destroy_local_variable(value);
+            }
+          }
+
+          // Might not need return handlers for inlining. Instead,
+          //   1. Find all program_builder::instruction_tag::return_jmp tags after generating inline code
+          //   2. Replace address with end of inline function.
+          //   3. Reset tag to instruction_tag::none
+          program->jump_relative(0);
+          program->set_instruction_tag(program_builder::instruction_tag::return_jmp);
+          });
+
+        for (size_t i = 0; i < signature->arguments.size(); ++i) {
+          int64_t resultIdx = argsStartIndex + i;
+          auto &var  = ast.get<expr::variable_declaration>(func->arguments[i]);
+          push_argument(ast, program, var.name, program->value_stack[resultIdx], signature->arguments[i], inlineCall);
+        }
+
+        if (func->body.has_value()) {
+          if (!generate_code(ast, program, func->body.value())) {
+            return false;
+          }
+        }
+
+        program->end_scope();
+      }
+      else {
+        program->push_return_pointer();
+        program->push_frame_pointer();
+        program->move(vm::register_names::fp, vm::register_names::sp);
+        program->begin_scope();
+
+        for (size_t i = 0; i < signature->arguments.size(); ++i) {
+          int64_t resultIdx = argsStartIndex + i;
+          push_argument(ast, program, "", program->value_stack[resultIdx], signature->arguments[i], inlineCall);
+        }
+
+        program->call(function);
+        program->end_scope();
+
+        program->pop_frame_pointer();
+        program->pop_return_pointer();
+      }
+
       return true;
     }
 
@@ -267,15 +373,23 @@ namespace adder {
       // Allow `generate_code` to push all matching identifiers to `results`.
       // generate_call can then match the correct overload.
       // size_t overloadsEnd = program->results.size();
-      size_t startResult = program->value_stack.size();
       generate_code(ast, program, statement.left.value());
-      if (statement.right.has_value())
-        generate_code(ast, program, statement.right.value());
 
       switch (statement.type_name) {
-      case expr::operator_type::call:
-        generate_call(ast, program, startResult);
+      case expr::operator_type::call: {
+        size_t startResult = program->value_stack.size();
+        prepare_call(ast, program, program->value_stack.back(), statement.right.value());
+        // TODO: When generating code,
+        //   1. value_stack should have the lhs or dst of the final return value at the top.
+        //   2. implement a prepare_call function that evaluates parameters and allocates temporaries.
+        //      prepare_call will also allocate the return value.
+        //      All temporaries must be allocated before the return value and parameters.
+        //      [optimize] If a temporary can be forwarded as a parameter, it should be allocated in the correct place.
+        //      [optimize] For inline calls, if the top of the value stack already has a valid candidate for the return value, use that.
+        assert(program->value_stack.size() > startResult);
+        generate_call(ast, program, program->value_stack[startResult], startResult + 1);
         break;
+      }
       default:
         return false;
       }
@@ -291,15 +405,25 @@ namespace adder {
         return false;
       }
 
-      const auto &symbol = program->meta.symbols[symbolIndex.value()];
-
       if (statement.body.has_value()) {
-        program->begin_function(symbolIndex.value());
+        program->begin_function(symbolIndex.value(), statementId);
 
-        program->push_return_handler([](auto* program) {
-          // TODO: Need to end all nested scopes in the function and cleanup variables
-          program->end_scope();
-          program->ret();
+        size_t rootScope = program->scopes.size();
+        program->push_return_handler([rootScope](auto* program) {
+          for (size_t scope = program->scopes.size() - 1; scope >= rootScope; --scope) {
+            for (auto const & value : program->scopes[scope].variables) {
+              value;
+              // TODO: 
+              // program->destroy_local_variable(value);
+            }
+          }
+
+          // Might not need return handlers for inlining. Instead,
+          //   1. Find all program_builder::instruction_tag::return_jmp tags after generating inline code
+          //   2. Replace address with end of inline function.
+          //   3. Reset tag to instruction_tag::none
+          program->jump_relative(0);
+          program->set_instruction_tag(program_builder::instruction_tag::return_jmp);
         });
 
         program->begin_scope();
@@ -332,8 +456,9 @@ namespace adder {
 
         program->end_scope();
         program->ret();
-        program->pop_return_handler();
         program->end_function();
+
+        program->pop_return_handler();
       }
 
       program_builder::value val;
@@ -365,6 +490,18 @@ namespace adder {
           auto cpy = src;
           cpy.identifier = name;
           program->add_variable(cpy);
+          return true;
+        }
+        else if (program->meta.is_reference_of(argType, src.type_index)) {
+          // Push alias to src value
+          // TODO: This might not work quite as I expect yet.
+          //       Generator needs to be able to treat `receiver` as a reference type.
+          //       e.g. "Load value" loads its address.
+          auto receiver = src;
+          receiver.identifier = name;
+          receiver.flags |= program_builder::value_flags::eval_as_reference;
+          program->add_variable(receiver);
+          return true;
         }
         else {
           auto receiver = program->allocate_temporary_value(argType);
@@ -373,39 +510,36 @@ namespace adder {
           return initialize_variable(ast, program, receiver, src);
         }
       }
-      else {
-        auto receiver = program->allocate_temporary_value(argType);
-        receiver.identifier = name;
-        program->add_variable(receiver);
 
-        if (src.type_index == argType) {
-          program_builder::value unnamedInit;
-          program->find_unnamed_initializer(argType, argType);
-          program->find_value_by_identifier("");
-          unnamedInit.symbol_index = program->meta.find_unnamed_initializer(program->current_scope_id(), argType, argType);
+      auto receiver = program->allocate_temporary_value(argType);
+      receiver.identifier = name;
+      program->add_variable(receiver);
 
-          if (!unnamedInit.symbol_index.has_value()) {
-            // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
-            return false;
-          }
+      if (src.type_index == argType) {
+        auto unnamedInit = program->find_unnamed_initializer(argType, argType);
 
-          size_t start = program->value_stack.size();
-          program->push_value(unnamedInit);
-          program->push_value(receiver);
-          program->push_value(src);
-          return generate_call(ast, program, start);
+        if (!unnamedInit.has_value()) {
+          // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
+          return false;
         }
-        else {
-          return initialize_variable(ast, program, receiver, src);
-        }
+
+        size_t start = program->value_stack.size();
+        program->push_value({}); // Void return value
+        program->push_value(receiver);
+        program->push_value(src);
+        bool result = generate_call(ast, program, unnamedInit.value(), start);
+        program->pop_value();
+        program->pop_value();
+        program->pop_value();
+        return result;
       }
-      return false;
+      else {
+        return initialize_variable(ast, program, receiver, src);
+      }
     }
 
     /// Generate a call using expressions pushed to the builders result stack.
-    bool generate_call(ast const & ast, program_builder * program, size_t startResult) {
-      program_builder::value function = program->value_stack[startResult];
-
+    bool generate_call(ast const & ast, program_builder * program, program_builder::value const & function, size_t valuesStartIndex) {
       if (!function.symbol_index.has_value()) {
         // Push error: First expression must be a callable symbol.
         return false;
@@ -417,9 +551,9 @@ namespace adder {
 
       // Pointer to the actual function definition.
       // Allows us to inline the call if possible
-      type_function_decl * func =
-        std::holds_alternative<type_function_decl>(symbolType.desc)
-          ? &std::get<type_function_decl>(symbolType.desc)
+      expr::function_declaration const * func =
+        callable.function_index.has_value()
+          ? &ast.get<expr::function_declaration>(program->functions[callable.function_index.value()].declaration_id)
           : nullptr;
 
       type_function * signature =
@@ -427,56 +561,50 @@ namespace adder {
         ? &std::get<type_function>(symbolType.desc)
         : nullptr;
 
-      if (signature == nullptr && func == nullptr) {
+      if (signature == nullptr) {
         // Push error: Type is not callable.
         return false;
       }
-      if (signature == nullptr && func != nullptr) {
-        auto & funcType = program->meta.types[func->type];
-        if (!std::holds_alternative<type_function>(funcType.desc)) {
-          // Push error: Function declaration does not have a valid type.
-          return false;
-        }
-        signature = &std::get<type_function>(funcType.desc);
-      }
 
-      if (signature->arguments.size() != program->value_stack.size() - startResult - 1) {
+      size_t returnResultIdx = valuesStartIndex;
+      size_t argsStartIndex = valuesStartIndex + 1;
+      if (signature->arguments.size() != program->value_stack.size() - argsStartIndex) {
         // Push error: Invalid argument count
         return false;
       }
 
       const bool inlineCall = func != nullptr &&
-        (callable.flags & symbol_flags::inline_) == symbol_flags::inline_ &&
-        ast.get<expr::function_declaration>(func->function_id).body.has_value();
-
-      // TODO: Eval function parameters.
-
-      // TODO: This needs to happen before any parameter expressions are evaluated.
-      //       They might allocate temporary storage which will be freed before this temporary.
-      program_builder::value returnResult = program->allocate_temporary_value(signature->return_type);
+        (func->flags & symbol_flags::inline_) == symbol_flags::inline_ && callable.function_index.has_value();
 
       if (inlineCall) {
         program->begin_scope();
 
-        size_t startScopeIndex = program->scopes.size();
-        program->push_return_handler([startScopeIndex](auto* program) {
-          // TODO: Need to end all nested scopes in the function and cleanup variables
-          while (program->scopes.size() > startScopeIndex) {
-            program->end_scope();
+        size_t rootScope = program->scopes.size();
+        program->push_return_handler([rootScope](auto* program) {
+          for (size_t scope = program->scopes.size() - 1; scope >= rootScope; --scope) {
+            for (auto const & value : program->scopes[scope].variables) {
+              value;
+              // TODO:
+              // program->destroy_local_variable(value);
+            }
           }
-          program->jump_relative(0); // TODO: Replace with bytes until end of function
+
+          // Might not need return handlers for inlining. Instead,
+          //   1. Find all program_builder::instruction_tag::return_jmp tags after generating inline code
+          //   2. Replace address with end of inline function.
+          //   3. Reset tag to instruction_tag::none
+          program->jump_relative(0);
+          program->set_instruction_tag(program_builder::instruction_tag::return_jmp);
         });
 
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
-          int64_t resultIdx = startResult + i + 1;
-          auto &decl = ast.get<expr::function_declaration>(func->function_id);
-          auto &var  = ast.get<expr::variable_declaration>(decl.arguments[i]);
+          int64_t resultIdx = argsStartIndex + i;
+          auto &var  = ast.get<expr::variable_declaration>(func->arguments[i]);
           push_argument(ast, program, var.name, program->value_stack[resultIdx], signature->arguments[i], inlineCall);
         }
 
-        auto &decl = ast.get<expr::function_declaration>(func->function_id);
-        if (decl.body.has_value()) {
-          if (!generate_code(ast, program, decl.body.value())) {
+        if (func->body.has_value()) {
+          if (!generate_code(ast, program, func->body.value())) {
             return false;
           }
         }
@@ -490,35 +618,16 @@ namespace adder {
         program->begin_scope();
 
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
-          int64_t resultIdx = startResult + i + 1;
+          int64_t resultIdx = argsStartIndex + i;
           push_argument(ast, program, "", program->value_stack[resultIdx], signature->arguments[i], inlineCall);
         }
 
-        program->call(callable);
+        program->call(function);
         program->end_scope();
 
         program->pop_frame_pointer();
         program->pop_return_pointer();
       }
-
-      while (program->value_stack.size() > startResult)
-        program->pop_result();
-
-      program->push_value(returnResult);
-      return true;
-    }
-
-    bool generate_code(ast const & ast, program_builder * program, expr::call const& statement, size_t statementId) {
-      unused(statementId);
-
-      size_t first = program->value_stack.size();
-
-      generate_code(ast, program, statement.functor);
-
-      if (statement.parameters.has_value())
-        generate_code(ast, program, statement.parameters.value());
-
-      generate_call(ast, program, first);
 
       return true;
     }
@@ -541,15 +650,17 @@ namespace adder {
       unused(blockId);
 
       auto scopeId = program->meta.statement_info[blockId].scope_index;
-      if (scopeId.has_value()) {
+      if (!scopeId.has_value()) {
         // No associated scope
         return false;
       }
 
       program->begin_scope();
 
-      auto scopeMeta = program->meta.scopes[scopeId.value()];
-      if (!scopeMeta.parent_function_scope.has_value()) {
+      const auto &scopeMeta = program->meta.scopes[scopeId.value()];
+      const bool isStackFrame = !scopeMeta.parent_function_scope.has_value();
+
+      if (isStackFrame) {
         // Is function stack frame
         program->alloc_stack(scopeMeta.max_stack_size + scopeMeta.max_temp_size);
       }
@@ -558,13 +669,11 @@ namespace adder {
         if (!generate_code(ast, program, statementId))
           return false;
 
-      for (auto symbolId : scopeMeta.symbols) {
-        if (program->meta.symbols[symbolId].is_global()) {
-          destroy_symbol(ast, program, symbolId);
-        }
-      }
+      if (isStackFrame) {
+        // Mark return section
+        auto & func = program->current_function();
+        func.return_section_start = func.instructions.size();
 
-      if (scopeMeta.parent_function_scope > 0) {
         program->free_stack(scopeMeta.max_stack_size + scopeMeta.max_temp_size);
       }
 
@@ -750,7 +859,7 @@ namespace adder {
         return false;
       }
 
-      const std::string name = std::string(decl.identifier.empty() ? adder::format("__unnamed_fn_%lld", ast.id_of(&decl).value()) : decl.identifier);
+      const std::string name = std::string(/*decl.identifier.empty() ? adder::format("__unnamed_fn_%lld", ast.id_of(&decl).value()) :*/decl.identifier);
       symbol.full_identifier = name;
       symbol.full_identifier = adder::format(
         "%s%s",
@@ -808,7 +917,7 @@ namespace adder {
         symbol.type = typeIndex.value();
       }
       else if (decl.initializer.has_value()) {
-        symbol.type = evaluate_statement_return_type(ast, meta, decl.initializer.value());
+        symbol.type = eval_decltype(ast, meta, decl.initializer.value());
       }
       else {
         // TODO: Error. Unable to infer type. No initializer statement.
@@ -928,10 +1037,12 @@ namespace adder {
 
       // evaluate_function_addresses(&ret.meta);
       
+      ret.begin_scope();
       expr::block const & top = ast.get<expr::block>(ast.statements.size() - 1);
       for (size_t statementId : top.statements) {
         generate_code(ast, &ret, statementId);
       }
+      ret.end_scope();
 
       return ret.binary();
     }
