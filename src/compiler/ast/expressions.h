@@ -46,16 +46,15 @@ namespace adder {
 
       struct variable_declaration {
         std::optional<size_t> type; // If nullopt, infer the type from initializer expression
-        std::string_view name;
-        symbol_flags     flags = symbol_flags::none;
+        std::string_view      name;
+        symbol_flags          flags = symbol_flags::none;
         std::optional<size_t> initializer;
       };
 
-      struct conversion {
-        size_t expression;
-        std::string_view target_type_name;
-        // type_desc * target_type_desc;
-      };
+      // struct conversion {
+      //   size_t expression;
+      //   std::string_view target_type_name;
+      // };
 
       struct init {
         size_t target;
@@ -150,11 +149,123 @@ namespace adder {
         function_declaration,
         call_parameter,
         // call,
-        class_decl,
-        conversion
+        class_decl
+        // conversion
       >;
 
       constexpr size_t sz = sizeof(statement);
+    }
+    
+    template<typename Expr, typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, Expr const &o, Visitor const & callable) {
+      unused(ast, id, o, callable);
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::list const & o, Visitor const & callable) {
+      unused(ast, id);
+
+      callable(o.expr);
+      if (o.next.has_value())
+        callable(o.next.value());
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::type_fn const &o, Visitor const & callable) {
+      unused(ast, id);
+      callable(o.return_type);
+      for (size_t argId : o.argument_list)
+        callable(argId);
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::type_modifier const &o, Visitor const & callable) {
+      unused(ast, id);
+      callable(o.modified);
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::variable_declaration const & o, Visitor const & callable) {
+      unused(ast, id);
+      if (o.type.has_value())
+        callable(o.type.value());
+      if (o.initializer.has_value())
+        callable(o.initializer.value());
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::init const & o, Visitor const & callable) {
+      unused(ast, id);
+      callable(o.target);
+      callable(o.expression);
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::function_return const & o, Visitor const & callable) {
+      unused(ast, id);
+      if (o.expression.has_value())
+        callable(o.expression.value());
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::binary_operator const & o, Visitor const & callable) {
+      unused(ast, id);
+      if (o.left.has_value())
+        callable(o.left.value());
+      if (o.right.has_value())
+        callable(o.right.value());
+    }
+    
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::block const & o, Visitor const & callable) {
+      unused(ast, id);
+      for (size_t i = 0; i < o.statements.size(); ++i)
+        callable(o.statements[i]);
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::function_declaration const & o, Visitor const & callable) {
+      unused(ast, id);
+      for (size_t i = 0; i < o.arguments.size(); ++i)
+        callable(o.arguments[i]);
+
+      if (o.type.has_value())
+        callable(o.type.value());
+
+      if (o.body.has_value())
+        callable(o.body.value());
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::call_parameter const & o, Visitor const & callable) {
+      unused(ast, id);
+      callable(o.expression);
+      if (o.next.has_value())
+        callable(o.next.has_value());
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::class_decl const & o, Visitor const & callable) {
+      unused(ast, id);
+
+      for (size_t i = 0; i < o.constructors.size(); ++i) {
+        callable(o.constructors[i]);
+      }
+
+      for (size_t i = 0; i < o.methods.size(); ++i) {
+        callable(o.methods[i]);
+      }
+
+      for (size_t i = 0; i < o.members.size(); ++i) {
+        callable(o.members[i]);
+      }
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t root, Visitor const & callable) {
+      std::visit([&](auto &&o) {
+        visit_sub_expressions(ast, root, o, callable);
+      }, ast.statements[root]);
     }
   }
 }

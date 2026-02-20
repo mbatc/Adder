@@ -4,5 +4,5 @@ fn test() => int32 {
 }
 
 fn main() => void {
-  const test: int32 = test();
+  const test_val: int32 = test();
 }

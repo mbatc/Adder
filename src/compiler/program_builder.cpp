@@ -279,7 +279,11 @@ namespace adder {
     }
 
     size_t program_metadata::get_symbol_size(size_t const& symbolIndex) const {
-      return get_type_size(symbols[symbolIndex].type);
+      return get_type_size(get_symbol_type(symbolIndex));
+    }
+
+    size_t program_metadata::get_symbol_type(size_t const& symbolIndex) const {
+      return symbols[symbolIndex].type;
     }
 
     std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::string_view const & fullName) const {
@@ -299,6 +303,55 @@ namespace adder {
 
       return search_for_symbol_index(scopes[scopeId].parent.value(), pred);
     }
+
+    std::optional<size_t> program_metadata::search_for_callable_symbol_index(size_t scopeId, std::string_view const& identifier, ast const& ast, std::optional<size_t> const & paramList) const {
+      // std::optional<size_t> bestFunction;
+      // std::optional<size_t> bestMatchScore;
+
+      return search_for_symbol_index(scopeId, [&](symbol const& sym) {
+        if (sym.name != identifier) {
+          return false;
+        }
+        return get_parameter_list_score(scopeId, sym.type, ast, paramList).has_value();
+      });
+
+      // return std::optional<size_t>();
+    }
+
+    std::optional<size_t> program_metadata::get_parameter_list_score(size_t scopeId, size_t funcType, ast const & ast, std::optional<size_t> const & paramList) const {
+      if (!is_function(funcType)) {
+        return std::nullopt;
+      }
+      auto decayed = decay_type(funcType);
+      if (!decayed.has_value()) {
+        return std::nullopt;
+      }
+
+      auto const& signature = std::get<type_function>(types[decayed.value()].desc);
+      std::optional<size_t> current = paramList;
+      size_t score = 0;
+      for (size_t i = 0; i < signature.arguments.size(); ++i) {
+        if (!current.has_value())
+          return std::nullopt; // Not enough arguments.
+
+        auto & param = ast.get<expr::call_parameter>(current.value());
+        if (statement_info[param.expression].type_id == signature.arguments[i])
+          continue;
+
+        auto initializer = find_unnamed_initializer(scopeId, signature.arguments[i], statement_info[param.expression].type_id.value());
+        if (!initializer.has_value())
+          return std::nullopt; // No conversion available
+
+        ++score;
+      }
+
+      if (current.has_value()) {
+        return std::nullopt; // Too many arguments
+      }
+
+      return score;
+    }
+
 
     std::optional<size_t> program_metadata::find_symbol(std::string_view const & fullName) const {
       auto found = std::find_if(symbols.begin(), symbols.end(), [&](symbol const& s) { return s.full_identifier == fullName; });
@@ -375,8 +428,10 @@ namespace adder {
       assert(!function_stack.empty());
       auto const & func = functions[function_stack.back()];
       value ret;
-      ret.stack_frame_offset = -(int64_t)meta.get_type_size(func.return_type) - func.args_size;
-      ret.type_index         = func.return_type;
+
+      ret.indirect_register_index = vm::register_names::fp;
+      ret.address_offset          = -(int64_t)meta.get_type_size(func.return_type) - func.args_size;
+      ret.type_index              = func.return_type;
       return ret;
     }
     
@@ -447,10 +502,35 @@ namespace adder {
       // TODO: Would be nice to eval this ahead of time, same as max_stack_size.
       //       A bit annoying having this evaluated during code gen. Ideally, meta evaled should be complete before code-gen
       scopeMeta.max_temp_size = std::max(scopeMeta.max_temp_size, func.temp_storage_used);
-      result.stack_frame_offset =  offset;
+      result.indirect_register_index = vm::register_names::fp;
+      result.address_offset = offset;
       result.type_index = typeIndex;
 
       scopes.back().temporaries.push_back(result);
+      return result;
+    }
+
+    program_builder::value program_builder::allocate_temporary_call_parameter(size_t typeIndex) {
+      const size_t sz = meta.get_type_size(typeIndex);
+      auto & func = current_function();
+
+      alloc_stack(sz);
+
+      // Ammend other temporaries with addresses relative to the stack pointer
+      for (auto& temporary : scopes.back().temporaries) {
+        if (temporary.indirect_register_index == vm::register_names::sp) {
+          temporary.address_offset -= sz;
+        }
+      }
+
+      value result;
+      result.type_index              = typeIndex;
+      result.address_offset          = -(int64_t)sz;
+      result.indirect_register_index = vm::register_names::sp;
+      scopes.back().temporaries.push_back(result);
+
+      func.call_params_used += sz;
+
       return result;
     }
 
@@ -461,7 +541,20 @@ namespace adder {
 
       auto & func = current_function();
       const size_t sz = meta.get_type_size(val.type_index.value());
-      func.temp_storage_used -= sz;
+      if (val.indirect_register_index == vm::register_names::fp)
+        func.temp_storage_used -= sz;
+      else if (val.indirect_register_index == vm::register_names::sp) {
+        func.call_params_used -= sz;
+
+        // Ammend other temporaries with addresses relative to the stack pointer
+        for (auto& temporary : scopes.back().temporaries) {
+          if (temporary.indirect_register_index == vm::register_names::sp) {
+            temporary.address_offset += sz;
+          }
+        }
+
+        free_stack(sz);
+      }
     }
 
     void program_builder::destroy_value(value * value) {
@@ -474,8 +567,7 @@ namespace adder {
 
     void program_builder::add_relocation(std::string_view const & symbol, uint64_t offset) {
       const size_t funcId = function_stack.back();
-      const auto pLast = functions[funcId].instructions.data() + functions[funcId].instructions.size() - 1;
-      const uint64_t base = (uint64_t)((uint8_t const*)pLast);
+      const uint64_t base = sizeof(vm::instruction) * (functions[funcId].instructions.size() - 1);
       const uint64_t addr = base + offset;
       // TODO: Could be stored as a list of addresses per symbol.
       //       Might be more efficient when evaluating the relocations..
@@ -524,17 +616,31 @@ namespace adder {
 
     void program_builder::end_function() {
       auto & func = current_function();
+      auto & scopeMeta = meta.scopes[func.scope_id];
 
       // Process instruction tags
       for (size_t i = 0; i < func.instructions.size(); ++i) {
         auto& op = func.instructions[i];
         auto& tag = func.instruction_tags[i];
         switch (tag) {
-        case instruction_tag::return_jmp:
+        case instruction_tag::return_jmp: {
           // Jump to return statement
-          assert(op.code == vm::op_code::jump_relative);
+          assert(op.code == vm::op_code::jump_relative && "invalid op code tagged with instruction_tag::return_jmp");
           op.jump_relative.offset = (func.return_section_start - i) * sizeof(vm::instruction);
           break;
+        }
+        case instruction_tag::stack_frame: {
+          switch (op.code) {
+          case vm::op_code::alloc_stack:
+            op.alloc_stack.bytes = scopeMeta.max_stack_size + scopeMeta.max_temp_size;
+            break;
+          case vm::op_code::free_stack:
+            op.alloc_stack.bytes = scopeMeta.max_stack_size + scopeMeta.max_temp_size;
+            break;
+          default:
+            assert(false && "invalid op code tagged with instruction_tag::stack_frame");
+          }
+        }
         default:
           break;
         }
@@ -733,13 +839,13 @@ namespace adder {
       const size_t sz = meta.get_type_size(value.type_index.value());
       assert(sz <= sizeof(vm::register_value));
 
-      if (value.stack_frame_offset.has_value()) {
+      if (value.indirect_register_index.has_value()) {
         if ((value.flags & program_builder::value_flags::eval_as_reference) != program_builder::value_flags::none) {
           return load_address_of(value);
         }
         else {
           vm::register_index ret = pin_register();
-          load(ret, vm::register_names::fp, sz, value.stack_frame_offset.value() + value.address_offset);
+          load(ret, value.indirect_register_index.value(), sz, value.address_offset);
           return ret;
         }
       }
@@ -816,10 +922,10 @@ namespace adder {
         return 0;
       }
 
-      if (value.stack_frame_offset.has_value()) {
+      if (value.indirect_register_index.has_value()) {
         vm::register_index ret = pin_register();
-        set(ret, value.stack_frame_offset.value() + value.address_offset);
-        addi(ret, ret, vm::register_names::fp);
+        set(ret, value.address_offset);
+        addi(ret, ret, value.indirect_register_index.value());
         return ret;
       }
 

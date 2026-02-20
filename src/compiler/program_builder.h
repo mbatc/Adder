@@ -52,6 +52,8 @@ namespace adder {
         std::optional<size_t> symbol_index;
         /// Type that this statement is associated with (if any)
         std::optional<size_t> type_id;
+        /// Type of temporary storage needed
+        std::optional<size_t> temporary_type;
       };
       std::vector<statement_meta> statement_info;
 
@@ -145,9 +147,12 @@ namespace adder {
 
       std::optional<size_t> add_symbol(symbol const & s);
       size_t get_symbol_size(size_t const & symbolIndex) const;
-
+      size_t get_symbol_type(size_t const & symbolIndex) const;
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::string_view const & identifier) const;
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const;
+      std::optional<size_t> search_for_callable_symbol_index(size_t scopeId, std::string_view const & identifier, ast const& ast, std::optional<size_t> const & paramList) const;
+      std::optional<size_t> get_parameter_list_score(size_t scopeId, size_t funcType, ast const & ast, std::optional<size_t> const & paramList) const;
+
       std::optional<size_t> find_symbol(std::string_view const & fullName) const;
       std::optional<size_t> find_unnamed_initializer(size_t scopeId, size_t receiverTypeIndex, size_t initializerTypeIndex) const;
 
@@ -182,8 +187,8 @@ namespace adder {
         std::optional<vm::register_index> register_index;
         /// Constant value evaluated
         std::optional<vm::register_value> constant;
-        /// Stack frame offset of the value
-        std::optional<int64_t> stack_frame_offset;
+        /// Address stored in a register + address_offset
+        std::optional<vm::register_index> indirect_register_index;
         /// Index of the symbol
         std::optional<size_t> symbol_index;
         /// Type of the value
@@ -197,7 +202,8 @@ namespace adder {
 
       enum class instruction_tag : uint8_t {
         none,
-        return_jmp ///< Set jump instruction address to the start of the function return section
+        return_jmp, ///< Set jump instruction address to the start of the function return section
+        stack_frame 
       };
 
       struct function {
@@ -210,6 +216,7 @@ namespace adder {
         size_t args_size = 0;         ///< Size of the function parameters.
         size_t arg_count = 0;         ///< Number of arguments to this function.
         size_t temp_storage_used = 0; ///< Max temp storage allocated while evaluating this function
+        size_t call_params_used  = 0; ///< Current size of the call parameters allocated
 
         size_t return_section_start = 0;
 
@@ -270,7 +277,9 @@ namespace adder {
 
       /// Allocate space for a temporary and push a value to the value_stack
       program_builder::value allocate_temporary_value(size_t typeIndex);
+      program_builder::value allocate_temporary_call_parameter(size_t typeIndex);
       void free_temporary_value();
+
       void destroy_value(value * value);
 
       size_t current_scope_id() const;

@@ -20,23 +20,47 @@ namespace adder {
   // Compiler implementation
   namespace compiler {
     size_t eval_decltype(ast const& ast, program_metadata * meta, size_t statementId);
-    size_t eval_decltype_impl(ast const& ast, program_metadata * meta, size_t statementId, ...) {
+
+    template<typename T>
+    size_t eval_decltype_impl(ast const& ast, program_metadata * meta, size_t statementId, T const & o) {
+      unused(ast, o);
+
       auto metaTypeId = meta->statement_info[statementId].type_id;
-      return metaTypeId.value_or(meta->get_type_index(get_primitive_type_name(type_primitive::void_)));
+      return metaTypeId.value_or(meta->get_type_index(get_primitive_type_name(type_primitive::void_)).value());
     }
 
-    size_t eval_decltype_impl(ast const& ast, program_metadata * meta, size_t statementId, expr::binary_operator const & call) {
+    size_t eval_decltype_impl(ast const & ast, program_metadata * meta, size_t statementId, expr::identifier const & identifier) {
+      unused(ast, identifier);
 
-      meta->is_valid_function_overload();
-      call.left;
-      call.right;
+      auto symbolIndex = meta->statement_info[statementId].symbol_index;
+      if (!symbolIndex.has_value()) {
+        return meta->get_type_index(get_primitive_type_name(type_primitive::void_)).value();
+      }
+      return meta->symbols[symbolIndex.value()].type;
+    }
+
+    size_t eval_decltype_impl(ast const & ast, program_metadata * meta, size_t statementId, expr::binary_operator const & op) {
+      unused(statementId);
+      // meta->is_valid_function_overload();
+      if (op.type_name == expr::operator_type::call) {
+        size_t funcType = eval_decltype(ast, meta, op.left.value());
+        assert(meta->is_function(funcType));
+        auto returnType = meta->return_type_of(funcType);
+        return returnType.value_or(meta->get_type_index(get_primitive_type_name(type_primitive::void_)).value());
+      }
+      else {
+        // TODO: Get operator method and eval return type
+      }
+      return false;
     }
 
     size_t eval_decltype(ast const & ast, program_metadata * meta, size_t statementId) {
       return std::visit([=](auto&& o) { return eval_decltype_impl(ast, meta, statementId, o); }, ast.statements[statementId]);
     }
 
-    bool generate_call(ast const & ast, program_builder * program, program_builder::value const & function, size_t argsStartIndex);
+    bool prepare_call(ast const& ast, program_builder* program, program_builder::value const& function, std::optional<size_t> const& parameters);
+    bool generate_call(ast const & ast, program_builder * program);
+
     bool generate_copy(ast const & ast, program_builder * program, size_t statementId) {
       unused(ast, program, statementId);
       return false;
@@ -104,6 +128,7 @@ namespace adder {
       std::optional<program_builder::value> value = program->find_value_by_identifier(statement.name);
 
       if (!value.has_value()) {
+        printf("Error: Undeclared identifier '%.*s'\n", statement.name.length(), statement.name.data());
         // Push Error: Undeclared identifier `statement.name`
         return false;
       }
@@ -114,22 +139,26 @@ namespace adder {
 
     bool generate_code(ast const & ast, program_builder * program, expr::list const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
-      return false;
+      printf("info: No code generated for list expression\n");
+      return true;
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::type_name const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
-      return false;
+      printf("info: No code generated for type_name expression\n");
+      return true;
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::type_fn const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
-      return false;
+      printf("info: No code generated for type_fn expression\n");
+      return true;
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::type_modifier const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
-      return false;
+      printf("info: No code generated for type_modifier expression\n");
+      return true;
     }
 
     bool initialize_variable(ast const & ast, program_builder * program, program_builder::value const & receiver, program_builder::value const & initializer) {
@@ -150,57 +179,66 @@ namespace adder {
       std::optional<program_builder::value> unnamedInit = program->find_unnamed_initializer(receiver.type_index.value(), initializer.type_index.value());
 
       if (!unnamedInit.has_value()) {
+        auto a = program->meta.types[receiver.type_index.value()];
+        auto b = program->meta.types[initializer.type_index.value()];
+        printf("Error: No unnamed initializer that can create a `%.*s` from `%.*s`\n",
+          (int)a.identifier.length(), a.identifier.data(),
+          (int)b.identifier.length(), b.identifier.data());
         // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
         return false;
       }
 
       // program->allocate_temporary_value(returnType.value());
-      size_t start = program->value_stack.size();
       program->push_value({}); // Null return value
-      program->push_value(receiver);
       program->push_value(initializer);
-      bool result = generate_call(ast, program, unnamedInit.value(), start);
+      program->push_value(receiver);
+      program->push_value(unnamedInit.value());
+      if (!generate_call(ast, program)) {
+        return false;
+      }
+      // Pop return value of call
       program->pop_value();
-      program->pop_value();
-      program->pop_value();
-      return result;
+      return true;
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::variable_declaration const & statement, size_t statementId) {
-      std::optional<program_builder::value> initializer;
-      if (statement.initializer.has_value()) {
-        size_t count = program->value_stack.size();
-        generate_code(ast, program, statement.initializer.value());
-        assert(count < program->value_stack.size());
-        initializer = program->pop_value();
-      }
+      const size_t temporaries = program->scopes.back().temporaries.size(); // Scoped helper for this?
 
-      std::optional<size_t> type = statement.type;
-      if (!type.has_value()) {
-        if (!initializer.has_value() || !initializer->type_index.has_value()) {
-          // Push Error: Unable to infer variable type.
-          return false;
-        }
-
-        type = initializer->type_index;
-      }
+      // std::optional<size_t> type = statement.type;
+      // if (!type.has_value()) {
+      //   if (!initializer.has_value() || !initializer->type_index.has_value()) {
+      //     printf("Error: Unable to infer variable type for %.*s\n", statement.name.length(), statement.name.data());
+      //     // Push Error: Unable to infer variable type.
+      //     return false;
+      //   }
+      // 
+      //   type = initializer->type_index;
+      // }
 
       const size_t variableType = program->meta.get_type_index(ast, statement.type.value()).value();
       const size_t symbolIndex  = program->meta.statement_info[statementId].symbol_index.value();
 
-      program_builder::value receiver = {
-        std::nullopt,
-        std::nullopt,
-        symbolIndex,
-        variableType
-      };
+      program_builder::value receiver;
+      receiver.symbol_index = symbolIndex;
+      receiver.type_index = variableType;
       receiver.identifier = statement.name;
-
       program->add_variable(receiver);
 
-      if (initializer.has_value()) {
-        initialize_variable(ast, program, receiver, initializer.value());
+      if (statement.initializer.has_value()) {
+        size_t count = program->value_stack.size();
+        if (!generate_code(ast, program, statement.initializer.value())) {
+          return false;
+        }
+        assert(count < program->value_stack.size());
+        auto initializer = program->pop_value();
+        assert(initializer.has_value());
+        if (!initialize_variable(ast, program, receiver, initializer.value())) {
+          return false;
+        }
       }
+
+      while (program->scopes.back().temporaries.size() > temporaries)
+        program->free_temporary_value();
 
       return true;
     }
@@ -230,10 +268,6 @@ namespace adder {
     bool generate_code(ast const & ast, program_builder * program, expr::function_return const & statement, size_t statementId) {
       unused(statementId);
 
-      if (!statement.expression.has_value()) {
-        return false;
-      }
-
       auto receiver = program->get_return_value();
       if (!receiver.type_index.has_value()) {
         return false;
@@ -241,22 +275,28 @@ namespace adder {
 
       if (program->meta.is_void(receiver.type_index)) {
         if (statement.expression.has_value()) {
+          auto symbol = program->meta.symbols[program->current_function().symbol];
+
           // TODO: Push error. Unexpected expression for function that returns void.
+          printf("Error: fn %.*s returns void, not a value\n", (int)symbol.name.length(), symbol.name.data());
           return false;
         }
         return true;
       }
 
       if (!generate_code(ast, program, statement.expression.value())) {
+        printf("Error: failed to evaluate return expression\n");
         return false;
       }
 
       auto expressionResult = program->pop_value();
       if (!expressionResult.has_value()) {
+        printf("Error: return expression did not evaluate to a value\n");
         return false;
       }
 
       if (!initialize_variable(ast, program, receiver, expressionResult.value())) {
+        printf("Error: failed to initialize return value\n");
         return false;
       }
 
@@ -264,121 +304,21 @@ namespace adder {
       return true;
     }
 
-    bool prepare_call(ast const & ast, program_builder * program, program_builder::value const & function, std::optional<size_t> const & parameters) {
-      if (parameters.has_value()) {
-        auto currentParam = parameters;
-        while (currentParam.has_value()) {
-          auto param = ast.get<expr::call_parameter>(parameters.value());
-          generate_code(ast, program, param.expression);
-          program->meta.statement_info[param.expression].type_id;
-          currentParam = param.next;
-        }
-      }
-
-      if (!function.symbol_index.has_value()) {
-        // Push error: First expression must be a callable symbol.
-        return false;
-      }
-
-      // Push parameters to the stack
-      auto & callable   = program->meta.symbols[function.symbol_index.value()];
-      auto & symbolType = program->meta.types[callable.type];
-
-      // Pointer to the actual function definition.
-      // Allows us to inline the call if possible
-      expr::function_declaration const * func =
-        callable.function_index.has_value()
-        ? &ast.get<expr::function_declaration>(program->functions[callable.function_index.value()].declaration_id)
-        : nullptr;
-
-      type_function * signature =
-        std::holds_alternative<type_function>(symbolType.desc)
-        ? &std::get<type_function>(symbolType.desc)
-        : nullptr;
-
-      if (signature == nullptr) {
-        // Push error: Type is not callable.
-        return false;
-      }
-
-      size_t returnResultIdx = valuesStartIndex;
-      size_t argsStartIndex = valuesStartIndex + 1;
-      if (signature->arguments.size() != program->value_stack.size() - argsStartIndex) {
-        // Push error: Invalid argument count
-        return false;
-      }
-
-      const bool inlineCall = func != nullptr &&
-        (func->flags & symbol_flags::inline_) == symbol_flags::inline_ && callable.function_index.has_value();
-
-      if (inlineCall) {
-        program->begin_scope();
-
-        size_t rootScope = program->scopes.size();
-        program->push_return_handler([rootScope](auto* program) {
-          for (size_t scope = program->scopes.size() - 1; scope >= rootScope; --scope) {
-            for (auto const & value : program->scopes[scope].variables) {
-              value;
-              // TODO:
-              // program->destroy_local_variable(value);
-            }
-          }
-
-          // Might not need return handlers for inlining. Instead,
-          //   1. Find all program_builder::instruction_tag::return_jmp tags after generating inline code
-          //   2. Replace address with end of inline function.
-          //   3. Reset tag to instruction_tag::none
-          program->jump_relative(0);
-          program->set_instruction_tag(program_builder::instruction_tag::return_jmp);
-          });
-
-        for (size_t i = 0; i < signature->arguments.size(); ++i) {
-          int64_t resultIdx = argsStartIndex + i;
-          auto &var  = ast.get<expr::variable_declaration>(func->arguments[i]);
-          push_argument(ast, program, var.name, program->value_stack[resultIdx], signature->arguments[i], inlineCall);
-        }
-
-        if (func->body.has_value()) {
-          if (!generate_code(ast, program, func->body.value())) {
-            return false;
-          }
-        }
-
-        program->end_scope();
-      }
-      else {
-        program->push_return_pointer();
-        program->push_frame_pointer();
-        program->move(vm::register_names::fp, vm::register_names::sp);
-        program->begin_scope();
-
-        for (size_t i = 0; i < signature->arguments.size(); ++i) {
-          int64_t resultIdx = argsStartIndex + i;
-          push_argument(ast, program, "", program->value_stack[resultIdx], signature->arguments[i], inlineCall);
-        }
-
-        program->call(function);
-        program->end_scope();
-
-        program->pop_frame_pointer();
-        program->pop_return_pointer();
-      }
-
-      return true;
-    }
-
     bool generate_code(ast const & ast, program_builder * program, expr::binary_operator const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
 
-      // Allow `generate_code` to push all matching identifiers to `results`.
-      // generate_call can then match the correct overload.
-      // size_t overloadsEnd = program->results.size();
-      generate_code(ast, program, statement.left.value());
+      if (!generate_code(ast, program, statement.left.value())) {
+        printf("Error: failed to evaluate lhs of operator\n");
+        return false;
+      }
 
       switch (statement.type_name) {
       case expr::operator_type::call: {
-        size_t startResult = program->value_stack.size();
-        prepare_call(ast, program, program->value_stack.back(), statement.right.value());
+        auto function = program->pop_value();
+        if (!function.has_value()) {
+          printf("Error: lhs of operator did not evaluate to a value\n");
+          return false;
+        }
         // TODO: When generating code,
         //   1. value_stack should have the lhs or dst of the final return value at the top.
         //   2. implement a prepare_call function that evaluates parameters and allocates temporaries.
@@ -386,11 +326,15 @@ namespace adder {
         //      All temporaries must be allocated before the return value and parameters.
         //      [optimize] If a temporary can be forwarded as a parameter, it should be allocated in the correct place.
         //      [optimize] For inline calls, if the top of the value stack already has a valid candidate for the return value, use that.
-        assert(program->value_stack.size() > startResult);
-        generate_call(ast, program, program->value_stack[startResult], startResult + 1);
+
+        if (!(prepare_call(ast, program, function.value(), statement.right)
+          && generate_call(ast, program)))
+          return false;
+
         break;
       }
       default:
+        printf("Error: Unknown operator type\n");
         return false;
       }
 
@@ -402,6 +346,7 @@ namespace adder {
       const auto symbolIndex = statementMeta.symbol_index;
       if (!symbolIndex.has_value()) {
         // TODO: Report error. Declaration does not have a valid symbol
+        printf("Error: No symbol associated with function declaration\n");
         return false;
       }
 
@@ -436,13 +381,15 @@ namespace adder {
           const auto & argSymbol = program->meta.statement_info[argId].symbol_index;
           if (!argSymbol.has_value()) {
             // TODO: Report error. Argument has unknown type
+            printf("Error: Unknown argument type\n");
             return false;
           }
 
           program_builder::value val;
           val.symbol_index = argSymbol;
           val.type_index = program->meta.symbols[argSymbol.value()].type;
-          val.stack_frame_offset = nextArgOffset;
+          val.indirect_register_index = vm::register_names::fp;
+          val.address_offset = nextArgOffset;
           val.identifier = decl.name;
           nextArgOffset += program->meta.get_type_size(val.type_index.value());
 
@@ -451,6 +398,7 @@ namespace adder {
 
         if (!generate_code(ast, program, statement.body.value())) {
           // TODO: Report error. Failed to generate code for function.
+          printf("Error: Failed to generate code for function\n");
           return false;
         }
 
@@ -493,12 +441,9 @@ namespace adder {
           return true;
         }
         else if (program->meta.is_reference_of(argType, src.type_index)) {
-          // Push alias to src value
-          // TODO: This might not work quite as I expect yet.
-          //       Generator needs to be able to treat `receiver` as a reference type.
-          //       e.g. "Load value" loads its address.
           auto receiver = src;
           receiver.identifier = name;
+          // Method expects a reference, so treat the value alias with reference semantics
           receiver.flags |= program_builder::value_flags::eval_as_reference;
           program->add_variable(receiver);
           return true;
@@ -511,7 +456,7 @@ namespace adder {
         }
       }
 
-      auto receiver = program->allocate_temporary_value(argType);
+      auto receiver = program->allocate_temporary_call_parameter(argType);
       receiver.identifier = name;
       program->add_variable(receiver);
 
@@ -520,14 +465,20 @@ namespace adder {
 
         if (!unnamedInit.has_value()) {
           // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
+          auto a = program->meta.types[argType];
+          auto b = program->meta.types[argType];
+          printf("Error: No unnamed initializer that can create a `%.*s` from `%.*s`\n",
+            a.identifier.length(), a.identifier.data(),
+            b.identifier.length(), b.identifier.data());
           return false;
         }
 
-        size_t start = program->value_stack.size();
         program->push_value({}); // Void return value
-        program->push_value(receiver);
         program->push_value(src);
-        bool result = generate_call(ast, program, unnamedInit.value(), start);
+        program->push_value(receiver);
+        program->push_value(unnamedInit.value());
+        bool result = generate_call(ast, program);
+        program->pop_value();
         program->pop_value();
         program->pop_value();
         program->pop_value();
@@ -538,23 +489,63 @@ namespace adder {
       }
     }
 
+    bool prepare_call(ast const & ast, program_builder * program, program_builder::value const & function, std::optional<size_t> const & parameters) {
+      if (!function.type_index.has_value()) {
+        // TODO: Push error. No type
+        printf("Error: Callable type is undefined\n");
+        return false;
+      }
+      if (!program->meta.is_function(function.type_index)) {
+        // TODO: Push error. Not callable
+        auto type = program->meta.types[function.type_index.value()];
+        printf("Error: %.*s is not callable\n", type.identifier.length(), type.identifier.data());
+        return false;
+      }
+
+      auto ret = program->allocate_temporary_value(program->meta.return_type_of(function.type_index.value()).value());
+
+      program->push_value(ret);
+
+      auto currentParam = parameters;
+      int64_t numParams = 0;
+      while (currentParam.has_value()) {
+        // TODO: Maybe determine if temporaries need to be allocated? Not sure if it needs to be done here or not though.
+        // TODO: Default args could be pushed here (if param.expression is empty)
+        auto param = ast.get<expr::call_parameter>(parameters.value());
+
+        generate_code(ast, program, param.expression);
+        
+        int64_t prevSz = program->value_stack.size();
+        unused(prevSz);
+        assert(program->value_stack.size() != prevSz);
+        currentParam = param.next;
+      }
+
+      program->push_value(function);
+      return true;
+    }
+
     /// Generate a call using expressions pushed to the builders result stack.
-    bool generate_call(ast const & ast, program_builder * program, program_builder::value const & function, size_t valuesStartIndex) {
-      if (!function.symbol_index.has_value()) {
+    bool generate_call(ast const & ast, program_builder * program) {
+      std::optional<program_builder::value> function = program->pop_value();
+
+      if (!function.has_value() || !function->type_index.has_value()) {
         // Push error: First expression must be a callable symbol.
         return false;
       }
 
-      // Push parameters to the stack
-      auto & callable   = program->meta.symbols[function.symbol_index.value()];
-      auto & symbolType = program->meta.types[callable.type];
+      std::optional<program_metadata::symbol> callable;
+      if (function->symbol_index.has_value())
+        callable = program->meta.symbols[function->symbol_index.value()];
+
+      auto & symbolType = program->meta.types[function->type_index.value()];
 
       // Pointer to the actual function definition.
       // Allows us to inline the call if possible
       expr::function_declaration const * func =
-        callable.function_index.has_value()
-          ? &ast.get<expr::function_declaration>(program->functions[callable.function_index.value()].declaration_id)
-          : nullptr;
+        callable.has_value() && callable->function_index.has_value()
+        ? &ast.get<expr::function_declaration>(program->functions[callable->function_index.value()].declaration_id)
+        : nullptr;
 
       type_function * signature =
         std::holds_alternative<type_function>(symbolType.desc)
@@ -563,18 +554,19 @@ namespace adder {
 
       if (signature == nullptr) {
         // Push error: Type is not callable.
+        printf("Error: %.*s is not a callable type\n", symbolType.identifier.length(), symbolType.identifier.data());
         return false;
       }
 
-      size_t returnResultIdx = valuesStartIndex;
-      size_t argsStartIndex = valuesStartIndex + 1;
-      if (signature->arguments.size() != program->value_stack.size() - argsStartIndex) {
-        // Push error: Invalid argument count
-        return false;
-      }
+      const size_t prevTemporaryCount = program->scopes.back().temporaries.size();
+      const size_t argsStartIndex = program->value_stack.size();
 
-      const bool inlineCall = func != nullptr &&
-        (func->flags & symbol_flags::inline_) == symbol_flags::inline_ && callable.function_index.has_value();
+      // if (signature->arguments.size() != program->value_stack.size() - argsStartIndex) {
+      //   // Push error: Invalid argument count
+      //   return false;
+      // }
+
+      const bool inlineCall = func != nullptr && (func->flags & symbol_flags::inline_) == symbol_flags::inline_;
 
       if (inlineCall) {
         program->begin_scope();
@@ -598,9 +590,12 @@ namespace adder {
         });
 
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
-          int64_t resultIdx = argsStartIndex + i;
           auto &var  = ast.get<expr::variable_declaration>(func->arguments[i]);
-          push_argument(ast, program, var.name, program->value_stack[resultIdx], signature->arguments[i], inlineCall);
+          auto arg = program->pop_value();
+          if (!arg.has_value()) {
+            return false;
+          }
+          push_argument(ast, program, var.name, arg.value(), signature->arguments[i], inlineCall);
         }
 
         if (func->body.has_value()) {
@@ -612,30 +607,48 @@ namespace adder {
         program->end_scope();
       }
       else {
+        program->begin_scope();
+
         program->push_return_pointer();
         program->push_frame_pointer();
         program->move(vm::register_names::fp, vm::register_names::sp);
-        program->begin_scope();
+
+        auto rv = program->allocate_temporary_call_parameter(program->meta.return_type_of(function->type_index).value());
 
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
-          int64_t resultIdx = argsStartIndex + i;
-          push_argument(ast, program, "", program->value_stack[resultIdx], signature->arguments[i], inlineCall);
+          auto arg = program->pop_value();
+          if (!arg.has_value()) {
+            return false;
+          }
+          push_argument(ast, program, "", arg.value(), signature->arguments[i], inlineCall);
         }
 
-        program->call(function);
-        program->end_scope();
+        program->call(function.value());
+
+        initialize_variable(ast, program, program->value_stack.back(), rv);
+
+        // Free args space
+        for (size_t i = 0; i < signature->arguments.size(); ++i) {
+          program->free_temporary_value();
+        }
+        // Free return space
+        program->free_temporary_value();
 
         program->pop_frame_pointer();
         program->pop_return_pointer();
+        program->end_scope();
       }
 
+      while (program->scopes.back().temporaries.size() > prevTemporaryCount)
+        program->free_temporary_value();
+
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::conversion const & statement, size_t statementId) {
-      unused(ast, program, statement, statementId);
-      return true;
-    }
+    // bool generate_code(ast const & ast, program_builder * program, expr::conversion const & statement, size_t statementId) {
+    //   unused(ast, program, statement, statementId);
+    //   return true;
+    // }
 
     bool generate_code(ast const & ast, program_builder * program, expr::class_decl const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
@@ -662,7 +675,8 @@ namespace adder {
 
       if (isStackFrame) {
         // Is function stack frame
-        program->alloc_stack(scopeMeta.max_stack_size + scopeMeta.max_temp_size);
+        program->alloc_stack(1);
+        program->set_instruction_tag(program_builder::instruction_tag::stack_frame);
       }
 
       for (size_t statementId : scope.statements)
@@ -674,7 +688,8 @@ namespace adder {
         auto & func = program->current_function();
         func.return_section_start = func.instructions.size();
 
-        program->free_stack(scopeMeta.max_stack_size + scopeMeta.max_temp_size);
+        program->free_stack(1);
+        program->set_instruction_tag(program_builder::instruction_tag::stack_frame);
       }
 
       program->end_scope();
@@ -791,36 +806,83 @@ namespace adder {
       return evaluate_type_names(ast, meta);
     }
 
-    template<typename T>
-    size_t evaluate_statement_return_type(ast const & ast, program_metadata const * meta, T const & other) {
-      unused(ast, other);
-      return meta->get_type_index(get_primitive_type_name(type_primitive::void_)).value();
-    }
+    struct symbol_eval_context
+    {
+      size_t scope_id;
 
-    size_t evaluate_statement_return_type(ast const & ast, program_metadata const * meta, size_t statement) {
-      return std::visit([&](auto &&s) {
-        return evaluate_statement_return_type(ast, meta, s);
-      }, ast.statements[statement]);
-    }
+      // std::optional<size_t> call_method;
+      bool is_call = false;
+      std::optional<size_t> call_parameter_list;
+    };
 
-
-    bool evaluate_symbols(ast const& ast, program_metadata* meta, size_t id, size_t scopeId);
+    bool evaluate_symbols(ast const& ast, program_metadata* meta, size_t id, symbol_eval_context const & ctx);
 
     template<typename T>
-    bool evaluate_statement_symbols(ast const& ast, program_metadata * meta, size_t scopeId, T const & other) {
-      unused(ast, meta, scopeId, other);
-      return true;
+    bool evaluate_statement_symbols(ast const& ast, program_metadata * meta, size_t id, T const & other, symbol_eval_context const & ctx) {
+      unused(other);
+
+      bool result = true;
+      visit_sub_expressions(ast, id, [&](size_t childId) {
+        result = evaluate_symbols(ast, meta, childId, ctx);
+      });
+      return result;
     }
 
-    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t scopeId, expr::block const & block) {
-      auto & statementInfo = meta->statement_info[ast.id_of(&block).value()];
+    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::identifier const & identifier, symbol_eval_context const & ctx) {
+      auto& statementMeta = meta->statement_info[id];
+      if (ctx.is_call) {
+        statementMeta.symbol_index = meta->search_for_callable_symbol_index(ctx.scope_id, identifier.name, ast, ctx.call_parameter_list);
+      }
+      else {
+        statementMeta.symbol_index = meta->search_for_symbol_index(ctx.scope_id, identifier.name);
+      }
+
+      if (!statementMeta.symbol_index.has_value()) {
+        return false;
+      }
+
+      statementMeta.type_id = meta->get_symbol_type(statementMeta.symbol_index.value());
+      return statementMeta.symbol_index.has_value();
+    }
+
+    bool evaluate_statement_symbols(ast const& ast, program_metadata* meta, size_t id, expr::call_parameter const & param, symbol_eval_context const & ctx) {
+      unused(id);
+      return evaluate_symbols(ast, meta, param.expression, ctx)
+        && (!param.next.has_value() || evaluate_symbols(ast, meta, param.next.value(), ctx));
+    }
+
+    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::binary_operator const & op, symbol_eval_context const & ctx) {
+      switch (op.type_name) {
+      case expr::operator_type::call: {
+        assert(op.left.has_value());
+
+        if (op.right.has_value() && !evaluate_symbols(ast, meta, op.right.value(), ctx))
+          return false;
+
+        symbol_eval_context callCtx = ctx;
+        callCtx.is_call = true;
+        callCtx.call_parameter_list = op.right;
+        if (!evaluate_symbols(ast, meta, op.left.value(), callCtx))
+          return false;
+
+        meta->statement_info[id].temporary_type = meta->return_type_of(meta->statement_info[op.left.value()].type_id);
+        return true;
+      }
+      }
+
+      return false;
+    }
+
+    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::block const & block, symbol_eval_context const & ctx) {
+      auto & statementInfo = meta->statement_info[id];
       size_t thisBlockScopeId = 0;
+      symbol_eval_context thisBlockCtx = ctx;
       if (statementInfo.scope_index.has_value()) {
         // Already have a scope index.
         // This is the root scope of a function declaration.
-        thisBlockScopeId = statementInfo.scope_index.value();
+        thisBlockCtx.scope_id = statementInfo.scope_index.value();
       } else {
-        thisBlockScopeId = meta->new_scope(scopeId);
+        thisBlockCtx.scope_id = meta->new_scope(ctx.scope_id);
         statementInfo.scope_index = thisBlockScopeId;
 
         program_metadata::scope & newScope = meta->scopes[thisBlockScopeId];
@@ -828,11 +890,11 @@ namespace adder {
           program_metadata::scope& parentScope = meta->scopes[newScope.parent.value()];
           newScope.parent_function_scope = parentScope.parent_function_scope;
         }
-        newScope.prefix = adder::format("%s/%s/", meta->scopes[scopeId].prefix.c_str(), block.scope_name.c_str());
+        newScope.prefix = adder::format("%s/%s/", meta->scopes[ctx.scope_id].prefix.c_str(), block.scope_name.c_str());
       }
 
       for (auto & statement : block.statements) {
-        if (!evaluate_symbols(ast, meta, statement, thisBlockScopeId)) {
+        if (!evaluate_symbols(ast, meta, statement, thisBlockCtx)) {
           return false;
         }
       }
@@ -840,10 +902,10 @@ namespace adder {
       return true;
     }
 
-    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t scopeId, expr::function_declaration const & decl) {
+    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::function_declaration const & decl, symbol_eval_context const & ctx) {
       program_metadata::symbol symbol;
       symbol.name     = decl.identifier;
-      symbol.scope_id = scopeId;
+      symbol.scope_id = ctx.scope_id;
       symbol.flags    = symbol_flags::function;
 
       if (decl.type.has_value()) {
@@ -863,7 +925,7 @@ namespace adder {
       symbol.full_identifier = name;
       symbol.full_identifier = adder::format(
         "%s%s",
-        meta->scopes[scopeId].prefix.c_str(),
+        meta->scopes[ctx.scope_id].prefix.c_str(),
         get_symbol_name(meta->types[symbol.type].identifier, name).c_str());
 
       const auto symbol_index = meta->add_symbol(symbol);
@@ -872,40 +934,40 @@ namespace adder {
         return false;
       }
 
-      const size_t funcStatementId = ast.id_of(&decl).value();
-      meta->statement_info[funcStatementId].symbol_index = symbol_index;
+      meta->statement_info[id].symbol_index = symbol_index;
 
       if (decl.body.has_value()) {
-        const size_t thisBlockScopeId = meta->new_scope(scopeId);
-        meta->statement_info[funcStatementId].scope_index = thisBlockScopeId;
-        meta->statement_info[decl.body.value()].scope_index = thisBlockScopeId;
+        symbol_eval_context thisBlockCtx = ctx;
+        thisBlockCtx.scope_id = meta->new_scope(ctx.scope_id);
+        meta->statement_info[id].scope_index = thisBlockCtx.scope_id;
+        meta->statement_info[decl.body.value()].scope_index = thisBlockCtx.scope_id;
 
         {
-          program_metadata::scope& functionScope = meta->scopes[thisBlockScopeId];
+          program_metadata::scope& functionScope = meta->scopes[thisBlockCtx.scope_id];
           functionScope.parent_function_scope = std::nullopt;
           functionScope.prefix = adder::format("%.*s/",
             symbol.full_identifier.length(),
             symbol.full_identifier.data()
           );
         }
-        meta->symbols[symbol_index.value()].function_root_scope_id = thisBlockScopeId;
+        meta->symbols[symbol_index.value()].function_root_scope_id = thisBlockCtx.scope_id;
 
         for (const size_t statement : decl.arguments) {
           // TODO: Should arguments be part of the "block" statement?
-          if (!evaluate_symbols(ast, meta, statement, thisBlockScopeId)) {
+          if (!evaluate_symbols(ast, meta, statement, thisBlockCtx)) {
             return false;
           }
         }
 
-        evaluate_symbols(ast, meta, decl.body.value(), thisBlockScopeId);
+        evaluate_symbols(ast, meta, decl.body.value(), thisBlockCtx);
       }
 
       return true;
     }
 
-    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t scopeId, expr::variable_declaration const & decl) {
+    bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::variable_declaration const & decl, symbol_eval_context const & ctx) {
       program_metadata::symbol symbol;
-      symbol.scope_id = scopeId;
+      symbol.scope_id = ctx.scope_id;
       symbol.name = decl.name;
 
       if (decl.type.has_value()) {
@@ -932,7 +994,7 @@ namespace adder {
       symbol.flags = decl.flags;
       symbol.full_identifier = adder::format(
         "%s%s",
-        meta->scopes[scopeId].prefix.c_str(),
+        meta->scopes[ctx.scope_id].prefix.c_str(),
         get_symbol_name(meta->types[symbol.type].identifier, symbol.name).c_str());
 
       auto symbol_index = meta->add_symbol(symbol);
@@ -941,15 +1003,20 @@ namespace adder {
         return false;
       }
 
-      meta->statement_info[ast.id_of(&decl).value()].symbol_index = symbol_index;
+      if (decl.initializer.has_value()) {
+        evaluate_symbols(ast, meta, decl.initializer.value(), ctx);
+      }
+
+      meta->statement_info[id].symbol_index = symbol_index;
+      meta->statement_info[id].type_id      = symbol.type;
       return true;
     }
 
-    bool evaluate_symbols(ast const & ast, program_metadata * meta, size_t id, size_t parentScopeId) {
+    bool evaluate_symbols(ast const & ast, program_metadata * meta, size_t id, symbol_eval_context const & ctx) {
       // meta->statement_info[id].parent_scope_id = parentScopeId;
       return std::visit(
         [&](auto&& s) {
-          return evaluate_statement_symbols(ast, meta, parentScopeId, s);
+          return evaluate_statement_symbols(ast, meta, id, s, ctx);
         },
         ast.statements[id]
       );
@@ -964,8 +1031,10 @@ namespace adder {
       meta->statement_info.resize(ast.statements.size());
 
       expr::block const & top = ast.get<expr::block>(ast.statements.size() - 1);
+      symbol_eval_context ctx;
+      ctx.scope_id = 0;
       for (size_t statementId : top.statements) {
-        if (!evaluate_symbols(ast, meta, statementId, 0)) {
+        if (!evaluate_symbols(ast, meta, statementId, ctx)) {
           return false;
         }
       }
