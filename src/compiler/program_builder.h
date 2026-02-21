@@ -209,6 +209,8 @@ namespace adder {
       };
 
       struct function {
+        inline static constexpr int64_t CallLinkStorageSize = sizeof(vm::register_value) * 2;
+
         size_t symbol;
         size_t scope_id;
         size_t return_type;

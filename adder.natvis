@@ -13,4 +13,39 @@
       </CustomListItems>
     </Expand>
   </Type>
+  <Type Name="adder::vm::instruction">
+    <DisplayString Condition="code == adder::vm::op_code::load"         >load r{ (int)load.dst } r{ (int)load.src_addr } { (int)load.size }</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::load_addr"    >load_addr r{ (int)load_addr.dst } { load_addr.addr } { (int)load_addr.size }</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::load_offset"  >load_offset r{ (int)load_offset.dst } r{ (int)load_offset.src_addr } { (int)load_offset.size } { load_offset.offset }</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::store"        >store r{ (int)store.addr } r{ (int)store.src } { (int)store.size }</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::store_addr"   >store_addr { store_addr.addr } r{(int)store_addr.src} {(int)store_addr.size}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::store_offset" >store_offset r{ (int)store_offset.addr } r{ (int)store_offset.src } { (int)store_offset.size } { store_offset.offset }</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::set"          >set r{(int)set.dst} {(int64_t)set.val}</DisplayString>
+    
+    <DisplayString Condition="code == adder::vm::op_code::add_i64">addi r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::add_f64">addf r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::sub_i64">subi r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::sub_f64">subf r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::mul_i64">muli r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::mul_f64">mulf r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::div_i64">divi r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::div_f64">divf r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
+
+    <DisplayString Condition="code == adder::vm::op_code::alloc_stack">alloc_stack {alloc_stack.bytes}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::free_stack">free_stack {alloc_stack.bytes}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::push">push r{(int)push.src} {(int)push.size}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::pop">pop r{(int)pop.dst} {(int)push.size}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::jump">jump {jump.addr}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::jump_relative">jump_relative {jump_relative.offset}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::jump_indirect">jump_indirect {jump_indirect.addr}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::move">move r{(int)move.dst} r{(int)move.src}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::compare_i64">comparei r{(int)compare.dst} r{(int)compare.lhs} r{(int)compare.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::compare_f64">comparef r{(int)compare.dst} r{(int)compare.lhs} r{(int)compare.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::conditional_jump">cond_jump r{conditional_jump.cmp_reg} {(int)conditional_jump.cmp_val}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::conditional_move">cond_move r{conditional_move.cmp_reg} {(int)conditional_jump.cmp_val}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::call">call {call.addr}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::call_indirect">call_indirect r{(int)call_indirect.addr}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::ret">ret</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::exit">exit</DisplayString>
+  </Type>
 </AutoVisualizer>

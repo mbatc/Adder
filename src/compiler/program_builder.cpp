@@ -286,9 +286,9 @@ namespace adder {
       return symbols[symbolIndex].type;
     }
 
-    std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::string_view const & fullName) const {
-      return search_for_symbol_index(scopeId, [&fullName](symbol const& s) {
-        return s.full_identifier == fullName;
+    std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::string_view const & name) const {
+      return search_for_symbol_index(scopeId, [&name](symbol const& s) {
+        return s.name == name;
       });
     }
 
@@ -342,6 +342,7 @@ namespace adder {
         if (!initializer.has_value())
           return std::nullopt; // No conversion available
 
+        current = param.next;
         ++score;
       }
 
@@ -361,13 +362,15 @@ namespace adder {
     }
 
     std::optional<size_t> program_metadata::find_unnamed_initializer(size_t scopeId, size_t receiverTypeIndex, size_t initializerTypeIndex) const {
-      std::string_view symbol = adder::format(
+      std::string_view fullName = adder::format(
         "init ([ref]%.*s,%.*s)=>void:",
         types[receiverTypeIndex].identifier.length(), types[receiverTypeIndex].identifier.data(),
         types[initializerTypeIndex].identifier.length(), types[initializerTypeIndex].identifier.data()
       );
 
-      return search_for_symbol_index(scopeId, symbol);
+      return search_for_symbol_index(scopeId, [fullName](symbol const & sym) {
+        return sym.full_identifier == fullName;
+      });
     }
 
     std::optional<size_t> program_metadata::get_parent_scope(size_t const & scopeId) const {
@@ -430,7 +433,7 @@ namespace adder {
       value ret;
 
       ret.indirect_register_index = (vm::register_index)vm::register_names::fp;
-      ret.address_offset          = -(int64_t)meta.get_type_size(func.return_type) - func.args_size;
+      ret.address_offset          = -(int64_t)meta.get_type_size(func.return_type) - func.args_size - function::CallLinkStorageSize;
       ret.type_index              = func.return_type;
       return ret;
     }

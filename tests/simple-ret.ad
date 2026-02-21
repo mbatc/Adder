@@ -1,6 +1,6 @@
 
 fn test() => int32 {
-  return 0;
+  return 1234;
 }
 
 fn main() => void {

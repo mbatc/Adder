@@ -352,6 +352,9 @@ namespace adder {
 
       if (statement.body.has_value() && (statement.flags & symbol_flags::inline_) == symbol_flags::none) {
         program->begin_function(symbolIndex.value());
+        program->push_return_pointer();
+        program->push_frame_pointer();
+        program->move(vm::register_names::fp, vm::register_names::sp);
 
         size_t rootScope = program->scopes.size();
         program->push_return_handler([rootScope](auto* program) {
@@ -374,7 +377,7 @@ namespace adder {
         program->begin_scope();
 
         auto &func = program->current_function();
-        int64_t nextArgOffset = -(int64_t)func.args_size;
+        int64_t nextArgOffset = -(int64_t)func.args_size - program_builder::function::CallLinkStorageSize; // Frame pointer + return pointer
 
         for (auto argId : statement.arguments) {
           const auto & decl = ast.get<expr::variable_declaration>(argId);
@@ -403,6 +406,8 @@ namespace adder {
         }
 
         program->end_scope();
+        program->pop_frame_pointer();
+        program->pop_return_pointer();
         program->ret();
         program->end_function();
 
@@ -513,10 +518,11 @@ namespace adder {
         // TODO: Default args could be pushed here (if param.expression is empty)
         auto param = ast.get<expr::call_parameter>(parameters.value());
 
-        generate_code(ast, program, param.expression);
-        
         size_t prevSz = program->value_stack.size();
         unused(prevSz);
+
+        generate_code(ast, program, param.expression);
+        
         assert(program->value_stack.size() != prevSz);
         currentParam = param.next;
       }
@@ -608,10 +614,6 @@ namespace adder {
       else {
         program->begin_scope();
 
-        program->push_return_pointer();
-        program->push_frame_pointer();
-        program->move(vm::register_names::fp, vm::register_names::sp);
-
         auto rv = program->allocate_temporary_call_parameter(program->meta.return_type_of(function->type_index).value());
 
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
@@ -632,9 +634,6 @@ namespace adder {
         }
         // Free return space
         program->free_temporary_value();
-
-        program->pop_frame_pointer();
-        program->pop_return_pointer();
         program->end_scope();
       }
 
@@ -837,11 +836,43 @@ namespace adder {
       }
 
       if (!statementMeta.symbol_index.has_value()) {
+        printf("Error: Unknown identifier '%.*s'\n", (int)identifier.name.length(), identifier.name.data());
         return false;
       }
 
       statementMeta.type_id = meta->get_symbol_type(statementMeta.symbol_index.value());
       return statementMeta.symbol_index.has_value();
+    }
+
+    bool evaluate_literal_symbols(ast const& ast, program_metadata* meta, size_t id, bool value, symbol_eval_context const & ctx) {
+      unused(ast, value, ctx);
+      meta->statement_info[id].type_id = meta->get_type_index(get_primitive_type_name(type_primitive::bool_));
+      return true;
+    }
+
+    bool evaluate_literal_symbols(ast const& ast, program_metadata* meta, size_t id, int64_t value, symbol_eval_context const & ctx) {
+      unused(ast, value, ctx);
+      meta->statement_info[id].type_id = meta->get_type_index(get_primitive_type_name(type_primitive::int64));
+      return true;
+    }
+
+    bool evaluate_literal_symbols(ast const& ast, program_metadata* meta, size_t id, double value, symbol_eval_context const & ctx) {
+      unused(ast, value, ctx);
+      meta->statement_info[id].type_id = meta->get_type_index(get_primitive_type_name(type_primitive::float64));
+      return true;
+    }
+
+    bool evaluate_literal_symbols(ast const& ast, program_metadata* meta, size_t id, std::string_view const & value, symbol_eval_context const& ctx) {
+      unused(ast, meta, id, value, ctx);
+      // TODO: Implement strings
+      // meta->statement_info[id].type_id = meta->get_type_index(get_primitive_type_name(type_primitive::));
+      return true;
+    }
+
+    bool evaluate_statement_symbols(ast const& ast, program_metadata* meta, size_t id, expr::literal const & decl, symbol_eval_context const& ctx) {
+      return std::visit([&](auto&& o) {
+        return evaluate_literal_symbols(ast, meta, id, o, ctx);
+      }, decl.value);
     }
 
     bool evaluate_statement_symbols(ast const& ast, program_metadata* meta, size_t id, expr::call_parameter const & param, symbol_eval_context const & ctx) {

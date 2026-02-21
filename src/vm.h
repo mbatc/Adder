@@ -78,20 +78,20 @@ namespace adder {
     };
 
     template<> struct op_code_args<op_code::store> {
-      register_index src;
       register_index addr; // [reg]
+      register_index src;
       uint8_t        size;
     };
 
     template<> struct op_code_args<op_code::store_addr> {
-      register_index src;
       register_value addr;
+      register_index src;
       uint8_t        size;
     };
 
     template<> struct op_code_args<op_code::store_offset> {
-      register_index src;
       register_index addr;
+      register_index src;
       uint8_t        size;
       int64_t        offset;
     };

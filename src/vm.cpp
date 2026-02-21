@@ -241,7 +241,7 @@ namespace adder {
       }
 
       void call_indirect(machine * vm, op_code_args<op_code::call_indirect> const & args) {
-        vm->registers[vm::register_names::fp] = vm->registers[vm::register_names::sp];
+        vm->registers[vm::register_names::rp] = vm->registers[vm::register_names::pc];
         vm->registers[vm::register_names::pc].value = vm->registers[args.addr].value;
       }
 
@@ -392,7 +392,10 @@ namespace adder {
         for (int p = 0; p < vm->stack.size; ++p)
         {
           if (p % 8 == 0)
+          {
             std::cout << std::endl;
+            printf("[%lld]: ", (int64_t)(vm->stack.base + p));
+          }
           printf("0x%.2x ", vm->stack.base[p]);
         }
         std::cout << "\n\n";
