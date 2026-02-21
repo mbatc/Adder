@@ -383,6 +383,7 @@ namespace adder {
       case adder::vm::op_code::pop: return "pop";                           ///< Pop a register value from the stack. Store in named register
       case adder::vm::op_code::jump: return "jump";                         ///< Set the program counter.
       case adder::vm::op_code::jump_indirect: return "jump_indirect";       ///< Set the program counter to a value stored in a register
+      case adder::vm::op_code::jump_relative: return "jump_relative";       ///< Set the program counter to a location relative to the current instruction
       case adder::vm::op_code::move: return "move";                         ///< Move a value from a register
       case adder::vm::op_code::compare_i64: return "compare_i64";           ///< Compare the values in two registers as integers
       case adder::vm::op_code::compare_f64: return "compare_f64";           ///< Compare the values in two registers as floats

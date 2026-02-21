@@ -26,7 +26,7 @@ int main(int argc, char ** argv) {
   adder::vm::machine vm(&allocator);
 
   auto loaded = adder::vm::load_program(&vm, result.view());
-  auto mainSymbol = loaded.find_public_symbol("fn:()=>void:main");
+  auto mainSymbol = loaded.find_public_symbol("()=>void:main");
 
   void * entry = adder::vm::compile_call_handle(&vm, *mainSymbol);
 

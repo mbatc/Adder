@@ -128,7 +128,7 @@ namespace adder {
       std::optional<program_builder::value> value = program->find_value_by_identifier(statement.name);
 
       if (!value.has_value()) {
-        printf("Error: Undeclared identifier '%.*s'\n", statement.name.length(), statement.name.data());
+        printf("Error: Undeclared identifier '%.*s'\n", (int)statement.name.length(), statement.name.data());
         // Push Error: Undeclared identifier `statement.name`
         return false;
       }
@@ -350,8 +350,8 @@ namespace adder {
         return false;
       }
 
-      if (statement.body.has_value()) {
-        program->begin_function(symbolIndex.value(), statementId);
+      if (statement.body.has_value() && (statement.flags & symbol_flags::inline_) == symbol_flags::none) {
+        program->begin_function(symbolIndex.value());
 
         size_t rootScope = program->scopes.size();
         program->push_return_handler([rootScope](auto* program) {
@@ -388,7 +388,7 @@ namespace adder {
           program_builder::value val;
           val.symbol_index = argSymbol;
           val.type_index = program->meta.symbols[argSymbol.value()].type;
-          val.indirect_register_index = vm::register_names::fp;
+          val.indirect_register_index = (vm::register_index)vm::register_names::fp;
           val.address_offset = nextArgOffset;
           val.identifier = decl.name;
           nextArgOffset += program->meta.get_type_size(val.type_index.value());
@@ -468,8 +468,8 @@ namespace adder {
           auto a = program->meta.types[argType];
           auto b = program->meta.types[argType];
           printf("Error: No unnamed initializer that can create a `%.*s` from `%.*s`\n",
-            a.identifier.length(), a.identifier.data(),
-            b.identifier.length(), b.identifier.data());
+            (int)a.identifier.length(), a.identifier.data(),
+            (int)b.identifier.length(), b.identifier.data());
           return false;
         }
 
@@ -498,7 +498,7 @@ namespace adder {
       if (!program->meta.is_function(function.type_index)) {
         // TODO: Push error. Not callable
         auto type = program->meta.types[function.type_index.value()];
-        printf("Error: %.*s is not callable\n", type.identifier.length(), type.identifier.data());
+        printf("Error: %.*s is not callable\n", (int)type.identifier.length(), type.identifier.data());
         return false;
       }
 
@@ -507,7 +507,7 @@ namespace adder {
       program->push_value(ret);
 
       auto currentParam = parameters;
-      int64_t numParams = 0;
+      // int64_t numParams = 0;
       while (currentParam.has_value()) {
         // TODO: Maybe determine if temporaries need to be allocated? Not sure if it needs to be done here or not though.
         // TODO: Default args could be pushed here (if param.expression is empty)
@@ -515,7 +515,7 @@ namespace adder {
 
         generate_code(ast, program, param.expression);
         
-        int64_t prevSz = program->value_stack.size();
+        size_t prevSz = program->value_stack.size();
         unused(prevSz);
         assert(program->value_stack.size() != prevSz);
         currentParam = param.next;
@@ -539,28 +539,27 @@ namespace adder {
         callable = program->meta.symbols[function->symbol_index.value()];
 
       auto & symbolType = program->meta.types[function->type_index.value()];
-
+      
       // Pointer to the actual function definition.
       // Allows us to inline the call if possible
       expr::function_declaration const * func =
-        callable.has_value() && callable->function_index.has_value()
-        ? &ast.get<expr::function_declaration>(program->functions[callable->function_index.value()].declaration_id)
+        callable.has_value() && callable->declaration_id.has_value()
+        ? &ast.get<expr::function_declaration>(callable->declaration_id.value())
         : nullptr;
 
-      type_function * signature =
+      type_function const * signature =
         std::holds_alternative<type_function>(symbolType.desc)
         ? &std::get<type_function>(symbolType.desc)
         : nullptr;
 
       if (signature == nullptr) {
         // Push error: Type is not callable.
-        printf("Error: %.*s is not a callable type\n", symbolType.identifier.length(), symbolType.identifier.data());
+        printf("Error: %.*s is not a callable type\n", (int)symbolType.identifier.length(), symbolType.identifier.data());
         return false;
       }
 
       const size_t prevTemporaryCount = program->scopes.back().temporaries.size();
-      const size_t argsStartIndex = program->value_stack.size();
-
+      // const size_t argsStartIndex = program->value_stack.size();
       // if (signature->arguments.size() != program->value_stack.size() - argsStartIndex) {
       //   // Push error: Invalid argument count
       //   return false;
@@ -904,10 +903,10 @@ namespace adder {
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::function_declaration const & decl, symbol_eval_context const & ctx) {
       program_metadata::symbol symbol;
-      symbol.name     = decl.identifier;
-      symbol.scope_id = ctx.scope_id;
-      symbol.flags    = symbol_flags::function;
-
+      symbol.name           = decl.identifier;
+      symbol.scope_id       = ctx.scope_id;
+      symbol.flags          = decl.flags | symbol_flags::function;
+      symbol.declaration_id = id;
       if (decl.type.has_value()) {
         const auto typeIndex = evaluate_type_index(ast, meta, decl.type.value());
         if (!typeIndex.has_value()) {
@@ -967,8 +966,10 @@ namespace adder {
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::variable_declaration const & decl, symbol_eval_context const & ctx) {
       program_metadata::symbol symbol;
-      symbol.scope_id = ctx.scope_id;
-      symbol.name = decl.name;
+      symbol.name           = decl.name;
+      symbol.scope_id       = ctx.scope_id;
+      symbol.declaration_id = id;
+      symbol.flags          = decl.flags;
 
       if (decl.type.has_value()) {
         const auto typeIndex = evaluate_type_index(ast, meta, decl.type.value());
@@ -991,7 +992,6 @@ namespace adder {
         return false;
       }
 
-      symbol.flags = decl.flags;
       symbol.full_identifier = adder::format(
         "%s%s",
         meta->scopes[ctx.scope_id].prefix.c_str(),
@@ -1082,7 +1082,7 @@ namespace adder {
           }
 
           const size_t sz = meta->get_type_size(symbol.type);
-          const bool isGlobal = !symbol.is_global();
+          const bool isGlobal = symbol.is_global();
           if (isStatic || isGlobal) {
             symbol.global_address = meta->static_storage_size;
             meta->static_storage_size += sz;

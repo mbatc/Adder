@@ -73,6 +73,8 @@ namespace adder {
         /// size_t statement_id = 0;
         /// Scope that declared this symbol.
         size_t scope_id = 0;
+        /// ID if the statement that declared this symbol
+        std::optional<size_t> declaration_id;
         /// Function declaration root scope id.
         std::optional<size_t> function_root_scope_id;
         /// Function declaration associated with this symbol.
@@ -211,7 +213,7 @@ namespace adder {
         size_t scope_id;
         size_t return_type;
 
-        size_t declaration_id; ///< ID of the declaration statement
+        // size_t declaration_id; ///< ID of the declaration statement
 
         size_t args_size = 0;         ///< Size of the function parameters.
         size_t arg_count = 0;         ///< Number of arguments to this function.
@@ -245,7 +247,7 @@ namespace adder {
       void push_value(value r);
       std::optional<value> pop_value();
 
-      bool begin_function(size_t symbol, size_t declarationStatementId);
+      bool begin_function(size_t symbol);
       void end_function();
       function & current_function();
 
