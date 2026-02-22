@@ -5,6 +5,7 @@
 #include "program.h"
 
 #include <iostream>
+#include <chrono>
 
 int main(int argc, char ** argv) {
   adder::unused(argc, argv);
@@ -30,7 +31,18 @@ int main(int argc, char ** argv) {
 
   void * entry = adder::vm::compile_call_handle(&vm, *mainSymbol);
 
-  adder::vm::call(&vm, entry);
+  for (int64_t j = 0; j < 100; ++j)
+  {
+    using namespace std::chrono;
+    auto start = high_resolution_clock::now();
 
+    for (int64_t i = 0; i < 100000; ++i)
+      adder::vm::call(&vm, entry);
+
+    auto end = high_resolution_clock::now();
+
+    double s = (double)(end - start).count() / (1000 * 1000 * 1000ll);
+    printf("%.4f\n", s);
+  }
   return 0;
 }

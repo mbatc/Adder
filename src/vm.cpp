@@ -7,7 +7,48 @@
 #include <iostream>
 #include <iomanip>
 
+// #define AD_PRINT_VM_STATE
+
+#define use_small_memcpy 1
+
+#if use_small_memcpy
+  #define small_memcpy(dst, src, size) ::adder::impl::tiny_copy(dst, src, size)
+#else
+  #define small_memcpy(dst, src, size) memcpy(dst, src, size)
+#endif
+
 namespace adder {
+  namespace impl {
+    /// Copy 8 bytes or less
+    void tiny_copy(void* dst, void const * src, uint8_t sz) {
+      uint8_t* dstData = (uint8_t*)dst;
+      uint8_t const * srcData = (uint8_t const * )src;
+      switch (sz) {
+      case 8:
+        *(uint64_t*)dst = *(uint64_t const *)src;
+        break;
+      case 7:
+        dstData[6] = srcData[6];
+      case 6:
+        dstData[5] = srcData[5];
+      case 5:
+        dstData[4] = srcData[4];
+      case 4:
+        *(uint32_t*)dst = *(uint32_t const *)src;
+        break;
+      case 3:
+        dstData[2] = srcData[2];
+      case 2:
+        *(uint16_t*)dst = *(uint16_t const *)src;
+        break;
+      case 1:
+        dstData[0] = srcData[0];
+      case 0:
+        break;
+      }
+    }
+  }
+
   namespace vm {
     size_t instruction_size(op_code /*code*/) {
       return sizeof(instruction);
@@ -182,7 +223,7 @@ namespace adder {
 
       void pop(machine * vm, op_code_args<op_code::pop> const & args) {
         vm->registers[args.dst].u64 = 0;
-        memcpy(&vm->registers[args.dst], vm->stack.end() - args.size, args.size);
+        small_memcpy(&vm->registers[args.dst], vm->stack.end() - args.size, args.size);
 
         vm->stack.free(args.size);
         vm->registers[register_names::sp].ptr = vm->stack.end();
@@ -376,18 +417,19 @@ namespace adder {
       return ret;
     }
 
-    void call(machine * vm, void * handle)
+    void call(machine* vm, void* handle)
     {
       // Set program counter to the entry point.
       vm->registers[adder::vm::register_names::pc].ptr = handle;
-      
+
+#ifdef AD_PRINT_VM_STATE
       int64_t step = 0;
       do
       {
         int i = 0;
-        for (auto &reg : vm->registers)
+        for (auto& reg : vm->registers)
           std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.d64 << "]" << std::endl;
-      
+
         std::cout << "\nStack:\n";
         for (int p = 0; p < vm->stack.size; ++p)
         {
@@ -399,11 +441,11 @@ namespace adder {
           printf("0x%.2x ", vm->stack.base[p]);
         }
         std::cout << "\n\n";
-      
+
         adder::vm::decode(vm);
 
         std::cout << "\nInstruction " << step << ": " << op_code_to_string(vm->next_instruction.code) << "\n";
-      
+
         if (!adder::vm::execute(vm))
         {
           if (vm->next_instruction.code == adder::vm::op_code::exit)
@@ -412,9 +454,18 @@ namespace adder {
             std::cout << "Failed\n";
           break;
         }
-      
+
         ++step;
       } while (true);
+#else
+      while (true)
+      {
+        bool ok = adder::vm::decode(vm);
+        ok = ok && adder::vm::execute(vm);
+        if (!ok || vm->next_instruction.code == adder::vm::op_code::exit)
+          break;
+      }
+#endif
     }
   }
 }

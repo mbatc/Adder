@@ -253,7 +253,7 @@ namespace adder {
       /// Allocate data on the stack.
       void * allocate(size_t bytes) {
         size_t newSize = size + bytes;
-        if (!grow(newSize)) {
+        if (newSize > capacity && !grow(newSize)) {
           return nullptr;
         }
 
@@ -337,6 +337,7 @@ namespace adder {
         int64_t        i64;
         double         d64;
         void*          ptr;
+        uint8_t*       data;
       } registers[register_count];
 
       uint64_t program_counter() const {
@@ -354,6 +355,11 @@ namespace adder {
     const_program_view load_program(machine * vm, program_view const& program, bool relocated = true);
     bool execute(machine * vm);
     bool step(machine *vm);
+
+    /// Call handle should include metadata for the symbol return/parameter types.
+    /// `call` should take a callback used to initialize parameters and receive the return value
+    ///   e.g. typedef (*CallParameterInitializer)(void * ptr, int position, type * type, void *userdata);
+    ///        typedef (*ReturnValueHandler)(void const * ptr, type * type, void *userdata);
     void* compile_call_handle(machine* vm, program_symbol_table_entry const & symbol);
 
     void call(machine* vm, void * handle);
