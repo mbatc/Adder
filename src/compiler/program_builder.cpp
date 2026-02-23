@@ -335,12 +335,11 @@ namespace adder {
           return std::nullopt; // Not enough arguments.
 
         auto & param = ast.get<expr::call_parameter>(current.value());
-        if (statement_info[param.expression].type_id == signature.arguments[i])
-          continue;
-
-        auto initializer = find_unnamed_initializer(scopeId, signature.arguments[i], statement_info[param.expression].type_id.value());
-        if (!initializer.has_value())
-          return std::nullopt; // No conversion available
+        if (statement_info[param.expression].type_id != signature.arguments[i]) {
+          auto initializer = find_unnamed_initializer(scopeId, signature.arguments[i], statement_info[param.expression].type_id.value());
+          if (!initializer.has_value())
+            return std::nullopt; // No conversion available
+        }
 
         current = param.next;
         ++score;
@@ -428,13 +427,18 @@ namespace adder {
     }
 
     program_builder::value program_builder::get_return_value() const {
-      assert(!function_stack.empty());
-      auto const & func = functions[function_stack.back()];
-      value ret;
+      assert(!return_values.empty());
+      return return_values.back();
+    }
 
-      ret.indirect_register_index = (vm::register_index)vm::register_names::fp;
-      ret.address_offset          = -(int64_t)meta.get_type_size(func.return_type) - func.args_size - function::CallLinkStorageSize;
-      ret.type_index              = func.return_type;
+    void program_builder::push_return_value_receiver(value const& val) {
+      return_values.push_back(val);
+    }
+
+    program_builder::value program_builder::pop_return_value_receiver() {
+      assert(!return_values.empty());
+      auto ret = return_values.back();
+      return_values.pop_back();
       return ret;
     }
     
@@ -494,7 +498,7 @@ namespace adder {
       return find_value(predicate, scopeIndex - 1);
     }
 
-    program_builder::value program_builder::allocate_temporary_value(size_t typeIndex) {
+    size_t program_builder::allocate_temporary_value(size_t typeIndex) {
       const size_t sz = meta.get_type_size(typeIndex);
       value result;
       auto & func = current_function();
@@ -509,11 +513,13 @@ namespace adder {
       result.address_offset = offset;
       result.type_index = typeIndex;
 
+      size_t id = scopes.back().temporaries.size();
       scopes.back().temporaries.push_back(result);
-      return result;
+
+      return id;
     }
 
-    program_builder::value program_builder::allocate_temporary_call_parameter(size_t typeIndex) {
+    size_t program_builder::allocate_temporary_call_parameter(size_t typeIndex) {
       const size_t sz = meta.get_type_size(typeIndex);
       auto & func = current_function();
 
@@ -530,11 +536,16 @@ namespace adder {
       result.type_index              = typeIndex;
       result.address_offset          = -(int64_t)sz;
       result.indirect_register_index = (vm::register_index)vm::register_names::sp;
+      size_t id = scopes.back().temporaries.size();
       scopes.back().temporaries.push_back(result);
 
       func.call_params_used += sz;
 
-      return result;
+      return id;
+    }
+
+    program_builder::value program_builder::get_temporary(size_t id) const {
+      return scopes.back().temporaries[id];
     }
 
     void program_builder::free_temporary_value() {
@@ -607,6 +618,12 @@ namespace adder {
       func.return_type = funcDesc.return_type;
       func.symbol      = symbolId;
       func.scope_id    = symbol.function_root_scope_id.value();
+
+      value rv;
+      rv.indirect_register_index = (vm::register_index)vm::register_names::fp;
+      rv.address_offset          = -(int64_t)meta.get_type_size(func.return_type) - func.args_size - function::CallLinkStorageSize;
+      rv.type_index              = func.return_type;
+      push_return_value_receiver(rv);
 
       function_stack.push_back(functions.size());
       functions.push_back(func);

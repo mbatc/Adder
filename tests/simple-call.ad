@@ -1,8 +1,16 @@
 
-fn test(val: int32) => int32 {
-  return val;
+fn return_first(val1: int64, val2: int64) => int64 {
+  return val1;
+}
+
+fn return_second(val1: int64, val2: int64) => int64 {
+  return val2;
 }
 
 fn main() => void {
-  const test_val: int32 = test(1234);
+  const first: int64 = 1234;
+  const second: int64 = 4321;
+
+  const equals_second: int64 = return_second(first, second);
+  const equals_first: int64 = return_first(first, second);
 }

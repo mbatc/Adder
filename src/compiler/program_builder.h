@@ -264,6 +264,9 @@ namespace adder {
       /// Get a value that describes the return value.
       /// TODO: Might need to "push" return value for handling inline calls
       value get_return_value() const;
+      void  push_return_value_receiver(value const & val);
+      value pop_return_value_receiver();
+      std::vector<value> return_values;
 
       /// Get the type of a value
       size_t get_value_type(value const & val) const;
@@ -280,8 +283,10 @@ namespace adder {
       std::optional<value> find_value(std::function<bool(value const &)> const & predicate, size_t scopeIndex) const;
 
       /// Allocate space for a temporary and push a value to the value_stack
-      program_builder::value allocate_temporary_value(size_t typeIndex);
-      program_builder::value allocate_temporary_call_parameter(size_t typeIndex);
+      size_t allocate_temporary_value(size_t typeIndex);
+      size_t allocate_temporary_call_parameter(size_t typeIndex);
+      value get_temporary(size_t id) const;
+
       void free_temporary_value();
 
       void destroy_value(value * value);

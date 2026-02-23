@@ -55,7 +55,7 @@ namespace adder {
     }
 
     size_t eval_decltype(ast const & ast, program_metadata * meta, size_t statementId) {
-      return std::visit([=](auto&& o) { return eval_decltype_impl(ast, meta, statementId, o); }, ast.statements[statementId]);
+      return std::visit([&](auto&& o) { return eval_decltype_impl(ast, meta, statementId, o); }, ast.statements[statementId]);
     }
 
     bool prepare_call(ast const& ast, program_builder* program, program_builder::value const& function, std::optional<size_t> const& parameters);
@@ -117,7 +117,7 @@ namespace adder {
       unused(statementId);
 
       return std::visit(
-        [=](auto value) {
+        [&](auto &&value) {
           return generate_literal_code(ast, program, value);
         },
         statement.value);
@@ -454,14 +454,16 @@ namespace adder {
           return true;
         }
         else {
-          auto receiver = program->allocate_temporary_value(argType);
+          auto receiverId = program->allocate_temporary_value(argType);
+          auto receiver = program->get_temporary(receiverId);
           receiver.identifier = name;
           program->add_variable(receiver);
           return initialize_variable(ast, program, receiver, src);
         }
       }
 
-      auto receiver = program->allocate_temporary_call_parameter(argType);
+      auto receiverId = program->allocate_temporary_call_parameter(argType);
+      auto receiver = program->get_temporary(receiverId);
       receiver.identifier = name;
       program->add_variable(receiver);
 
@@ -482,19 +484,40 @@ namespace adder {
         program->push_value(src);
         program->push_value(receiver);
         program->push_value(unnamedInit.value());
-        bool result = generate_call(ast, program);
+        if (!generate_call(ast, program)) {
+          return false;
+        }
         program->pop_value();
-        program->pop_value();
-        program->pop_value();
-        program->pop_value();
-        return result;
+        return true;
       }
       else {
         return initialize_variable(ast, program, receiver, src);
       }
     }
 
-    bool prepare_call(ast const & ast, program_builder * program, program_builder::value const & function, std::optional<size_t> const & parameters) {
+    bool prepare_call_parameters_reversed(ast const& tree, program_builder * program, std::optional<size_t> const& id) {
+      if (!id.has_value())
+        return true;
+
+      auto param = tree.get<expr::call_parameter>(id.value());
+      if (!prepare_call_parameters_reversed(tree, program, param.next)) {
+        return false;
+      }
+
+      size_t prevSz = program->value_stack.size();
+      unused(prevSz);
+
+      if (!generate_code(tree, program, param.expression)) {
+        return false;
+      }
+
+      assert(program->value_stack.size() != prevSz);
+
+      return true;
+    }
+
+
+    bool prepare_call(ast const & tree, program_builder * program, program_builder::value const & function, std::optional<size_t> const & parameters) {
       if (!function.type_index.has_value()) {
         // TODO: Push error. No type
         printf("Error: Callable type is undefined\n");
@@ -507,24 +530,12 @@ namespace adder {
         return false;
       }
 
-      auto ret = program->allocate_temporary_value(program->meta.return_type_of(function.type_index.value()).value());
+      auto retId = program->allocate_temporary_value(program->meta.return_type_of(function.type_index.value()).value());
+      program->push_value(program->get_temporary(retId));
 
-      program->push_value(ret);
-
-      auto currentParam = parameters;
-      // int64_t numParams = 0;
-      while (currentParam.has_value()) {
-        // TODO: Maybe determine if temporaries need to be allocated? Not sure if it needs to be done here or not though.
-        // TODO: Default args could be pushed here (if param.expression is empty)
-        auto param = ast.get<expr::call_parameter>(parameters.value());
-
-        size_t prevSz = program->value_stack.size();
-        unused(prevSz);
-
-        generate_code(ast, program, param.expression);
-        
-        assert(program->value_stack.size() != prevSz);
-        currentParam = param.next;
+      if (!prepare_call_parameters_reversed(tree, program, parameters)) {
+        printf("Error: Failed to prepare call parameters\n");
+        return false;
       }
 
       program->push_value(function);
@@ -574,8 +585,8 @@ namespace adder {
       const bool inlineCall = func != nullptr && (func->flags & symbol_flags::inline_) == symbol_flags::inline_;
 
       if (inlineCall) {
+        // TODO: Fix me - inlining functions that allocate stack space is probably broken.
         program->begin_scope();
-
         size_t rootScope = program->scopes.size();
         program->push_return_handler([rootScope](auto* program) {
           for (size_t scope = program->scopes.size() - 1; scope >= rootScope; --scope) {
@@ -603,12 +614,33 @@ namespace adder {
           push_argument(ast, program, var.name, arg.value(), signature->arguments[i], inlineCall);
         }
 
+        program->push_return_value_receiver(program->value_stack.back());
+        
+        const size_t startInstruction = program->current_function().instructions.size();
+
         if (func->body.has_value()) {
           if (!generate_code(ast, program, func->body.value())) {
             return false;
           }
         }
 
+        program->pop_return_value_receiver();
+
+        {
+          auto &curFunc = program->current_function();
+          for (size_t i = startInstruction; i < curFunc.instructions.size(); ++i) {
+            auto& op = curFunc.instructions[i];
+            auto& tag = curFunc.instruction_tags[i];
+            switch (tag) {
+            case program_builder::instruction_tag::return_jmp: {
+              // Jump to return statement
+              assert(op.code == vm::op_code::jump_relative && "invalid op code tagged with instruction_tag::return_jmp");
+              op.jump_relative.offset = (curFunc.return_section_start - i) * sizeof(vm::instruction);
+              break;
+            }
+            }
+          }
+        }
         program->end_scope();
       }
       else {
@@ -626,12 +658,13 @@ namespace adder {
 
         program->call(function.value());
 
-        initialize_variable(ast, program, program->value_stack.back(), rv);
+        initialize_variable(ast, program, program->value_stack.back(), program->get_temporary(rv));
 
         // Free args space
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
           program->free_temporary_value();
         }
+
         // Free return space
         program->free_temporary_value();
         program->end_scope();
@@ -702,7 +735,7 @@ namespace adder {
 
     bool generate_code(ast const & ast, program_builder * program, size_t statementId) {
       bool result = false;
-      std::visit([=, &result](auto const & statement) {
+      std::visit([&](auto const & statement) {
         result = generate_code(ast, program, statement, statementId);
       }, ast.statements[statementId]);
       return result;

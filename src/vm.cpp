@@ -7,7 +7,7 @@
 #include <iostream>
 #include <iomanip>
 
-// #define AD_PRINT_VM_STATE
+#define AD_PRINT_VM_STATE
 
 #define use_small_memcpy 1
 
