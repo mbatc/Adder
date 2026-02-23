@@ -19,6 +19,7 @@ namespace adder {
 
     enum class op_code : uint64_t {
       exit,             ///< Load a value from a memory address
+      noop,             ///< Do nothing
       load,             ///< Load a value from a memory address
       load_addr,        ///< Load a value from a constant address
       load_offset,      ///< Load a value from an address (stored in a register) with some offset

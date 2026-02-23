@@ -52,8 +52,6 @@ namespace adder {
         std::optional<size_t> symbol_index;
         /// Type that this statement is associated with (if any)
         std::optional<size_t> type_id;
-        /// Type of temporary storage needed
-        std::optional<size_t> temporary_type;
       };
       std::vector<statement_meta> statement_info;
 
@@ -65,7 +63,7 @@ namespace adder {
         /// Flags for the symbol
         symbol_flags flags = symbol_flags::none;
         /// Stack frame offset for local variables
-        std::optional<uint64_t> stack_offset;
+        // std::optional<uint64_t> stack_offset;
         /// Static address for static/global.
         /// Cannot be resolved until program data area has been compiled.
         std::optional<uint64_t> global_address;
@@ -102,12 +100,6 @@ namespace adder {
         /// Scope ID of the function that contains this scope.
         /// If nullopt, this is the root scope of a function.
         std::optional<size_t> parent_function_scope;
-        /// Upper bound of space allocated for this function.
-        /// Includes variables in all nested scopes.
-        size_t max_stack_size = 0;
-        /// Max size of temporary space needed to evaluate an expression.
-        /// A function scope must allocate the max_stack_size + max_temp_size for the stack frame.
-        size_t max_temp_size = 0;
       };
       std::vector<scope> scopes;
 
@@ -176,10 +168,16 @@ namespace adder {
 
       enum class value_flags {
         none = 0,
+        /// Value uses temporary storage space
         temporary = 1 << 0,
+        /// Value uses stack-frame storage space
+        stack_variable = 1 << 1,
         /// Treat as if it has reference semantics.
         /// Used when aliasing references for inline functions.
-        eval_as_reference = 1 << 1
+        eval_as_reference = 1 << 2,
+        /// Treat as if it has reference semantics.
+        /// Used when aliasing references for inline functions.
+        alias = 1 << 3,
       };
 
       struct value {
@@ -205,7 +203,9 @@ namespace adder {
       enum class instruction_tag : uint8_t {
         none,
         return_jmp, ///< Set jump instruction address to the start of the function return section
-        stack_frame 
+        stack_frame,
+        add_temporary_storage_offset,
+        add_stack_storage_offset,
       };
 
       struct function {
@@ -215,12 +215,14 @@ namespace adder {
         size_t scope_id;
         size_t return_type;
 
-        // size_t declaration_id; ///< ID of the declaration statement
-
         size_t args_size = 0;         ///< Size of the function parameters.
-        size_t arg_count = 0;         ///< Number of arguments to this function.
-        size_t temp_storage_used = 0; ///< Max temp storage allocated while evaluating this function
-        size_t call_params_used  = 0; ///< Current size of the call parameters allocated
+        // size_t arg_count = 0;         ///< Number of arguments to this function.
+        // size_t call_params_used   = 0; ///< Current size of the call parameters allocated
+
+        size_t stack_storage_used = 0; ///< Current size of the allocated stack storage
+        size_t max_stack_storage  = 0; ///< Max stack storage allocated while evaluating this function
+        size_t temp_storage_used  = 0; ///< Current size of the allocated temporary storage
+        size_t max_temp_storage   = 0; ///< Max temp storage allocated while evaluating this function
 
         size_t return_section_start = 0;
 
@@ -255,6 +257,8 @@ namespace adder {
 
       bool begin_scope();
       bool end_scope();
+      void emit_scope_cleanup();
+      void emit_scope_cleanup(size_t upToScopeId);
 
       void push_return_handler(const std::function<void(program_builder*)>& handler);
       void pop_return_handler();
@@ -271,6 +275,10 @@ namespace adder {
       /// Get the type of a value
       size_t get_value_type(value const & val) const;
 
+      /// Allocate stack space for a variable.
+      /// Returns the frame-pointer offset to the new variable.
+      program_builder::value allocate_stack_variable(size_t typeIndex);
+
       /// Add an identifier to the current scope
       void add_variable(program_builder::value const & val);
 
@@ -283,7 +291,8 @@ namespace adder {
       std::optional<value> find_value(std::function<bool(value const &)> const & predicate, size_t scopeIndex) const;
 
       /// Allocate space for a temporary and push a value to the value_stack
-      size_t allocate_temporary_value(size_t typeIndex);
+      value allocate_temporary_value(size_t typeIndex);
+
       size_t allocate_temporary_call_parameter(size_t typeIndex);
       value get_temporary(size_t id) const;
 
@@ -311,13 +320,6 @@ namespace adder {
       void pop_return_pointer();
       void pop_frame_pointer();
 
-      // bool push_return_value_alias(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
-      // bool push_fn_parameter(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
-      // bool push_variable(std::string_view const& identifier, size_t typeIndex, symbol_flags const & flags);
-      // bool push_variable(std::string_view const& identifier, std::string_view const & type_name, symbol_flags const & flags);
-      // bool push_identifier(std::string_view const& identifier, program_metadata::symbol const & symbol);
-      // void push_expression_result(expression_result result);
-
       void alloc_stack(size_t bytes);
       void free_stack(size_t bytes);
 
@@ -327,20 +329,11 @@ namespace adder {
       void pop(vm::register_index const & dst);
 
       vm::register_index pin_register();
-      vm::register_index load_stack_frame_offset(int64_t offset, size_t size);
-      // vm::register_index load_result(expression_result const & value);
-      // vm::register_index load_address_of(expression_result const & result);
-
       vm::register_index load_constant(vm::register_value value);
-      // vm::register_index load_value_of(program_metadata::symbol const & symbol);
-      // vm::register_index load_value_of(uint64_t address, size_t size);
       vm::register_index load_value_of(program_builder::value const & value);
-      // vm::register_index load_address_of(program_metadata::symbol const & symbol);
-      // vm::register_index load_address_of(std::string_view identifier, size_t size);
       vm::register_index load_address_of(program_builder::value const & value);
       void release_register(vm::register_index reg);
 
-      // expression_result pop_expression_result();
       void load(vm::register_index dst, vm::register_index address, size_t size, int64_t offset);
       void load(vm::register_index dst, vm::register_index address, size_t size);
       void load_from_constant_address(vm::register_index dst, vm::register_value address, size_t size);

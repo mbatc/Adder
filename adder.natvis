@@ -47,5 +47,6 @@
     <DisplayString Condition="code == adder::vm::op_code::call_indirect">call_indirect r{(int)call_indirect.addr}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::ret">ret</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::exit">exit</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::noop">no-op</DisplayString>
   </Type>
 </AutoVisualizer>

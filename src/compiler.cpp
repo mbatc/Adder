@@ -17,7 +17,6 @@
 #include <algorithm>
 
 namespace adder {
-  // Compiler implementation
   namespace compiler {
     size_t eval_decltype(ast const& ast, program_metadata * meta, size_t statementId);
 
@@ -202,26 +201,22 @@ namespace adder {
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::variable_declaration const & statement, size_t statementId) {
-      const size_t temporaries = program->scopes.back().temporaries.size(); // Scoped helper for this?
-
-      // std::optional<size_t> type = statement.type;
-      // if (!type.has_value()) {
-      //   if (!initializer.has_value() || !initializer->type_index.has_value()) {
-      //     printf("Error: Unable to infer variable type for %.*s\n", statement.name.length(), statement.name.data());
-      //     // Push Error: Unable to infer variable type.
-      //     return false;
-      //   }
-      // 
-      //   type = initializer->type_index;
-      // }
+      const size_t temporaries = program->scopes.back().temporaries.size(); // TODO: Scoped helper for this?
 
       const size_t variableType = program->meta.get_type_index(ast, statement.type.value()).value();
       const size_t symbolIndex  = program->meta.statement_info[statementId].symbol_index.value();
+      const auto & symbol       = program->meta.symbols[symbolIndex];
 
       program_builder::value receiver;
-      receiver.symbol_index = symbolIndex;
-      receiver.type_index = variableType;
+      if (symbol.has_local_storage()) {
+        receiver = program->allocate_stack_variable(variableType);
+      }
+      else {
+        receiver.type_index = variableType;
+        receiver.symbol_index = symbolIndex;
+      }
       receiver.identifier = statement.name;
+
       program->add_variable(receiver);
 
       if (statement.initializer.has_value()) {
@@ -356,25 +351,14 @@ namespace adder {
         program->push_frame_pointer();
         program->move(vm::register_names::fp, vm::register_names::sp);
 
+        program->begin_scope();
+
         size_t rootScope = program->scopes.size();
         program->push_return_handler([rootScope](auto* program) {
-          for (size_t scope = program->scopes.size() - 1; scope >= rootScope; --scope) {
-            for (auto const & value : program->scopes[scope].variables) {
-              value;
-              // TODO: 
-              // program->destroy_local_variable(value);
-            }
-          }
-
-          // Might not need return handlers for inlining. Instead,
-          //   1. Find all program_builder::instruction_tag::return_jmp tags after generating inline code
-          //   2. Replace address with end of inline function.
-          //   3. Reset tag to instruction_tag::none
+          program->emit_scope_cleanup(rootScope);
           program->jump_relative(0);
           program->set_instruction_tag(program_builder::instruction_tag::return_jmp);
         });
-
-        program->begin_scope();
 
         auto &func = program->current_function();
         int64_t nextArgOffset = -(int64_t)func.args_size - program_builder::function::CallLinkStorageSize; // Frame pointer + return pointer
@@ -442,6 +426,7 @@ namespace adder {
         if (src.type_index == argType) {
           auto cpy = src;
           cpy.identifier = name;
+          cpy.flags |= program_builder::value_flags::alias;
           program->add_variable(cpy);
           return true;
         }
@@ -450,12 +435,12 @@ namespace adder {
           receiver.identifier = name;
           // Method expects a reference, so treat the value alias with reference semantics
           receiver.flags |= program_builder::value_flags::eval_as_reference;
+          receiver.flags |= program_builder::value_flags::alias;
           program->add_variable(receiver);
           return true;
         }
         else {
-          auto receiverId = program->allocate_temporary_value(argType);
-          auto receiver = program->get_temporary(receiverId);
+          auto receiver = program->allocate_temporary_value(argType);
           receiver.identifier = name;
           program->add_variable(receiver);
           return initialize_variable(ast, program, receiver, src);
@@ -530,8 +515,8 @@ namespace adder {
         return false;
       }
 
-      auto retId = program->allocate_temporary_value(program->meta.return_type_of(function.type_index.value()).value());
-      program->push_value(program->get_temporary(retId));
+      auto ret = program->allocate_temporary_value(program->meta.return_type_of(function.type_index.value()).value());
+      program->push_value(ret);
 
       if (!prepare_call_parameters_reversed(tree, program, parameters)) {
         printf("Error: Failed to prepare call parameters\n");
@@ -576,31 +561,16 @@ namespace adder {
       }
 
       const size_t prevTemporaryCount = program->scopes.back().temporaries.size();
-      // const size_t argsStartIndex = program->value_stack.size();
-      // if (signature->arguments.size() != program->value_stack.size() - argsStartIndex) {
-      //   // Push error: Invalid argument count
-      //   return false;
-      // }
-
       const bool inlineCall = func != nullptr && (func->flags & symbol_flags::inline_) == symbol_flags::inline_;
 
       if (inlineCall) {
         // TODO: Fix me - inlining functions that allocate stack space is probably broken.
         program->begin_scope();
-        size_t rootScope = program->scopes.size();
-        program->push_return_handler([rootScope](auto* program) {
-          for (size_t scope = program->scopes.size() - 1; scope >= rootScope; --scope) {
-            for (auto const & value : program->scopes[scope].variables) {
-              value;
-              // TODO:
-              // program->destroy_local_variable(value);
-            }
-          }
+        const size_t rootScope = program->scopes.size();
+        const size_t temporaries = program->scopes.back().temporaries.size();
 
-          // Might not need return handlers for inlining. Instead,
-          //   1. Find all program_builder::instruction_tag::return_jmp tags after generating inline code
-          //   2. Replace address with end of inline function.
-          //   3. Reset tag to instruction_tag::none
+        program->push_return_handler([rootScope](auto* program) {
+          program->emit_scope_cleanup(rootScope);
           program->jump_relative(0);
           program->set_instruction_tag(program_builder::instruction_tag::return_jmp);
         });
@@ -635,12 +605,17 @@ namespace adder {
             case program_builder::instruction_tag::return_jmp: {
               // Jump to return statement
               assert(op.code == vm::op_code::jump_relative && "invalid op code tagged with instruction_tag::return_jmp");
-              op.jump_relative.offset = (curFunc.return_section_start - i) * sizeof(vm::instruction);
+              op.jump_relative.offset = (curFunc.instructions.size() - i) * sizeof(vm::instruction);
+              curFunc.instruction_tags[i] = program_builder::instruction_tag::none; // Clear tag.
               break;
             }
             }
           }
         }
+
+        while (program->scopes.back().temporaries.size() > temporaries)
+          program->free_temporary_value();
+
         program->end_scope();
       }
       else {
@@ -676,11 +651,6 @@ namespace adder {
       return true;
     }
 
-    // bool generate_code(ast const & ast, program_builder * program, expr::conversion const & statement, size_t statementId) {
-    //   unused(ast, program, statement, statementId);
-    //   return true;
-    // }
-
     bool generate_code(ast const & ast, program_builder * program, expr::class_decl const & statement, size_t statementId) {
       unused(ast, program, statement, statementId);
       return true;
@@ -701,10 +671,12 @@ namespace adder {
 
       program->begin_scope();
 
+      auto & func = program->current_function();
       const auto &scopeMeta = program->meta.scopes[scopeId.value()];
       const bool isStackFrame = !scopeMeta.parent_function_scope.has_value();
+      const bool isInlining = func.scope_id != scopeId;
 
-      if (isStackFrame) {
+      if (isStackFrame && !isInlining) {
         // Is function stack frame
         program->alloc_stack(1);
         program->set_instruction_tag(program_builder::instruction_tag::stack_frame);
@@ -714,9 +686,15 @@ namespace adder {
         if (!generate_code(ast, program, statementId))
           return false;
 
-      if (isStackFrame) {
+      // If the last statement was a return, scope variables will have already been cleaned up.
+      // skip cleanup instructions.
+      if (scope.statements.empty() || !ast.is<expr::function_return>(scope.statements.back()))
+        program->emit_scope_cleanup();
+
+      if (isStackFrame && !isInlining) {
         // Mark return section
-        auto & func = program->current_function();
+        auto& func = program->current_function();
+
         func.return_section_start = func.instructions.size();
 
         program->free_stack(1);
@@ -765,27 +743,6 @@ namespace adder {
         t.identifier = get_type_name(ast, statementId).value();
         typeId = meta->add_type(t);
       }
-
-      // if (ast.is<expr::function_declaration>(statementId)) {
-      //   expr::function_declaration const & decl = ast.get<expr::function_declaration>(statementId);
-      // 
-      //   type_function_decl fn;
-      //   fn.allowInline;
-      //   fn.function_id = statementId;
-      //   fn.type = evaluate_type_index(ast, meta, decl.type.value()).value_or(0);
-      // 
-      //   if (fn.type == 0) {
-      //     // TODO: Log error. Invalid funciton type.
-      //     return std::nullopt;
-      //   }
-      // 
-      //   type t;
-      //   t.identifier = decl.identifier.empty() ? adder::format("__unnamed_fn_%lld", statementId) : decl.identifier;
-      //   t.identifier = adder::format("%s:%s", t.identifier.c_str(), meta->types[fn.type].identifier.c_str());
-      //   t.desc = fn;
-      // 
-      //   typeId = meta->add_type(t);
-      // }
 
       if (ast.is<expr::type_fn>(statementId)) {
         expr::type_fn const & fn = ast.get<expr::type_fn>(statementId);
@@ -839,9 +796,7 @@ namespace adder {
 
     struct symbol_eval_context
     {
-      size_t scope_id;
-
-      // std::optional<size_t> call_method;
+      size_t scope_id = 0;
       bool is_call = false;
       std::optional<size_t> call_parameter_list;
     };
@@ -897,6 +852,7 @@ namespace adder {
 
     bool evaluate_literal_symbols(ast const& ast, program_metadata* meta, size_t id, std::string_view const & value, symbol_eval_context const& ctx) {
       unused(ast, meta, id, value, ctx);
+      assert(false && "Not implemented");
       // TODO: Implement strings
       // meta->statement_info[id].type_id = meta->get_type_index(get_primitive_type_name(type_primitive::));
       return true;
@@ -915,6 +871,7 @@ namespace adder {
     }
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::binary_operator const & op, symbol_eval_context const & ctx) {
+      unused(id);
       switch (op.type_name) {
       case expr::operator_type::call: {
         assert(op.left.has_value());
@@ -925,11 +882,8 @@ namespace adder {
         symbol_eval_context callCtx = ctx;
         callCtx.is_call = true;
         callCtx.call_parameter_list = op.right;
-        if (!evaluate_symbols(ast, meta, op.left.value(), callCtx))
-          return false;
 
-        meta->statement_info[id].temporary_type = meta->return_type_of(meta->statement_info[op.left.value()].type_id);
-        return true;
+        return evaluate_symbols(ast, meta, op.left.value(), callCtx);
       }
       }
 
@@ -1077,7 +1031,6 @@ namespace adder {
     }
 
     bool evaluate_symbols(ast const & ast, program_metadata * meta, size_t id, symbol_eval_context const & ctx) {
-      // meta->statement_info[id].parent_scope_id = parentScopeId;
       return std::visit(
         [&](auto&& s) {
           return evaluate_statement_symbols(ast, meta, id, s, ctx);
@@ -1105,55 +1058,55 @@ namespace adder {
       return true;
     }
 
-    void evaluate_stack_allocations(program_metadata * meta, const size_t rootId = 0, const size_t allocatedStackSpace = 0) {
-      program_metadata::scope & root = meta->scopes[rootId];
-      size_t stackSize = root.parent_function_scope.has_value() ? allocatedStackSpace : 0;
-      for (size_t symbolId : root.symbols) {
-        program_metadata::symbol & symbol = meta->symbols[symbolId];
-        if (!symbol.has_local_storage()) {
-          continue;
-        }
+    // void evaluate_stack_allocations(program_metadata * meta, const size_t rootId = 0, const size_t allocatedStackSpace = 0) {
+    //   program_metadata::scope & root = meta->scopes[rootId];
+    //   size_t stackSize = root.parent_function_scope.has_value() ? allocatedStackSpace : 0;
+    //   for (size_t symbolId : root.symbols) {
+    //     program_metadata::symbol & symbol = meta->symbols[symbolId];
+    //     if (!symbol.has_local_storage()) {
+    //       continue;
+    //     }
+    // 
+    //     symbol.stack_offset = stackSize;
+    //     stackSize += meta->get_type_size(symbol.type);
+    //   }
+    // 
+    //   if (root.parent_function_scope.has_value()) {
+    //     program_metadata::scope & storageScope = meta->scopes[root.parent_function_scope.value()];
+    //     storageScope.max_stack_size = std::max(storageScope.max_stack_size, stackSize);
+    //   }
+    //   else {
+    //     root.max_stack_size = stackSize;
+    //   }
+    // 
+    //   meta->for_each_child_scope(rootId, [&](size_t childId) {
+    //     evaluate_stack_allocations(meta, childId, stackSize);
+    //   });
+    // }
 
-        symbol.stack_offset = stackSize;
-        stackSize += meta->get_type_size(symbol.type);
-      }
-
-      if (root.parent_function_scope.has_value()) {
-        program_metadata::scope & storageScope = meta->scopes[root.parent_function_scope.value()];
-        storageScope.max_stack_size = std::max(storageScope.max_stack_size, stackSize);
-      }
-      else {
-        root.max_stack_size = stackSize;
-      }
-
-      meta->for_each_child_scope(rootId, [&](size_t childId) {
-        evaluate_stack_allocations(meta, childId, stackSize);
-      });
-    }
-
-    void evaluate_variable_addresses(program_metadata * meta) {
-      meta->static_storage_size = 0;
-      for (auto & scope : meta->scopes) {
-        for (const auto & index : scope.symbols) {
-          program_metadata::symbol & symbol = meta->symbols[index];
-
-          const bool isParameter = symbol.is_parameter();
-          const bool isStatic    = symbol.is_static();
-          const bool isFunction  = symbol.is_function();
-
-          if (isFunction || isParameter) {
-            continue; // Ignore function declarations for this phase.
-          }
-
-          const size_t sz = meta->get_type_size(symbol.type);
-          const bool isGlobal = symbol.is_global();
-          if (isStatic || isGlobal) {
-            symbol.global_address = meta->static_storage_size;
-            meta->static_storage_size += sz;
-          }
-        }
-      }
-    }
+    // void evaluate_variable_addresses(program_metadata * meta) {
+    //   meta->static_storage_size = 0;
+    //   for (auto & scope : meta->scopes) {
+    //     for (const auto & index : scope.symbols) {
+    //       program_metadata::symbol & symbol = meta->symbols[index];
+    // 
+    //       const bool isParameter = symbol.is_parameter();
+    //       const bool isStatic    = symbol.is_static();
+    //       const bool isFunction  = symbol.is_function();
+    // 
+    //       if (isFunction || isParameter) {
+    //         continue; // Ignore function declarations for this phase.
+    //       }
+    // 
+    //       const size_t sz = meta->get_type_size(symbol.type);
+    //       const bool isGlobal = symbol.is_global();
+    //       if (isStatic || isGlobal) {
+    //         symbol.global_address = meta->static_storage_size;
+    //         meta->static_storage_size += sz;
+    //       }
+    //     }
+    //   }
+    // }
 
     program generate_code(ast const & ast) {
       program_builder ret;
@@ -1161,8 +1114,8 @@ namespace adder {
       ret.meta.statement_info.resize(ast.statements.size());
 
       evaluate_symbols(ast, &ret.meta);
-      evaluate_stack_allocations(&ret.meta);
-      evaluate_variable_addresses(&ret.meta);
+      // evaluate_stack_allocations(&ret.meta);
+      // evaluate_variable_addresses(&ret.meta);
 
       // generate_code();
 

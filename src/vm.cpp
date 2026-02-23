@@ -294,6 +294,8 @@ namespace adder {
     bool execute(machine * vm) {
       instruction const & inst = vm->next_instruction;
       switch (inst.code) {
+      case op_code::noop:
+        break;
       case op_code::load:
         op::load(vm, inst.load);
         break;

@@ -404,12 +404,42 @@ namespace adder {
       assert(!scopes.empty());
       assert(scopes.back().temporaries.size() == 0);
 
-      // TODO:
-      // * Add label for for early returns.
-      // * Destroy variables.
+      if (function_stack.size() > 0) {
+        auto& func = current_function();
+        auto& scope = scopes.back();
+        for (auto it = scope.variables.rbegin(); it != scope.variables.rend(); ++it) {
+          if ((it->flags & value_flags::alias) == value_flags::alias)
+            continue;
+          if ((it->flags & value_flags::stack_variable) == value_flags::stack_variable) {
+            func.stack_storage_used -= meta.get_type_size(it->type_index.value());
+          }
+        }
+      }
 
       scopes.pop_back();
       return true;
+    }
+
+    void program_builder::emit_scope_cleanup() {
+      assert(!scopes.empty());
+
+      emit_scope_cleanup(scopes.size() - 1);
+    }
+
+    void program_builder::emit_scope_cleanup(size_t upToScopeId) {
+      assert(!scopes.empty());
+      assert(scopes.back().temporaries.size() == 0);
+
+      for (size_t scopeId = scopes.size() - 1; scopeId >= upToScopeId; --scopeId) {
+        auto & scope = scopes[scopeId];
+        for (auto it = scope.variables.rbegin(); it != scope.variables.rend(); ++it) {
+          if ((it->flags & value_flags::alias) == value_flags::alias)
+            continue;
+          if ((it->flags & value_flags::stack_variable) == value_flags::stack_variable) {
+            destroy_value(&(*it));
+          }
+        }
+      }
     }
 
     void program_builder::push_return_handler(const std::function<void(program_builder*)> &handler) {
@@ -498,31 +528,45 @@ namespace adder {
       return find_value(predicate, scopeIndex - 1);
     }
 
-    size_t program_builder::allocate_temporary_value(size_t typeIndex) {
+    program_builder::value program_builder::allocate_stack_variable(size_t typeIndex) {
       const size_t sz = meta.get_type_size(typeIndex);
-      value result;
+
       auto & func = current_function();
-      auto & scopeMeta = meta.scopes[current_function().scope_id];
-      const size_t offset = meta.scopes[current_function().scope_id].max_stack_size + func.temp_storage_used;
-      func.temp_storage_used += sz;
 
-      // TODO: Would be nice to eval this ahead of time, same as max_stack_size.
-      //       A bit annoying having this evaluated during code gen. Ideally, meta evaled should be complete before code-gen
-      scopeMeta.max_temp_size = std::max(scopeMeta.max_temp_size, func.temp_storage_used);
+      value result;
       result.indirect_register_index = (vm::register_index)vm::register_names::fp;
-      result.address_offset = offset;
+      result.address_offset = func.stack_storage_used;
       result.type_index = typeIndex;
+      result.flags |= value_flags::stack_variable;
 
-      size_t id = scopes.back().temporaries.size();
+      func.stack_storage_used += sz;
+      func.max_stack_storage   = std::max(func.max_stack_storage, func.stack_storage_used);
+
+      return result;
+    }
+
+    program_builder::value program_builder::allocate_temporary_value(size_t typeIndex) {
+      const size_t sz = meta.get_type_size(typeIndex);
+
+      auto & func = current_function();
+
+      value result;
+      result.indirect_register_index = (vm::register_index)vm::register_names::fp;
+      result.address_offset = func.temp_storage_used;
+      result.type_index = typeIndex;
+      result.flags |= value_flags::temporary;
+
+      func.temp_storage_used += sz;
+      func.max_temp_storage   = std::max(func.max_temp_storage, func.temp_storage_used);
+
       scopes.back().temporaries.push_back(result);
 
-      return id;
+      return result;
     }
 
     size_t program_builder::allocate_temporary_call_parameter(size_t typeIndex) {
       const size_t sz = meta.get_type_size(typeIndex);
-      auto & func = current_function();
-
+      
       alloc_stack(sz);
 
       // Ammend other temporaries with addresses relative to the stack pointer
@@ -536,12 +580,10 @@ namespace adder {
       result.type_index              = typeIndex;
       result.address_offset          = -(int64_t)sz;
       result.indirect_register_index = (vm::register_index)vm::register_names::sp;
-      size_t id = scopes.back().temporaries.size();
+
       scopes.back().temporaries.push_back(result);
 
-      func.call_params_used += sz;
-
-      return id;
+      return scopes.back().temporaries.size() - 1;
     }
 
     program_builder::value program_builder::get_temporary(size_t id) const {
@@ -553,12 +595,13 @@ namespace adder {
       destroy_value(&val);
       scopes.back().temporaries.pop_back();
 
-      auto & func = current_function();
+      auto& func = current_function();
       const size_t sz = meta.get_type_size(val.type_index.value());
-      if (val.indirect_register_index == vm::register_names::fp)
+      if (val.indirect_register_index == vm::register_names::fp) {
         func.temp_storage_used -= sz;
+      } 
       else if (val.indirect_register_index == vm::register_names::sp) {
-        func.call_params_used -= sz;
+        // func.call_params_used -= sz;
 
         // Ammend other temporaries with addresses relative to the stack pointer
         for (auto& temporary : scopes.back().temporaries) {
@@ -635,7 +678,6 @@ namespace adder {
 
     void program_builder::end_function() {
       auto & func = current_function();
-      auto & scopeMeta = meta.scopes[func.scope_id];
 
       // Process instruction tags
       for (size_t i = 0; i < func.instructions.size(); ++i) {
@@ -649,16 +691,46 @@ namespace adder {
           break;
         }
         case instruction_tag::stack_frame: {
+          uint32_t allocSize = (uint32_t)(func.max_stack_storage + func.max_temp_storage);
           switch (op.code) {
           case vm::op_code::alloc_stack:
-            op.alloc_stack.bytes = (uint32_t)(scopeMeta.max_stack_size + scopeMeta.max_temp_size);
+            if (allocSize != 0)
+              op.alloc_stack.bytes = allocSize;
+            else
+              op.code = vm::op_code::noop;
             break;
           case vm::op_code::free_stack:
-            op.alloc_stack.bytes = (uint32_t)(scopeMeta.max_stack_size + scopeMeta.max_temp_size);
+            if (allocSize != 0)
+              op.free_stack.bytes = allocSize;
+            else
+              op.code = vm::op_code::noop;
             break;
           default:
             assert(false && "invalid op code tagged with instruction_tag::stack_frame");
           }
+          break;
+        }
+        case instruction_tag::add_temporary_storage_offset: {
+          // Offset addresses by func.max_stack_storage.
+          // Temporary storage is allocated after stack storage
+          switch (op.code) {
+          case vm::op_code::set:
+            op.set.val += func.max_stack_storage;
+            break;
+          case vm::op_code::load_offset:
+            op.load_offset.offset += func.max_stack_storage;
+            break;
+          case vm::op_code::store_offset:
+            op.load_offset.offset += func.max_stack_storage;
+            break;
+          default:
+            assert(false && "invalid op code tagged with instruction_tag::add_temporary_storage_offset");
+          }
+          break;
+        }
+        case instruction_tag::add_stack_storage_offset: {
+          // no-op
+          // stack storage is starts at frame-pointer + 0
           break;
         }
         default:
@@ -691,7 +763,6 @@ namespace adder {
           registers.release(addr);
         }
       }
-
     }
     
     void program_builder::call(uint64_t address) {
@@ -823,18 +894,6 @@ namespace adder {
       return registers.pin();
     }
 
-    vm::register_index program_builder::load_stack_frame_offset(int64_t offset, size_t size) {
-      vm::register_index idx = registers.pin();
-      vm::instruction op;
-      op.code = vm::op_code::load_offset;
-      op.load_offset.src_addr = (uint8_t)vm::register_names::fp;
-      op.load_offset.offset   = offset;
-      op.load_offset.size     = (uint8_t)size;
-      op.load_offset.dst      = idx;
-      add_instruction(op);
-      return idx;
-    }
-
     vm::register_index program_builder::load_value_of(program_builder::value const & value) {
       if ((value.flags & program_builder::value_flags::eval_as_reference) != program_builder::value_flags::none) {
         return load_address_of(value);
@@ -855,25 +914,31 @@ namespace adder {
       if (value.indirect_register_index.has_value()) {
         vm::register_index ret = pin_register();
         load(ret, value.indirect_register_index.value(), sz, value.address_offset);
+
+        if ((value.flags & value_flags::temporary) == value_flags::temporary)
+          set_instruction_tag(instruction_tag::add_temporary_storage_offset);
+        else if ((value.flags & value_flags::stack_variable) == value_flags::stack_variable)
+          set_instruction_tag(instruction_tag::add_stack_storage_offset);
+
         return ret;
       }
 
       if (value.symbol_index.has_value()) {
-        // assert(false && "Fix me not always constant address. symbol_index might refer to a local variable (relative to the frame/stack pointer)");
         auto & symbol = meta.symbols[value.symbol_index.value()];
-        if (symbol.has_local_storage()) {
-          program_builder::value local;
-          local.address_offset = symbol.stack_offset.value();
-          local.indirect_register_index = (vm::register_index)vm::register_names::fp;
-          local.type_index = symbol.type;
-          return load_value_of(local);
-        }
-        else {
-          vm::register_index ret = pin_register();
-          load_from_constant_address(ret, value.address_offset, sz);
-          add_relocation(symbol.full_identifier, AD_IOFFSET(load_addr.addr));
-          return ret;
-        }
+        assert(!symbol.has_local_storage() && "load_value_of is unable to locate local symbols");
+        // if (symbol.has_local_storage()) {
+        //   program_builder::value local;
+        //   local.address_offset = symbol.stack_offset.value();
+        //   local.indirect_register_index = (vm::register_index)vm::register_names::fp;
+        //   local.type_index = symbol.type;
+        //   return load_value_of(local);
+        // }
+        // else {
+        vm::register_index ret = pin_register();
+        load_from_constant_address(ret, value.address_offset, sz);
+        add_relocation(symbol.full_identifier, AD_IOFFSET(load_addr.addr));
+        return ret;
+        // }
       }
 
       return 0;
@@ -888,33 +953,34 @@ namespace adder {
     vm::register_index program_builder::load_address_of(program_builder::value const & value) {
       if (value.constant.has_value()) {
         // TODO: Push error. Cannot get address of constant value
+        assert(false);
         return 0;
       }
 
       if (value.indirect_register_index.has_value()) {
         vm::register_index ret = pin_register();
         set(ret, value.address_offset);
+
+        if ((value.flags & value_flags::temporary) == value_flags::temporary)
+          set_instruction_tag(instruction_tag::add_temporary_storage_offset);
+        else if ((value.flags & value_flags::stack_variable) == value_flags::stack_variable)
+          set_instruction_tag(instruction_tag::add_stack_storage_offset);
+
         addi(ret, ret, value.indirect_register_index.value());
         return ret;
       }
 
       if (value.symbol_index.has_value()) {
         auto & symbol = meta.symbols[value.symbol_index.value()];
-        if (symbol.has_local_storage()) {
-          program_builder::value local;
-          local.address_offset = symbol.stack_offset.value();
-          local.indirect_register_index = (vm::register_index)vm::register_names::fp;
-          local.type_index = symbol.type;
-          return load_address_of(local);
-        }
-        else {
-          vm::register_index ret = pin_register();
-          set(ret, value.address_offset);
-          add_relocation(symbol.full_identifier, AD_IOFFSET(set.val));
-          return ret;
-        }
+        assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
+
+        vm::register_index ret = pin_register();
+        set(ret, value.address_offset);
+        add_relocation(symbol.full_identifier, AD_IOFFSET(set.val));
+        return ret;
       }
 
+      assert(false);
       return 0;
     }
     
@@ -1091,174 +1157,6 @@ namespace adder {
     }
     
 
-    // void program_builder::pop_result() {
-    //   auto r = results.back();
-    //   results.pop_back();
-    // 
-    //   if (r.alloc_size.has_value()) {
-    //     vm::instruction alloc;
-    //     alloc.code = vm::op_code::free_stack;
-    //     alloc.alloc_stack.bytes = (uint32_t)r.alloc_size.value();
-    //     add_instruction(alloc);
-    // 
-    //     // TODO: Destroy value
-    //   }
-    // }
-
-    // void program_builder::push_result(expression_result r) {
-    //   results.push_back(r);
-    // }
-    
-    // program_builder::expression_result program_builder::alloc_temporary_value(size_t typeIndex) {
-    //   const size_t typeSize = meta.get_type_size(typeIndex);
-    // 
-    //   vm::instruction op;
-    //   op.code = vm::op_code::alloc_stack;
-    //   op.alloc_stack.bytes = (uint32_t)typeSize;
-    // 
-    //   if (op.alloc_stack.bytes != 0)
-    //     add_instruction(op);
-    // 
-    //   scope &block = scopes.back();
-    // 
-    //   expression_result r;
-    //   r.address = stack_frame_offset{ block.stackSize };
-    //   r.type_index = typeIndex;
-    //   r.alloc_size = typeSize;
-    //   block.stackSize += typeSize;
-    // 
-    //   return r;
-    // }
-    
-
-    // bool program_builder::push_return_value_alias(std::string_view const & name, size_t typeIndex, symbol_flags const & flags) {
-    //   program_metadata::symbol symbol;
-    //   symbol.flags = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
-    //   symbol.type  = typeIndex;
-    //   symbol.name  = name;
-    // 
-    //   // Variable starts at the bottom of the stack (so frame pointer - frame size)
-    //   // Variable ends at (frame pointer - frame size + variable size)
-    //   // We offset from frame pointer as it is static during a scope/call. Stack pointer is always moving.
-    //   symbol.address = stack_frame_offset{ -(int64_t)meta.get_type_size(typeIndex) };
-    // 
-    //   expr::identifier id;
-    //   id.symbol_index = push_symbol(symbol);
-    //   id.name = name;
-    //   if (!id.symbol_index.has_value())
-    //     return false;
-    // 
-    //   scope &block = scopes.back();
-    //   block.identifiers.push_back(id);
-    //   return true;
-    // }
-    // 
-    // bool program_builder::push_fn_parameter(std::string_view const & name, size_t typeIndex, symbol_flags const & flags) {
-    //   symbol symbol;
-    //   symbol.flags       = flags | symbol_flags::const_ | symbol_flags::fn_parameter;
-    //   symbol.type_index  = typeIndex;
-    //   symbol.name        = name;
-    // 
-    //   scope &block = scopes.back();
-    //   block.stackSize += meta.get_type_size(typeIndex);
-    // 
-    //   // Variable starts at the bottom of the stack (so frame pointer - frame size)
-    //   // Variable ends at (frame pointer - frame size + variable size)
-    //   // We offset from frame pointer as it is static during a scope/call. Stack pointer is always moving.
-    //   symbol.address = stack_frame_offset{ block.stackSize };
-    // 
-    //   identifier id;
-    //   id.symbol_index = push_symbol(symbol);
-    //   id.name = name;
-    //   if (!id.symbol_index.has_value())
-    //     return false;
-    // 
-    //   block.identifiers.push_back(id);
-    //   return true;
-    // }
-    // 
-    // bool program_builder::push_variable(std::string_view const& name, size_t typeIndex, symbol_flags const & flags) {
-    //   auto const& type = meta.types[typeIndex];
-    // 
-    //   vm::instruction alloc;
-    //   alloc.code = vm::op_code::alloc_stack;
-    //   alloc.alloc_stack.bytes = (uint32_t)meta.get_type_size(type);
-    //   add_instruction(alloc);
-    // 
-    //   symbol symbol;
-    //   symbol.flags       = flags;
-    //   symbol.type_index  = typeIndex;
-    //   symbol.name        = name; // TODO: Generate more unique symbol names
-    // 
-    //   scope &block = scopes.back();
-    //   symbol.address = stack_frame_offset{ block.stackSize };
-    //   block.stackSize += meta.get_type_size(type);
-    // 
-    //   identifier id;
-    //   id.symbol_index = push_symbol(symbol);
-    //   id.name = name;
-    //   if (!id.symbol_index.has_value())
-    //     return false;
-    // 
-    //   block.identifiers.push_back(id);
-    //   return true;
-    // }
-    //
-    // bool program_builder::push_variable(std::string_view const& identifier, std::string_view const & typeName, symbol_flags const & flags) {
-    //   auto typeIndex = meta.get_type_index(typeName);
-    //   return typeIndex.has_value() && push_variable(identifier, typeIndex.value(), flags);
-    // }
-    // 
-    // bool program_builder::push_identifier(std::string_view const & name, program_metadata::symbol const & symbol) {
-    //   scope &block = scopes.back();
-    // 
-    //   identifier id;
-    //   id.symbol_index = push_symbol(symbol);
-    //   id.name = name;
-    //   if (!id.symbol_index.has_value())
-    //     return false;
-    // 
-    //   if (!name.empty())
-    //     block.identifiers.push_back(id);
-    //   return true;
-    // }
-    //
-    // vm::register_index program_builder::pin_result(expression_result const & value) {
-    //   if (value.constant.has_value()) {
-    //     return pin_constant(value.constant.value());
-    //   }
-    //   else if (value.address.has_value()) {
-    //     return pin_address(value.address.value(), meta.get_type_size(value.type_index.value()));
-    //   }
-    //   else if (value.symbol_index.has_value()) {
-    //     return pin_symbol(symbols[value.symbol_index.value()]);
-    //   }
-    //   return registers.pin();
-    // }
-    //
-    // vm::register_index program_builder::pin_address_of(expression_result const & result) {
-    //   if (result.address.has_value()) {
-    //     vm::register_index dst = pin_register();
-    //     set(dst, result.address.value());
-    //     return dst;
-    //   }
-    //   else if (result.symbol_index.has_value()) {
-    //     return pin_address_of(symbols[result.symbol_index.value()]);
-    //   }
-    // 
-    //   return false;
-    // }
-    //
-    // void program_builder::push_expression_result(expression_result result) {
-    //   results.push_back(result);
-    // }
-    //
-    // program_builder::expression_result program_builder::pop_expression_result() {
-    //   expression_result ret = results.back();
-    //   results.pop_back();
-    //   return ret;
-    // }
-
     program program_builder::binary() const {
       // Compiled Program Layout
       // header
@@ -1431,8 +1329,6 @@ namespace adder {
       // }
       
       return executable;
-
-      // return program({});
     }
 
     std::optional<std::string> get_type_name(ast const& ast, size_t statement) {
