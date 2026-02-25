@@ -84,6 +84,8 @@ namespace adder {
         count,
       };
 
+      std::string_view get_operator_identifer(operator_type const & op);
+
       struct binary_operator {
         operator_type type_name;
 

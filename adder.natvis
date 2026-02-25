@@ -20,9 +20,13 @@
     <DisplayString Condition="code == adder::vm::op_code::store"        >store r{ (int)store.addr } r{ (int)store.src } { (int)store.size }</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::store_addr"   >store_addr { store_addr.addr } r{(int)store_addr.src} {(int)store_addr.size}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::store_offset" >store_offset r{ (int)store_offset.addr } r{ (int)store_offset.src } { (int)store_offset.size } { store_offset.offset }</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::store_value"        >store r{ (int)store_value.addr } { (int64_t)store_value.src } { (int)store_value.size }</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::store_value_addr"   >store_addr { store_value_addr.addr } {(int64_t)store_value_addr.src} {(int)store_value_addr.size}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::store_value_offset" >store_offset r{ (int)store_value_offset.addr } r{ (int64_t)store_value_offset.src } { (int)store_value_offset.size } { store_value_offset.offset }</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::set"          >set r{(int)set.dst} {(int64_t)set.val}</DisplayString>
     
     <DisplayString Condition="code == adder::vm::op_code::add_i64">addi r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::add_i64_constant">addi r{(int)add_constant.dst} r{(int)add_constant.lhs} {(int64_t)add_constant.rhs}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::add_f64">addf r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::sub_i64">subi r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::sub_f64">subf r{(int)add.dst} r{(int)add.lhs} r{(int)add.rhs}</DisplayString>

@@ -255,6 +255,14 @@ namespace adder {
 
         return false;
       }
-    }
+
+      std::string_view token_id_to_string(token_id const & id) {
+        for (auto& desc : tokens) {
+          if (desc.id == id)
+            return desc.name;
+        }
+        return "";
+      }
+}
   }
 }

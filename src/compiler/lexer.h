@@ -79,6 +79,8 @@ namespace adder {
         count
       };
       inline static constexpr size_t token_id_count = (size_t)token_id::count;
+      
+      std::string_view token_id_to_string(token_id const & id);
 
       struct token_desc {
         std::string name;

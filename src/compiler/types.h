@@ -42,6 +42,7 @@ namespace adder {
 
     /// Type of function declaraition
     enum class functor_type {
+      none,
       free,
       member,
       initializer,

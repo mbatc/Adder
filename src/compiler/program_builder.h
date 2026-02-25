@@ -124,6 +124,7 @@ namespace adder {
       bool is_const(std::optional<size_t> const & type) const;
       bool is_function_decl(std::optional<size_t> const& type) const;
       bool is_function(std::optional<size_t> const & type) const;
+      functor_type get_functor_type(std::optional<size_t> const & type) const;
       bool is_integer(std::optional<size_t> const & type) const;
       bool is_float(std::optional<size_t> const & type) const;
       bool is_bool(std::optional<size_t> const & type) const;
@@ -144,12 +145,15 @@ namespace adder {
       size_t get_symbol_type(size_t const & symbolIndex) const;
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::string_view const & identifier) const;
       std::optional<size_t> search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const;
+      std::optional<size_t> search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &, size_t index)> const & pred) const;
       std::optional<size_t> search_for_callable_symbol_index(size_t scopeId, std::string_view const & identifier, ast const& ast, std::optional<size_t> const & paramList) const;
+      std::optional<size_t> search_for_operator_symbol_index(size_t scopeId, expr::operator_type op, size_t lhsType, size_t rhsType) const;
+
       std::optional<size_t> get_parameter_list_score(size_t scopeId, size_t funcType, ast const & ast, std::optional<size_t> const & paramList) const;
+      std::optional<size_t> get_parameter_list_score(size_t scopeId, size_t funcType, size_t const * paramList, size_t numParams) const;
 
       std::optional<size_t> find_symbol(std::string_view const & fullName) const;
       std::optional<size_t> find_unnamed_initializer(size_t scopeId, size_t receiverTypeIndex, size_t initializerTypeIndex) const;
-
       std::optional<size_t> get_parent_scope(size_t const & scopeId) const;
     };
 
@@ -157,14 +161,6 @@ namespace adder {
       program_builder() {}
 
       program_metadata meta;
-
-      struct Registers {
-        std::vector<vm::register_index> free;
-        vm::register_index next = 0;
-
-        vm::register_index pin();
-        void release(vm::register_index idx);
-      } registers;
 
       enum class value_flags {
         none = 0,
@@ -198,6 +194,33 @@ namespace adder {
 
         value_flags flags = value_flags::none;
       };
+
+      struct Registers {
+        struct RegisterState {
+          // std::optional<value> value;
+          // std::optional<value> address;
+
+          int64_t              numPins = 0;
+          size_t               lastUsed = 0;
+        };
+
+        RegisterState states[vm::register_names::gp_end];
+        vm::register_index next = 0;
+        size_t useRound = 0;
+
+        /// Pin a register new register.
+        vm::register_index pin();
+        vm::register_index pin(vm::register_index idx);
+        /// Find and pin a register that already has `value` loaded.
+        // std::optional<vm::register_index> find_and_pin(const value &value);
+        /// Release a pinned register.
+        void release(vm::register_index idx);
+        /// Evict all known values from register states.
+        // void evict();
+
+        /// void realise_value();
+      } registers;
+
       std::vector<value> value_stack;
 
       enum class instruction_tag : uint8_t {
@@ -283,6 +306,7 @@ namespace adder {
       void add_variable(program_builder::value const & val);
 
       std::optional<value> find_unnamed_initializer(size_t receiver, size_t initializer);
+      std::optional<value> find_operator(expr::operator_type op, size_t lhs, size_t rhs);
 
       /// Find a symbol by identifier. Searches from the inner most scope outwards.
       std::optional<value> find_value_by_identifier(std::string_view const & name) const;
@@ -339,9 +363,20 @@ namespace adder {
       void load_from_constant_address(vm::register_index dst, vm::register_value address, size_t size);
       void move(vm::register_index dst, vm::register_index src);
       void set(vm::register_index dst, vm::register_value value);
+
       bool store(vm::register_index src, vm::register_index address, uint8_t sz);
       bool store(vm::register_index src, vm::register_index address, uint8_t sz, int64_t offset);
+      bool store_constant(vm::register_value src, vm::register_index dst, uint8_t sz);
+      bool store_constant(vm::register_value src, vm::register_index dst, uint8_t sz, int64_t offset);
+      bool store_constant(vm::register_value src, program_builder::value const & dst);
+      bool store_to_constant_address(vm::register_index src, vm::register_value dst, uint8_t sz);
+      bool store_constant_to_constant_address(vm::register_value src, vm::register_value dst, uint8_t sz);
+
+      bool store(vm::register_index src, program_builder::value const & dst);
+      // bool store(program_builder::value const & src, program_builder::value const & dst);
+
       void addi(vm::register_index dst, vm::register_index a, vm::register_index b);
+      void addi_constant(vm::register_index dst, vm::register_index a, vm::register_value b);
       void addf(vm::register_index dst, vm::register_index a, vm::register_index b);
       void subi(vm::register_index dst, vm::register_index a, vm::register_index b);
       void subf(vm::register_index dst, vm::register_index a, vm::register_index b);

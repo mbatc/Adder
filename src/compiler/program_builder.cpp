@@ -99,6 +99,14 @@ namespace adder {
           || is_function(unwrap_type(*type)));
     }
 
+    functor_type program_metadata::get_functor_type(std::optional<size_t> const& type) const {
+      auto decayed = decay_type(type);
+      if (!(decayed.has_value() && std::holds_alternative<type_function>(types[*decayed].desc)))
+        return functor_type::none;
+      auto &decl = std::get<type_function>(types[*decayed].desc);
+      return decl.func_type;
+    }
+
     bool program_metadata::is_const(std::optional<size_t> const & type) const {
       return type.has_value()
         && std::holds_alternative<type_modifier>(types[*type].desc)
@@ -293,7 +301,11 @@ namespace adder {
     }
 
     std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const {
-      auto found = std::find_if(scopes[scopeId].symbols.rbegin(), scopes[scopeId].symbols.rend(), [&](int64_t idx) { return pred(symbols[idx]); });
+      return search_for_symbol_index(scopeId, [&pred](symbol const& sym, size_t) { return pred(sym); });
+    }
+
+    std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::function<bool(symbol const&, size_t)> const& pred) const {
+      auto found = std::find_if(scopes[scopeId].symbols.rbegin(), scopes[scopeId].symbols.rend(), [&](int64_t idx) { return pred(symbols[idx], idx); });
       if (found != scopes[scopeId].symbols.rend()) {
         return *found;
       }
@@ -305,17 +317,100 @@ namespace adder {
     }
 
     std::optional<size_t> program_metadata::search_for_callable_symbol_index(size_t scopeId, std::string_view const& identifier, ast const& ast, std::optional<size_t> const & paramList) const {
-      // std::optional<size_t> bestFunction;
-      // std::optional<size_t> bestMatchScore;
+      std::optional<size_t> bestFunction;
+      std::optional<size_t> bestMatchScore;
+      bool ambigious = false;
 
-      return search_for_symbol_index(scopeId, [&](symbol const& sym) {
+      search_for_symbol_index(scopeId, [&](symbol const& sym, size_t idx) {
         if (sym.name != identifier) {
           return false;
         }
-        return get_parameter_list_score(scopeId, sym.type, ast, paramList).has_value();
+        auto score = get_parameter_list_score(scopeId, sym.type, ast, paramList);
+        if (!score.has_value())
+          return false;
+        if (bestMatchScore.has_value() && score.value() > bestMatchScore.value())
+          return false;
+        if (score == bestMatchScore) {
+          ambigious = true;
+          bestFunction.reset();
+          return false;
+        }
+        bestMatchScore = score;
+        bestFunction = idx;
+        return false;
       });
 
-      // return std::optional<size_t>();
+      if (ambigious)
+        printf("Error: Ambigous call to '%.*s'\n", (int)identifier.length(), identifier.data());
+
+      return bestFunction;
+    }
+
+    std::optional<size_t> program_metadata::search_for_operator_symbol_index(size_t scopeId, expr::operator_type op, size_t lhsType, size_t rhsType) const {
+      std::string_view identifier = expr::get_operator_identifer(op);
+      std::optional<size_t> bestFunction;
+      std::optional<size_t> bestMatchScore;
+      bool ambigious = false;
+      search_for_symbol_index(scopeId, [&](symbol const & sym, size_t idx) {
+        if (sym.name != identifier)
+          return false;
+        if (get_functor_type(sym.type) != functor_type::operator_)
+          return false;
+        size_t const types[2] = { lhsType, rhsType };
+        auto score = get_parameter_list_score(scopeId, sym.type, types, 2);
+
+        if (!score.has_value())
+          return false;
+
+        if (bestMatchScore.has_value() && score.value() > bestMatchScore.value())
+          return false;
+
+        if (score == bestMatchScore) {
+          ambigious = true;
+          bestFunction.reset();
+          return false;
+        }
+
+        bestMatchScore = score;
+        bestFunction = idx;
+        ambigious = false;
+        return false;
+      });
+
+      if (ambigious)
+        printf("Error: Ambigous call to '%.*s'\n", (int)identifier.length(), identifier.data());
+
+      return bestFunction;
+    }
+
+    namespace {
+      // Implements the parameter list scoring algorithm
+      struct parameter_list_score_calculator {
+        type_function const * signature = nullptr;
+        size_t scope_id = 0;
+
+        size_t score = 0; // Lower is better
+        size_t i     = 0;
+
+        bool next(program_metadata const * meta, size_t param) {
+          if (complete())
+            return false;
+
+          auto& arg = signature->arguments[i++];
+          if (param != arg) {
+            auto initializer = meta->find_unnamed_initializer(scope_id, arg, param);
+            if (!initializer.has_value())
+              return false; // No conversion available
+            ++score;
+          }
+
+          return true;
+        }
+
+        bool complete() const {
+          return i == signature->arguments.size();
+        }
+      };
     }
 
     std::optional<size_t> program_metadata::get_parameter_list_score(size_t scopeId, size_t funcType, ast const & ast, std::optional<size_t> const & paramList) const {
@@ -327,31 +422,48 @@ namespace adder {
         return std::nullopt;
       }
 
-      auto const& signature = std::get<type_function>(types[decayed.value()].desc);
+      parameter_list_score_calculator scoreCalculator;
+      scoreCalculator.signature = &std::get<type_function>(types[decayed.value()].desc);
+      scoreCalculator.scope_id = scopeId;
+
       std::optional<size_t> current = paramList;
-      size_t score = 0;
-      for (size_t i = 0; i < signature.arguments.size(); ++i) {
-        if (!current.has_value())
-          return std::nullopt; // Not enough arguments.
-
+      while (current.has_value()) {
         auto & param = ast.get<expr::call_parameter>(current.value());
-        if (statement_info[param.expression].type_id != signature.arguments[i]) {
-          auto initializer = find_unnamed_initializer(scopeId, signature.arguments[i], statement_info[param.expression].type_id.value());
-          if (!initializer.has_value())
-            return std::nullopt; // No conversion available
+        if (!scoreCalculator.next(this, statement_info[param.expression].type_id.value())) {
+          return std::nullopt; // Too many arguments
         }
-
         current = param.next;
-        ++score;
       }
 
-      if (current.has_value()) {
-        return std::nullopt; // Too many arguments
+      if (!scoreCalculator.complete()) {
+        return std::nullopt; // Not enough arguments
       }
 
-      return score;
+      return scoreCalculator.score;
     }
 
+    std::optional<size_t> program_metadata::get_parameter_list_score(size_t scopeId, size_t funcType, size_t const * paramList, size_t numParams) const {
+      if (!is_function(funcType)) {
+        return std::nullopt;
+      }
+      auto decayed = decay_type(funcType);
+      if (!decayed.has_value()) {
+        return std::nullopt;
+      }
+
+      parameter_list_score_calculator scoreCalculator;
+      scoreCalculator.signature = &std::get<type_function>(types[decayed.value()].desc);
+      scoreCalculator.scope_id = scopeId;
+
+      for (size_t i = 0; i < numParams; ++i)
+        if (!scoreCalculator.next(this, paramList[i]))
+          return std::nullopt; // TOo many arguments
+
+      if (!scoreCalculator.complete())
+        return std::nullopt; // Not enough arguments
+
+      return scoreCalculator.score;
+    }
 
     std::optional<size_t> program_metadata::find_symbol(std::string_view const & fullName) const {
       auto found = std::find_if(symbols.begin(), symbols.end(), [&](symbol const& s) { return s.full_identifier == fullName; });
@@ -380,20 +492,82 @@ namespace adder {
     }
 
     vm::register_index program_builder::Registers::pin() {
-      vm::register_index idx = 0;
-      if (free.size() == 0) {
-        idx = next++;
+      vm::register_index staleAvailble = (vm::register_index)vm::register_names::gp_end;
+      size_t             staleLastUsed = useRound + 1;
+      for (vm::register_index idx = 0; idx < (vm::register_index)vm::register_names::gp_end; ++idx) {
+        if (states[idx].numPins != 0)
+          continue;
+        // if (!states[idx].value.has_value()) {
+        //   return pin(idx);
+        // }
+        if (states[idx].lastUsed < staleLastUsed) {
+          staleLastUsed = states[idx].lastUsed;
+          staleAvailble = idx;
+        }
       }
-      else {
-        idx = free.front();
-        free.erase(free.begin());
-      }
-      return idx;
+      assert(staleAvailble != (vm::register_index)vm::register_names::gp_end && "Failed to pin register");
+      return pin(staleAvailble);
     }
 
-    void program_builder::Registers::release(vm::register_index idx) {
-      free.push_back(idx);
+    vm::register_index program_builder::Registers::pin(vm::register_index idx) {
+      states[idx].lastUsed = ++useRound;
+      ++states[idx].numPins;
+      return idx;;
     }
+
+    // std::optional<vm::register_index> program_builder::Registers::find_and_pin(const value & value) {
+    //   for (vm::register_index idx = 0; idx < (vm::register_index)vm::register_names::count; ++idx) {
+    //     auto & state = states[idx];
+    //     if (!state.value.has_value())
+    //       return std::nullopt;
+    // 
+    //     if (state.value->flags != value.flags) {
+    //       return std::nullopt;
+    //     }
+    // 
+    //     if (value.type_index.has_value() && state.value->type_index != value.type_index) {
+    //       return std::nullopt;
+    //     }
+    // 
+    //     if (value.constant.has_value() && state.value->constant == value.constant) {
+    //       ++state.numPins;
+    //       return idx;
+    //     }
+    // 
+    //     if (value.indirect_register_index.has_value()) {
+    //       if (state.value->indirect_register_index != value.indirect_register_index) {
+    //         return std::nullopt;
+    //       }
+    //       if (state.value->address_offset != value.address_offset) {
+    //         return std::nullopt;
+    //       }
+    //       return pin(idx);
+    //     }
+    // 
+    //     if (value.symbol_index.has_value()) {
+    //       if (state.value->symbol_index != value.symbol_index) {
+    //         return std::nullopt;
+    //       }
+    //       if (state.value->address_offset != value.address_offset) {
+    //         return std::nullopt;
+    //       }
+    //       return pin(idx);
+    //     }
+    //   }
+    // 
+    //   return std::nullopt;
+    // }
+
+    void program_builder::Registers::release(vm::register_index idx) {
+      assert(states[idx].numPins > 0 && "register released too many times");
+      --states[idx].numPins;
+    }
+
+    // void program_builder::Registers::evict()
+    // {
+    //   for (auto& state : states)
+    //     state.value.reset();
+    // }
 
     bool program_builder::begin_scope() {
       scopes.emplace_back();
@@ -494,6 +668,23 @@ namespace adder {
         "init ([ref]%.*s,%.*s)=>void:",
         meta.types[receiver].identifier.length(), meta.types[receiver].identifier.data(),
         meta.types[initializer].identifier.length(), meta.types[initializer].identifier.data()
+      );
+
+      return find_value([=](program_builder::value const & candidate) {
+        if (!candidate.symbol_index.has_value())
+          return false;
+        const auto & symbol = meta.symbols[candidate.symbol_index.value()];
+        return symbol.full_identifier == symbolName;
+      });
+    }
+
+    std::optional<program_builder::value> program_builder::find_operator(expr::operator_type op, size_t lhs, size_t rhs) {
+      std::string_view opName = expr::get_operator_identifer(op);
+      std::string_view symbolName = adder::format(
+        "op (%.*s,%.*s)=>void:%.*s",
+        meta.types[lhs].identifier.length(), meta.types[lhs].identifier.data(),
+        meta.types[rhs].identifier.length(), meta.types[rhs].identifier.data(),
+        opName.length(), opName.data()
       );
 
       return find_value([=](program_builder::value const & candidate) {
@@ -714,6 +905,9 @@ namespace adder {
           // Offset addresses by func.max_stack_storage.
           // Temporary storage is allocated after stack storage
           switch (op.code) {
+          case vm::op_code::add_i64_constant:
+            op.add_constant.rhs += func.max_stack_storage;
+            break;
           case vm::op_code::set:
             op.set.val += func.max_stack_storage;
             break;
@@ -721,7 +915,10 @@ namespace adder {
             op.load_offset.offset += func.max_stack_storage;
             break;
           case vm::op_code::store_offset:
-            op.load_offset.offset += func.max_stack_storage;
+            op.store_offset.offset += func.max_stack_storage;
+            break;
+          case vm::op_code::store_value_offset:
+            op.store_value_offset.offset += func.max_stack_storage;
             break;
           default:
             assert(false && "invalid op code tagged with instruction_tag::add_temporary_storage_offset");
@@ -901,7 +1098,7 @@ namespace adder {
 
       if (value.register_index.has_value()) {
         // Might need some ref counting for "pin"
-        return value.register_index.value();
+        return registers.pin(value.register_index.value());
       }
 
       if (value.constant.has_value()) {
@@ -926,19 +1123,13 @@ namespace adder {
       if (value.symbol_index.has_value()) {
         auto & symbol = meta.symbols[value.symbol_index.value()];
         assert(!symbol.has_local_storage() && "load_value_of is unable to locate local symbols");
-        // if (symbol.has_local_storage()) {
-        //   program_builder::value local;
-        //   local.address_offset = symbol.stack_offset.value();
-        //   local.indirect_register_index = (vm::register_index)vm::register_names::fp;
-        //   local.type_index = symbol.type;
-        //   return load_value_of(local);
-        // }
-        // else {
+
+        assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
+
         vm::register_index ret = pin_register();
         load_from_constant_address(ret, value.address_offset, sz);
         add_relocation(symbol.full_identifier, AD_IOFFSET(load_addr.addr));
         return ret;
-        // }
       }
 
       return 0;
@@ -959,20 +1150,18 @@ namespace adder {
 
       if (value.indirect_register_index.has_value()) {
         vm::register_index ret = pin_register();
-        set(ret, value.address_offset);
-
+        addi_constant(ret, value.indirect_register_index.value(), value.address_offset);
         if ((value.flags & value_flags::temporary) == value_flags::temporary)
           set_instruction_tag(instruction_tag::add_temporary_storage_offset);
         else if ((value.flags & value_flags::stack_variable) == value_flags::stack_variable)
           set_instruction_tag(instruction_tag::add_stack_storage_offset);
-
-        addi(ret, ret, value.indirect_register_index.value());
         return ret;
       }
 
       if (value.symbol_index.has_value()) {
         auto & symbol = meta.symbols[value.symbol_index.value()];
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
+        assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
 
         vm::register_index ret = pin_register();
         set(ret, value.address_offset);
@@ -1068,6 +1257,142 @@ namespace adder {
       return true;
     }
 
+    bool program_builder::store_to_constant_address(vm::register_index src, vm::register_value dst, uint8_t sz) {
+      if (sz > sizeof(vm::address_t))
+        return false; // Too large.
+      vm::instruction str;
+      str.code             = vm::op_code::store_addr;
+      str.store_addr.src   = src;
+      str.store_addr.addr  = dst;
+      str.store_addr.size  = sz;
+      add_instruction(str);
+      return true;
+    }
+
+    bool program_builder::store_constant_to_constant_address(vm::register_value src, vm::register_value dst, uint8_t sz) {
+      vm::instruction str;
+      str.code                  = vm::op_code::store_value_addr;
+      str.store_value_addr.src  = src;
+      str.store_value_addr.addr = dst;
+      str.store_value_addr.size = sz;
+      add_instruction(str);
+      return true;
+    }
+
+    bool program_builder::store_constant(vm::register_value src, vm::register_index dst, uint8_t sz) {
+      vm::instruction str;
+      str.code             = vm::op_code::store_value;
+      str.store_value.src  = src;
+      str.store_value.addr = dst;
+      str.store_value.size = sz;
+      add_instruction(str);
+      return true;
+    }
+
+    bool program_builder::store_constant(vm::register_value src, vm::register_index dst, uint8_t sz, int64_t offset) {
+      vm::instruction str;
+      str.code                      = vm::op_code::store_value_offset;
+      str.store_value_offset.src    = src;
+      str.store_value_offset.addr   = dst;
+      str.store_value_offset.size   = sz;
+      str.store_value_offset.offset = offset;
+      add_instruction(str);
+      return true;
+    }
+
+    bool program_builder::store_constant(vm::register_value src, program_builder::value const & dst) {
+      if (dst.constant.has_value()) {
+        assert(false && "Cannot store to constant value");
+        return false;
+      }
+
+      if (!dst.type_index.has_value()) {
+        return false;
+      }
+
+      const size_t sz = meta.get_type_size(dst.type_index.value());
+      assert(sz <= sizeof(vm::register_value) && "value type does not fit in a register");
+      if (dst.indirect_register_index.has_value()) {
+        store_constant(src, dst.indirect_register_index.value(), (uint8_t)sz, dst.address_offset);
+        if ((dst.flags & value_flags::temporary) == value_flags::temporary)
+          set_instruction_tag(instruction_tag::add_temporary_storage_offset);
+        else if ((dst.flags & value_flags::stack_variable) == value_flags::stack_variable)
+          set_instruction_tag(instruction_tag::add_stack_storage_offset);
+        return true;
+      }
+
+      if (dst.symbol_index.has_value()) {
+        auto & symbol = meta.symbols[dst.symbol_index.value()];
+        assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
+        assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
+        store_constant_to_constant_address(src, dst.address_offset, (uint8_t)sz);
+        add_relocation(symbol.full_identifier, AD_IOFFSET(store_value_addr.addr));
+        return true;
+      }
+
+      assert(false);
+      return false;
+    }
+
+    bool program_builder::store(vm::register_index src, program_builder::value const & dst) {
+      if (dst.constant.has_value()) {
+        assert(false && "Cannot store to constant value");
+        return false;
+      }
+
+      if (!dst.type_index.has_value()) {
+        return false;
+      }
+
+      const size_t sz = meta.get_type_size(dst.type_index.value());
+      assert(sz <= sizeof(vm::register_value) && "value type does not fit in a register");
+      if (dst.indirect_register_index.has_value()) {
+        store(src, dst.indirect_register_index.value(), (uint8_t)sz, dst.address_offset);
+        if ((dst.flags & value_flags::temporary) == value_flags::temporary)
+          set_instruction_tag(instruction_tag::add_temporary_storage_offset);
+        else if ((dst.flags & value_flags::stack_variable) == value_flags::stack_variable)
+          set_instruction_tag(instruction_tag::add_stack_storage_offset);
+        return true;
+      }
+
+      if (dst.symbol_index.has_value()) {
+        auto & symbol = meta.symbols[dst.symbol_index.value()];
+        assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
+        assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
+        store_to_constant_address(src, dst.address_offset, (uint8_t)sz);
+        add_relocation(symbol.full_identifier, AD_IOFFSET(store_addr.addr));
+        return true;
+      }
+
+      assert(false);
+      return 0;
+    }
+
+    // bool program_builder::store(program_builder::value const & src, program_builder::value const & dst) {
+    //   if (src.constant.has_value()) {
+    //     return store_constant(src.constant.value(), dst);
+    //   }
+    // 
+    //   if (src.indirect_register_index.has_value()) {
+    //     store(src, dst.indirect_register_index.value(), (uint8_t)sz, dst.address_offset);
+    //     if ((dst.flags & value_flags::temporary) == value_flags::temporary)
+    //       set_instruction_tag(instruction_tag::add_temporary_storage_offset);
+    //     else if ((dst.flags & value_flags::stack_variable) == value_flags::stack_variable)
+    //       set_instruction_tag(instruction_tag::add_stack_storage_offset);
+    //     return true;
+    //   }
+    // 
+    //   if (dst.symbol_index.has_value()) {
+    //     auto & symbol = meta.symbols[dst.symbol_index.value()];
+    //     assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
+    //     assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
+    //     store_to_constant_address(src, dst.address_offset, (uint8_t)sz);
+    //     add_relocation(symbol.full_identifier, AD_IOFFSET(store_addr.addr));
+    //     return true;
+    //   }
+    // 
+    // }
+
     void program_builder::addi(vm::register_index dst, vm::register_index a, vm::register_index b) {
       vm::instruction op;
       op.code = vm::op_code::add_i64;
@@ -1076,7 +1401,16 @@ namespace adder {
       op.add.rhs = b;
       add_instruction(op);
     }
-    
+
+    void program_builder::addi_constant(vm::register_index dst, vm::register_index a, vm::register_value b) {
+      vm::instruction op;
+      op.code = vm::op_code::add_i64_constant;
+      op.add_constant.dst = dst;
+      op.add_constant.lhs = a;
+      op.add_constant.rhs = b;
+      add_instruction(op);
+    }
+
     void program_builder::addf(vm::register_index dst, vm::register_index a, vm::register_index b) {
       vm::instruction op;
       op.code = vm::op_code::add_f64;
@@ -1155,7 +1489,6 @@ namespace adder {
       assert(func.instruction_tags.size() > 0);
       func.instruction_tags.back() = tag;
     }
-    
 
     program program_builder::binary() const {
       // Compiled Program Layout

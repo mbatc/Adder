@@ -57,7 +57,8 @@ namespace adder {
       return std::visit([&](auto&& o) { return eval_decltype_impl(ast, meta, statementId, o); }, ast.statements[statementId]);
     }
 
-    bool prepare_call(ast const& ast, program_builder* program, program_builder::value const& function, std::optional<size_t> const& parameters);
+    bool prepare_operator_call(program_builder* program, expr::operator_type);
+    bool prepare_call(ast const& ast, program_builder* program, std::optional<size_t> const& parameters);
     bool generate_call(ast const & ast, program_builder * program);
 
     bool generate_copy(ast const & ast, program_builder * program, size_t statementId) {
@@ -300,20 +301,13 @@ namespace adder {
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::binary_operator const & statement, size_t statementId) {
-      unused(ast, program, statement, statementId);
-
-      if (!generate_code(ast, program, statement.left.value())) {
-        printf("Error: failed to evaluate lhs of operator\n");
-        return false;
-      }
-
       switch (statement.type_name) {
       case expr::operator_type::call: {
-        auto function = program->pop_value();
-        if (!function.has_value()) {
-          printf("Error: lhs of operator did not evaluate to a value\n");
+        if (!generate_code(ast, program, statement.left.value())) {
+          printf("Error: failed to evaluate lhs of operator\n");
           return false;
         }
+
         // TODO: When generating code,
         //   1. value_stack should have the lhs or dst of the final return value at the top.
         //   2. implement a prepare_call function that evaluates parameters and allocates temporaries.
@@ -322,17 +316,42 @@ namespace adder {
         //      [optimize] If a temporary can be forwarded as a parameter, it should be allocated in the correct place.
         //      [optimize] For inline calls, if the top of the value stack already has a valid candidate for the return value, use that.
 
-        if (!(prepare_call(ast, program, function.value(), statement.right)
+        if (!(prepare_call(ast, program, statement.right)
           && generate_call(ast, program)))
           return false;
 
         break;
       }
-      default:
-        printf("Error: Unknown operator type\n");
-        return false;
-      }
+      default: {
+        auto callableSymbolIndex = program->meta.statement_info[statementId].symbol_index;
+        if (!callableSymbolIndex.has_value())
+          return false;
 
+
+        if (!(generate_code(ast, program, statement.right.value())
+          && generate_code(ast, program, statement.left.value())))
+          return false;
+        auto rhs = program->pop_value();
+        auto lhs = program->pop_value();
+
+        auto callableSymbol = program->meta.symbols[callableSymbolIndex.value()];
+        program_builder::value function;
+        function.type_index   = program->meta.get_symbol_type(callableSymbolIndex.value());
+        function.symbol_index = callableSymbolIndex.value();
+        function.identifier   = expr::get_operator_identifer(statement.type_name);
+
+        auto ret = program->allocate_temporary_value(program->meta.return_type_of(function.type_index.value()).value());
+        program->push_value(ret);
+        program->push_value(rhs.value());
+        program->push_value(lhs.value());
+        program->push_value(function);
+
+        if (!generate_call(ast, program))
+          return false;
+
+        break;
+      }
+      }
       return true;
     }
 
@@ -502,20 +521,26 @@ namespace adder {
     }
 
 
-    bool prepare_call(ast const & tree, program_builder * program, program_builder::value const & function, std::optional<size_t> const & parameters) {
-      if (!function.type_index.has_value()) {
+    bool prepare_call(ast const & tree, program_builder * program, std::optional<size_t> const & parameters) {
+      auto function = program->pop_value();
+      if (!function.has_value()) {
+        printf("Error: lhs of operator did not evaluate to a value\n");
+        return false;
+      }
+
+      if (!function->type_index.has_value()) {
         // TODO: Push error. No type
         printf("Error: Callable type is undefined\n");
         return false;
       }
-      if (!program->meta.is_function(function.type_index)) {
+      if (!program->meta.is_function(function->type_index)) {
         // TODO: Push error. Not callable
-        auto type = program->meta.types[function.type_index.value()];
+        auto type = program->meta.types[function->type_index.value()];
         printf("Error: %.*s is not callable\n", (int)type.identifier.length(), type.identifier.data());
         return false;
       }
 
-      auto ret = program->allocate_temporary_value(program->meta.return_type_of(function.type_index.value()).value());
+      auto ret = program->allocate_temporary_value(program->meta.return_type_of(function->type_index.value()).value());
       program->push_value(ret);
 
       if (!prepare_call_parameters_reversed(tree, program, parameters)) {
@@ -523,9 +548,26 @@ namespace adder {
         return false;
       }
 
-      program->push_value(function);
+      program->push_value(function.value());
       return true;
     }
+
+    // bool prepare_operator_call(program_builder * program, expr::operator_type op) {
+    //   auto rhs = program->pop_value();
+    //   auto lhs = program->pop_value();
+    // 
+    //   if (!rhs.has_value() || !lhs.has_value()) {
+    //     printf("Error: operator must have 2 operands\n");
+    //     return false;
+    //   }
+    // 
+    //   auto ret = program->allocate_temporary_value(program->meta.return_type_of(func->type_index.value()).value());
+    //   program->push_value(ret);
+    //   program->push_value(rhs.value());
+    //   program->push_value(lhs.value());
+    //   program->push_value(func.value());
+    //   return true;
+    // }
 
     /// Generate a call using expressions pushed to the builders result stack.
     bool generate_call(ast const & ast, program_builder * program) {
@@ -671,10 +713,9 @@ namespace adder {
 
       program->begin_scope();
 
-      auto & func = program->current_function();
       const auto &scopeMeta = program->meta.scopes[scopeId.value()];
       const bool isStackFrame = !scopeMeta.parent_function_scope.has_value();
-      const bool isInlining = func.scope_id != scopeId;
+      const bool isInlining = program->current_function().scope_id != scopeId;
 
       if (isStackFrame && !isInlining) {
         // Is function stack frame
@@ -682,9 +723,16 @@ namespace adder {
         program->set_instruction_tag(program_builder::instruction_tag::stack_frame);
       }
 
-      for (size_t statementId : scope.statements)
+      for (size_t statementId : scope.statements) {
+        size_t temporaries = program->scopes.back().temporaries.size();
+
         if (!generate_code(ast, program, statementId))
           return false;
+
+        // Destroy any dangling temporaries
+        while (program->scopes.back().temporaries.size() > temporaries)
+          program->free_temporary_value();
+      }
 
       // If the last statement was a return, scope variables will have already been cleaned up.
       // skip cleanup instructions.
@@ -824,7 +872,7 @@ namespace adder {
       }
 
       if (!statementMeta.symbol_index.has_value()) {
-        printf("Error: Unknown identifier '%.*s'\n", (int)identifier.name.length(), identifier.name.data());
+        printf("Error: Unable to resolve identifier '%.*s'\n", (int)identifier.name.length(), identifier.name.data());
         return false;
       }
 
@@ -875,19 +923,40 @@ namespace adder {
       switch (op.type_name) {
       case expr::operator_type::call: {
         assert(op.left.has_value());
-
         if (op.right.has_value() && !evaluate_symbols(ast, meta, op.right.value(), ctx))
           return false;
 
         symbol_eval_context callCtx = ctx;
         callCtx.is_call = true;
         callCtx.call_parameter_list = op.right;
+        if (!evaluate_symbols(ast, meta, op.left.value(), callCtx)) {
+          return false;
+        }
 
-        return evaluate_symbols(ast, meta, op.left.value(), callCtx);
+        meta->statement_info[id].type_id = meta->return_type_of(meta->statement_info[op.left.value()].type_id);
+        break;
+      }
+      default: {
+        assert(op.left.has_value());
+        assert(op.right.has_value());
+        if (!(evaluate_symbols(ast, meta, op.left.value(), ctx) &&
+          evaluate_symbols(ast, meta, op.right.value(), ctx)))
+          return false;
+
+        auto lhsType = meta->statement_info[op.left.value()].type_id;
+        auto rhsType = meta->statement_info[op.right.value()].type_id;
+        if (!(lhsType.has_value() && rhsType.has_value()))
+          return false;
+        auto symbol = meta->search_for_operator_symbol_index(ctx.scope_id, op.type_name, lhsType.value(), rhsType.value());
+        if (!symbol.has_value())
+          return false;
+
+        meta->statement_info[id].symbol_index = symbol;
+        meta->statement_info[id].type_id       = meta->return_type_of(meta->symbols[symbol.value()].type);
+        break;
       }
       }
-
-      return false;
+      return true;
     }
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::block const & block, symbol_eval_context const & ctx) {

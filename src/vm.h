@@ -17,41 +17,45 @@ namespace adder {
     using register_index = uint8_t;
     using address_t      = uint64_t;
 
-    enum class op_code : uint64_t {
-      exit,             ///< Load a value from a memory address
-      noop,             ///< Do nothing
-      load,             ///< Load a value from a memory address
-      load_addr,        ///< Load a value from a constant address
-      load_offset,      ///< Load a value from an address (stored in a register) with some offset
-      store,            ///< Store a value to a memory address
-      store_addr,       ///< Store a value to a constant address
-      store_offset,     ///< Store a value to an address (stored in a register) with some offset
-      set,              ///< Set the value of a register
-      add_i64,          ///< Add two registers as integers
-      add_f64,          ///< Add two registers as floats
-      sub_i64,          ///< Add two registers as integers
-      sub_f64,          ///< Add two registers as floats
-      mul_i64,          ///< Multiply two registers as integers
-      mul_f64,          ///< Multiply two registers as floats
-      div_i64,          ///< Set the value of a register as integers
-      div_f64,          ///< Divide two registers as floats
-      alloc_stack,      ///< Reserve space on the stack
-      free_stack,       ///< Free space on the stack
-      push,             ///< Push a register to the stack
-      pop,              ///< Pop a register value from the stack. Store in named register
-      jump,             ///< Set the program counter.
-      jump_relative,    ///< Add a value to the program counter
-      jump_indirect,    ///< Set the program counter to a value stored in a register
-      move,             ///< Move a value from a register
-      compare_i64,      ///< Compare the values in two registers as integers
-      compare_f64,      ///< Compare the values in two registers as floats
-      conditional_jump, ///< Set the program counter if the specified comparison bits are set.
-      conditional_move, ///< Compare the specified register with a value. Move if equal
-      call,             ///< Call a function
-      call_indirect,    ///< Call an address stored in a register
-      ret,              ///< Return from a function
-      // call_native,      ///< Call a native function
-      count,            ///< Number of op codes
+    enum class op_code : uint8_t {
+      exit,               ///< Load a value from a memory address
+      noop,               ///< Do nothing
+      load,               ///< Load a value from a memory address
+      load_addr,          ///< Load a value from a constant address
+      load_offset,        ///< Load a value from an address (stored in a register) with some offset
+      store,              ///< Store a value to a memory address
+      store_addr,         ///< Store a value to a constant address
+      store_offset,       ///< Store a value to an address (stored in a register) with some offset
+      store_value,        ///< Store a constant value to a memory address
+      store_value_addr,   ///< Store a constant value to a constant address
+      store_value_offset, ///< Store a constant value to an address (stored in a register) with some offset
+      set,                ///< Set the value of a register
+      add_i64,            ///< Add two registers as integers
+      add_i64_constant,   ///< Add two integers lhs is a register, rhs is a constant
+      add_f64,            ///< Add two registers as floats
+      sub_i64,            ///< Add two registers as integers
+      sub_f64,            ///< Add two registers as floats
+      mul_i64,            ///< Multiply two registers as integers
+      mul_f64,            ///< Multiply two registers as floats
+      div_i64,            ///< Set the value of a register as integers
+      div_f64,            ///< Divide two registers as floats
+      alloc_stack,        ///< Reserve space on the stack
+      free_stack,         ///< Free space on the stack
+      push,               ///< Push a register to the stack
+      pop,                ///< Pop a register value from the stack. Store in named register
+      jump,               ///< Set the program counter.
+      jump_relative,      ///< Add a value to the program counter
+      jump_indirect,      ///< Set the program counter to a value stored in a register
+      move,               ///< Move a value from a register
+      compare_i64,        ///< Compare the values in two registers as integers
+      compare_f64,        ///< Compare the values in two registers as floats
+      conditional_jump,   ///< Set the program counter if the specified comparison bits are set.
+      conditional_move,   ///< Compare the specified register with a value. Move if equal
+      call,               ///< Call a function
+      call_indirect,      ///< Call an address stored in a register
+      ret,                ///< Return from a function
+      // call_native,     ///< Call a native function
+      count,              ///< Number of op codes
     };
 
     template<op_code code>
@@ -97,9 +101,28 @@ namespace adder {
       int64_t        offset;
     };
 
+    template<> struct op_code_args<op_code::store_value> {
+      register_value src;
+      register_index addr; // [reg]
+      uint8_t        size;
+    };
+
+    template<> struct op_code_args<op_code::store_value_addr> {
+      register_value addr;
+      register_value src;
+      uint8_t        size;
+    };
+
+    template<> struct op_code_args<op_code::store_value_offset> {
+      register_value src;
+      register_index addr;
+      uint8_t        size;
+      int64_t        offset;
+    };
+
     template<> struct op_code_args<op_code::set> {
-      register_index dst;
       register_value val;
+      register_index dst;
     };
 
     struct op_code_binary_op_args {
@@ -108,7 +131,14 @@ namespace adder {
       register_index rhs;
     };
 
+    struct op_code_binary_op_args_reg_constant {
+      register_value rhs;
+      register_index dst;
+      register_index lhs;
+    };
+
     template<> struct op_code_args<op_code::add_i64> : op_code_binary_op_args {};
+    template<> struct op_code_args<op_code::add_i64_constant> : op_code_binary_op_args_reg_constant {};
     template<> struct op_code_args<op_code::add_f64> : op_code_binary_op_args {};
     template<> struct op_code_args<op_code::sub_i64> : op_code_binary_op_args {};
     template<> struct op_code_args<op_code::sub_f64> : op_code_binary_op_args {};
@@ -186,7 +216,6 @@ namespace adder {
     /// Variable number of arguments.
     /// Dependent on op code implementation
     struct instruction {
-      op_code  code;
       union {
         uint8_t arg_bytes[1];
         op_code_args<op_code::load> load;
@@ -195,8 +224,12 @@ namespace adder {
         op_code_args<op_code::store> store;
         op_code_args<op_code::store_offset> store_offset;
         op_code_args<op_code::store_addr> store_addr;
+        op_code_args<op_code::store_value> store_value;
+        op_code_args<op_code::store_value_offset> store_value_offset;
+        op_code_args<op_code::store_value_addr> store_value_addr;
         op_code_args<op_code::set> set;
         op_code_binary_op_args add;
+        op_code_args<op_code::add_i64_constant> add_constant;
         op_code_binary_op_args sub;
         op_code_binary_op_args mul;
         op_code_binary_op_args div;
@@ -215,6 +248,7 @@ namespace adder {
         op_code_args<op_code::call_indirect> call_indirect;
         op_code_args<op_code::ret> ret;
       };
+      op_code code;
     };
 
     struct allocator {
@@ -311,7 +345,8 @@ namespace adder {
         r4, ///< General IO 4
         r5, ///< General IO 5
         r6, ///< General IO 6
-        pc, ///< Program counter.
+        gp_end,
+        pc = gp_end, ///< Program counter.
         fp, ///< Frame pointer. Offset of current stack frame.
         sp, ///< Stack pointer.
         rp, ///< Return pointer. Where the current scope should return to.
@@ -368,37 +403,41 @@ namespace adder {
 
   inline static std::string op_code_to_string(vm::op_code op) {
     switch (op) {
-      case adder::vm::op_code::exit: return "exit";                         ///< Stop program execution
-      case adder::vm::op_code::load: return "load";                         ///< Load a value from a memory address
-      case adder::vm::op_code::load_addr: return "load_addr";               ///< Load a value from a constant address
-      case adder::vm::op_code::load_offset: return "load_offset";           ///< Load a value from an address (stored in a register) with some offset
-      case adder::vm::op_code::store: return "store";                       ///< Store a value to a memory address
-      case adder::vm::op_code::store_addr: return "store_addr";             ///< Store a value to a constant address
-      case adder::vm::op_code::store_offset: return "store_offset";         ///< Store a value to an address (stored in a register) with some offset
-      case adder::vm::op_code::set: return "set";                           ///< Set the value of a register
-      case adder::vm::op_code::add_i64: return "add_i64";                   ///< Add two registers as integers
-      case adder::vm::op_code::add_f64: return "add_f64";                   ///< Add two registers as floats
-      case adder::vm::op_code::sub_i64: return "add_i64";                   ///< Subtract two registers as integers
-      case adder::vm::op_code::sub_f64: return "add_f64";                   ///< Subtract two registers as floats
-      case adder::vm::op_code::mul_i64: return "mul_i64";                   ///< Multiply two registers as integers
-      case adder::vm::op_code::mul_f64: return "mul_f64";                   ///< Multiply two registers as floats
-      case adder::vm::op_code::div_i64: return "div_i64";                   ///< Set the value of a register as integers
-      case adder::vm::op_code::div_f64: return "div_f64";                   ///< Divide two registers as floats
-      case adder::vm::op_code::alloc_stack: return "alloc_stack";           ///< Reserve space on the stack
-      case adder::vm::op_code::free_stack: return "free_stack";             ///< Free space on the stack
-      case adder::vm::op_code::push: return "push";                         ///< Push a register to the stack
-      case adder::vm::op_code::pop: return "pop";                           ///< Pop a register value from the stack. Store in named register
-      case adder::vm::op_code::jump: return "jump";                         ///< Set the program counter.
-      case adder::vm::op_code::jump_indirect: return "jump_indirect";       ///< Set the program counter to a value stored in a register
-      case adder::vm::op_code::jump_relative: return "jump_relative";       ///< Set the program counter to a location relative to the current instruction
-      case adder::vm::op_code::move: return "move";                         ///< Move a value from a register
-      case adder::vm::op_code::compare_i64: return "compare_i64";           ///< Compare the values in two registers as integers
-      case adder::vm::op_code::compare_f64: return "compare_f64";           ///< Compare the values in two registers as floats
-      case adder::vm::op_code::conditional_jump: return "conditional_jump"; ///< Set the program counter if the specified comparison bits are set.
-      case adder::vm::op_code::conditional_move: return "conditional_move"; ///< Compare the specified register with a value. Move if equal
-      case adder::vm::op_code::call: return "call";                         ///< Compare the specified register with a value. Move if equal
-      case adder::vm::op_code::call_indirect: return "call_indirect";       ///< Compare the specified register with a value. Move if equal
-      case adder::vm::op_code::ret: return "ret";                           ///< Compare the specified register with a value. Move if equal
+      case adder::vm::op_code::exit: return "exit";                             ///< Stop program execution
+      case adder::vm::op_code::load: return "load";                             ///< Load a value from a memory address
+      case adder::vm::op_code::load_addr: return "load_addr";                   ///< Load a value from a constant address
+      case adder::vm::op_code::load_offset: return "load_offset";               ///< Load a value from an address (stored in a register) with some offset
+      case adder::vm::op_code::store: return "store";                           ///< Store a value to a memory address
+      case adder::vm::op_code::store_addr: return "store_addr";                 ///< Store a value to a constant address
+      case adder::vm::op_code::store_offset: return "store_offset";             ///< Store a value to an address (stored in a register) with some offset
+      case adder::vm::op_code::store_value: return "store_value";               ///< Store a constant to a memory address
+      case adder::vm::op_code::store_value_addr: return "store_value_addr";     ///< Store a constant to a constant address
+      case adder::vm::op_code::store_value_offset: return "store_value_offset"; ///< Store a constant to an address (stored in a register) with some offset
+      case adder::vm::op_code::set: return "set";                               ///< Set the value of a register
+      case adder::vm::op_code::add_i64: return "add_i64";                       ///< Add two registers as integers
+      case adder::vm::op_code::add_i64_constant: return "add_i64_constant";     ///< Add two registers as integers
+      case adder::vm::op_code::add_f64: return "add_f64";                       ///< Add two registers as floats
+      case adder::vm::op_code::sub_i64: return "add_i64";                       ///< Subtract two registers as integers
+      case adder::vm::op_code::sub_f64: return "add_f64";                       ///< Subtract two registers as floats
+      case adder::vm::op_code::mul_i64: return "mul_i64";                       ///< Multiply two registers as integers
+      case adder::vm::op_code::mul_f64: return "mul_f64";                       ///< Multiply two registers as floats
+      case adder::vm::op_code::div_i64: return "div_i64";                       ///< Set the value of a register as integers
+      case adder::vm::op_code::div_f64: return "div_f64";                       ///< Divide two registers as floats
+      case adder::vm::op_code::alloc_stack: return "alloc_stack";               ///< Reserve space on the stack
+      case adder::vm::op_code::free_stack: return "free_stack";                 ///< Free space on the stack
+      case adder::vm::op_code::push: return "push";                             ///< Push a register to the stack
+      case adder::vm::op_code::pop: return "pop";                               ///< Pop a register value from the stack. Store in named register
+      case adder::vm::op_code::jump: return "jump";                             ///< Set the program counter.
+      case adder::vm::op_code::jump_indirect: return "jump_indirect";           ///< Set the program counter to a value stored in a register
+      case adder::vm::op_code::jump_relative: return "jump_relative";           ///< Set the program counter to a location relative to the current instruction
+      case adder::vm::op_code::move: return "move";                             ///< Move a value from a register
+      case adder::vm::op_code::compare_i64: return "compare_i64";               ///< Compare the values in two registers as integers
+      case adder::vm::op_code::compare_f64: return "compare_f64";               ///< Compare the values in two registers as floats
+      case adder::vm::op_code::conditional_jump: return "conditional_jump";     ///< Set the program counter if the specified comparison bits are set.
+      case adder::vm::op_code::conditional_move: return "conditional_move";     ///< Compare the specified register with a value. Move if equal
+      case adder::vm::op_code::call: return "call";                             ///< Compare the specified register with a value. Move if equal
+      case adder::vm::op_code::call_indirect: return "call_indirect";           ///< Compare the specified register with a value. Move if equal
+      case adder::vm::op_code::ret: return "ret";                               ///< Compare the specified register with a value. Move if equal
       default: return "unknown";
     }
   }

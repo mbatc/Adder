@@ -153,6 +153,22 @@ namespace adder {
         memcpy(mem, &vm->registers[args.src], args.size);
       }
 
+      void store_value(machine * vm, op_code_args<op_code::store_value> const & args) {
+        uint8_t *mem = (uint8_t *)vm->registers[args.addr].ptr;
+        memcpy(mem, &args.src, args.size);
+      }
+
+      void store_value_offset(machine * vm, op_code_args<op_code::store_value_offset> const & args) {
+        uint8_t *mem = (uint8_t *)vm->registers[args.addr].ptr + args.offset;
+        memcpy(mem, &args.src, args.size);
+      }
+
+      void store_value_addr(machine * vm, op_code_args<op_code::store_value_addr> const & args) {
+        unused(vm);
+        uint8_t *mem = (uint8_t *)args.addr;
+        memcpy(mem, &args.src, args.size);
+      }
+
       void set(machine * vm, op_code_args<op_code::set> const & args) {
         vm->registers[args.dst].value = args.val;
       }
@@ -160,6 +176,12 @@ namespace adder {
       void add_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
+        vm->registers[args.dst].i64 = lhs + rhs;
+      }
+
+      void add_i64_constant(machine * vm, op_code_binary_op_args_reg_constant const & args) {
+        const int64_t lhs = vm->registers[args.lhs].i64;
+        const int64_t rhs = static_cast<int64_t>(args.rhs);
         vm->registers[args.dst].i64 = lhs + rhs;
       }
 
@@ -180,7 +202,6 @@ namespace adder {
         const double rhs = vm->registers[args.rhs].d64;
         vm->registers[args.dst].d64 = lhs - rhs;
       }
-
 
       void mul_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
@@ -308,14 +329,29 @@ namespace adder {
       case op_code::store:
         op::store(vm, inst.store);
         break;
+      case op_code::store_addr:
+        op::store_addr(vm, inst.store_addr);
+        break;
       case op_code::store_offset:
         op::store_offset(vm, inst.store_offset);
+        break;
+      case op_code::store_value:
+        op::store_value(vm, inst.store_value);
+        break;
+      case op_code::store_value_addr:
+        op::store_value_addr(vm, inst.store_value_addr);
+        break;
+      case op_code::store_value_offset:
+        op::store_value_offset(vm, inst.store_value_offset);
         break;
       case op_code::set:
         op::set(vm, inst.set);
         break;
       case op_code::add_i64:
         op::add_i64(vm, inst.add);
+        break;
+      case op_code::add_i64_constant:
+        op::add_i64_constant(vm, inst.add_constant);
         break;
       case op_code::add_f64:
         op::add_f64(vm, inst.add);
