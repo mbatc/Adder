@@ -7,6 +7,8 @@ namespace adder {
     uint64_t public_symbol_count = 0;
     uint64_t extern_symbol_offset = 0;
     uint64_t extern_symbol_count = 0;
+    uint64_t relocation_table_offset = 0;
+    uint64_t relocation_table_size = 0;
     uint64_t symbol_data_offset = 0;
     uint64_t symbol_data_size = 0;
     uint64_t program_data_offset = 0;
@@ -20,12 +22,18 @@ namespace adder {
     uint64_t data_address = 0;
   };
 
+  struct program_relocation_table_entry {
+    uint64_t symbol;
+    uint64_t count;
+  };
+
   template<bool Const>
   struct program_view_impl {
-    using vector_t       = std::conditional_t<Const, const std::vector<uint8_t>, std::vector<uint8_t>>;
-    using storage_t      = std::conditional_t<Const, const uint8_t, uint8_t>;
-    using header_t       = std::conditional_t<Const, const program_header, program_header>;
-    using symbol_entry_t = std::conditional_t<Const, const program_symbol_table_entry, program_symbol_table_entry>;
+    using vector_t           = std::conditional_t<Const, const std::vector<uint8_t>, std::vector<uint8_t>>;
+    using storage_t          = std::conditional_t<Const, const uint8_t, uint8_t>;
+    using header_t           = std::conditional_t<Const, const program_header, program_header>;
+    using symbol_entry_t     = std::conditional_t<Const, const program_symbol_table_entry, program_symbol_table_entry>;
+    using relocation_entry_t = std::conditional_t<Const, const program_relocation_table_entry, program_relocation_table_entry>;
 
     program_view_impl() = default;
 
@@ -61,6 +69,22 @@ namespace adder {
     symbol_entry_t * get_extern_symbols() const {
       uint8_t const* table = ptr + get_header().extern_symbol_offset;
       return (symbol_entry_t *)table;
+    }
+
+    program_relocation_table_entry * first_relocation_entry() const {
+      if (get_header().relocation_table_size == 0)
+        return nullptr;
+      uint8_t const* table = ptr + get_header().relocation_table_offset;
+      return (program_relocation_table_entry*)table;
+    }
+
+    program_relocation_table_entry * next_relocation_entry(program_relocation_table_entry * entry) const {
+      if (entry == nullptr)
+        return first_relocation_entry();
+      auto next = (program_relocation_table_entry *)(((uint8_t*)entry) + sizeof(program_relocation_table_entry) + entry->count * sizeof(vm::address_t));
+      if (next >= (program_relocation_table_entry *)(ptr + get_header().relocation_table_offset + get_header().relocation_table_size))
+        return nullptr;
+      return next;
     }
 
     std::string_view get_symbol(program_symbol_table_entry const& entry) const {

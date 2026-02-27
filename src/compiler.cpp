@@ -221,11 +221,13 @@ namespace adder {
       program->add_variable(receiver);
 
       if (statement.initializer.has_value()) {
-        size_t count = program->value_stack.size();
+        const size_t count = program->value_stack.size();
         if (!generate_code(ast, program, statement.initializer.value())) {
           return false;
         }
-        assert(count < program->value_stack.size());
+
+        assert(count < program->value_stack.size()); adder::unused(count);
+
         auto initializer = program->pop_value();
         assert(initializer.has_value());
         if (!initialize_variable(ast, program, receiver, initializer.value())) {
@@ -1127,77 +1129,37 @@ namespace adder {
       return true;
     }
 
-    // void evaluate_stack_allocations(program_metadata * meta, const size_t rootId = 0, const size_t allocatedStackSpace = 0) {
-    //   program_metadata::scope & root = meta->scopes[rootId];
-    //   size_t stackSize = root.parent_function_scope.has_value() ? allocatedStackSpace : 0;
-    //   for (size_t symbolId : root.symbols) {
-    //     program_metadata::symbol & symbol = meta->symbols[symbolId];
-    //     if (!symbol.has_local_storage()) {
-    //       continue;
-    //     }
-    // 
-    //     symbol.stack_offset = stackSize;
-    //     stackSize += meta->get_type_size(symbol.type);
-    //   }
-    // 
-    //   if (root.parent_function_scope.has_value()) {
-    //     program_metadata::scope & storageScope = meta->scopes[root.parent_function_scope.value()];
-    //     storageScope.max_stack_size = std::max(storageScope.max_stack_size, stackSize);
-    //   }
-    //   else {
-    //     root.max_stack_size = stackSize;
-    //   }
-    // 
-    //   meta->for_each_child_scope(rootId, [&](size_t childId) {
-    //     evaluate_stack_allocations(meta, childId, stackSize);
-    //   });
-    // }
-
-    // void evaluate_variable_addresses(program_metadata * meta) {
-    //   meta->static_storage_size = 0;
-    //   for (auto & scope : meta->scopes) {
-    //     for (const auto & index : scope.symbols) {
-    //       program_metadata::symbol & symbol = meta->symbols[index];
-    // 
-    //       const bool isParameter = symbol.is_parameter();
-    //       const bool isStatic    = symbol.is_static();
-    //       const bool isFunction  = symbol.is_function();
-    // 
-    //       if (isFunction || isParameter) {
-    //         continue; // Ignore function declarations for this phase.
-    //       }
-    // 
-    //       const size_t sz = meta->get_type_size(symbol.type);
-    //       const bool isGlobal = symbol.is_global();
-    //       if (isStatic || isGlobal) {
-    //         symbol.global_address = meta->static_storage_size;
-    //         meta->static_storage_size += sz;
-    //       }
-    //     }
-    //   }
-    // }
-
     program generate_code(ast const & ast) {
       program_builder ret;
 
       ret.meta.statement_info.resize(ast.statements.size());
 
       evaluate_symbols(ast, &ret.meta);
-      // evaluate_stack_allocations(&ret.meta);
-      // evaluate_variable_addresses(&ret.meta);
 
-      // generate_code();
-
-      // generate_function_code(ast);
-
-      // evaluate_function_addresses(&ret.meta);
-      
+      auto moduleInit = ret.meta.find_symbol("()=>void:$module_init");
+      assert(moduleInit.has_value() && "$module_init was not declared");
+      ret.meta.symbols[moduleInit.value()].function_root_scope_id = 0;
+      ret.begin_function(moduleInit.value());
       ret.begin_scope();
+
+      // Push frame for initializer func
+      ret.push_return_pointer();
+      ret.push_frame_pointer();
+      ret.move(vm::register_names::fp, vm::register_names::sp);
+
       expr::block const & top = ast.get<expr::block>(ast.statements.size() - 1);
       for (size_t statementId : top.statements) {
-        generate_code(ast, &ret, statementId);
+        if (!generate_code(ast, &ret, statementId)) {
+          return program({});
+        }
       }
+
+      // Pop frame for initializer func
+      ret.pop_frame_pointer();
+      ret.pop_return_pointer();
+      ret.ret();
       ret.end_scope();
+      ret.end_function();
 
       return ret.binary();
     }

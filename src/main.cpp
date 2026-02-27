@@ -6,44 +6,80 @@
 
 #include <iostream>
 #include <chrono>
+#include <filesystem>
+
+std::string read_file(std::string const & path) {
+  std::string content;
+  FILE * file = fopen(path.c_str(), "r");
+  while (!feof(file)) {
+    char buffer[1024];
+    size_t numRead = fread(buffer, 1, sizeof(buffer), file);
+    content += std::string_view(buffer, numRead);
+  }
+  fclose(file);
+  return content;
+}
 
 int main(int argc, char ** argv) {
   adder::unused(argc, argv);
-
-  std::string content;
+  const bool testPerf = false;
+  std::map<std::string, std::string> tests;
   {
-    FILE * file = fopen("../../tests/simple-call.ad", "r");
-    while (!feof(file)) {
-      char buffer[1024];
-      size_t numRead = fread(buffer, 1, sizeof(buffer), file);
-      content += std::string_view(buffer, numRead);
+    for (auto& item : std::filesystem::directory_iterator( "../../tests/")) {
+      if (item.is_regular_file()) {
+        tests[item.path().string()] = read_file(item.path().string());
+      }
     }
-    fclose(file);
   }
 
-  auto result = adder::compile(content);
+  // tests = {
+  //   { "../../tests/simple-global.ad", read_file("../../tests/simple-global.ad") }
+  // };
 
-  adder::vm::allocator allocator;
-  adder::vm::machine vm(&allocator);
+  for (auto& [file, source] : tests) {
+    printf("Compile and run: %s\n", file.c_str());
 
-  auto loaded = adder::vm::load_program(&vm, result.view());
-  auto mainSymbol = loaded.find_public_symbol("()=>void:main");
+    auto result = adder::compile(source);
 
-  void * entry = adder::vm::compile_call_handle(&vm, *mainSymbol);
+    adder::vm::allocator allocator;
+    adder::vm::machine vm(&allocator);
 
-  adder::vm::call(&vm, entry);
+    auto loaded = adder::vm::load_program(&vm, result.view());
+    auto mainSymbol = loaded.find_public_symbol("()=>void:main");
+    if (mainSymbol == nullptr) {
+      printf(" ! %s has no ()=>void:main symbol. Skipping\n", file.c_str());
+      continue;
+    }
 
-  // for (int64_t j = 0; j < 100; ++j)
-  // {
-  //   using namespace std::chrono;
-  //   auto start = high_resolution_clock::now();
-  // 
-  //   for (int64_t i = 0; i < 100000; ++i)
-  // 
-  //   auto end = high_resolution_clock::now();
-  // 
-  //   double s = (double)(end - start).count() / (1000 * 1000 * 1000ll);
-  //   printf("%.4f\n", s);
-  // }
+    void* entry = adder::vm::compile_call_handle(&vm, *mainSymbol);
+    adder::vm::call(&vm, entry);
+
+    auto testResultSymbol = loaded.find_public_symbol("int64:test_result");
+    if (testResultSymbol != nullptr) {
+      printf(" - test_result: %lld\n", *(int64_t*)testResultSymbol->data_address);
+    }
+
+    if (testPerf) {
+      double tm = 0;
+      const int64_t batches = 100;
+      const int64_t batchSize = 100000;
+      for (int64_t j = 0; j < batches; ++j) {
+        using namespace std::chrono;
+        auto start = high_resolution_clock::now();
+
+        for (int64_t i = 0; i < batchSize; ++i)
+          adder::vm::call(&vm, entry);
+
+        auto end = high_resolution_clock::now();
+
+        tm += (double)(end - start).count() / (1000 * 1000 * 1000ll);
+      }
+      tm /= 100;
+      printf(" - Average run time of %lld calls: %.2f\n", batches * batchSize, tm);
+    }
+
+    adder::vm::free(&vm, entry);
+  }
+
   return 0;
 }

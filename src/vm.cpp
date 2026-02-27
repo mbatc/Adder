@@ -7,45 +7,73 @@
 #include <iostream>
 #include <iomanip>
 
-#define AD_PRINT_VM_STATE
+// #define AD_PRINT_VM_STATE
 
 #define use_small_memcpy 1
+#define use_inline_small_memcpy 1
+
+#define inline_small_memcpy(dst, src, size) do {            \
+      uint8_t* dstData = (uint8_t*)dst;                     \
+      uint8_t const * srcData = (uint8_t const * )src;      \
+      switch (size) {                                       \
+      case 8:                                               \
+        *(uint64_t*)dstData = *(uint64_t const *)srcData;   \
+        break;                                              \
+      case 7:                                               \
+        dstData[6] = srcData[6];                            \
+      case 6:                                               \
+        dstData[5] = srcData[5];                            \
+      case 5:                                               \
+        dstData[4] = srcData[4];                            \
+      case 4:                                               \
+        *(uint32_t*)dstData = *(uint32_t const *)srcData;   \
+        break;                                              \
+      case 3:                                               \
+        dstData[2] = srcData[2];                            \
+      case 2:                                               \
+        *(uint16_t*)dstData = *(uint16_t const *)srcData;   \
+        break;                                              \
+      case 1:                                               \
+        dstData[0] = srcData[0];                            \
+      case 0:                                               \
+        break;                                              \
+      }                                                     \
+    } while(false)
 
 #if use_small_memcpy
+#if use_inline_small_memcpy
+  #define small_memcpy(dst, src, size) inline_small_memcpy(dst, src, size)
+#else
   #define small_memcpy(dst, src, size) ::adder::impl::tiny_copy(dst, src, size)
+#endif
 #else
   #define small_memcpy(dst, src, size) memcpy(dst, src, size)
 #endif
+
+#define AD_VM_DECODE(vm, pInstruction) \
+  pInstruction = (instruction const *)vm->registers[register_names::pc].ptr; \
+  vm->registers[register_names::pc].u64 += sizeof(instruction);              \
+
+#define AD_VM_EXECUTE(vm, pInstruction) \
+  ::adder::vm::instruction_table[(uint8_t)pInstruction->code](vm, pInstruction); \
+
+#define AD_VM_GROW_STACK(vm)                                                       \
+ do {                                                                              \
+    const size_t curCap = vm->stack.end - vm->stack.base;                          \
+    const size_t newCap = curCap * 2;                                              \
+    void * newData      = vm->heap_allocator->allocate(newCap);                    \
+    const size_t curSz  = vm->registers[register_names::sp].data - vm->stack.base; \
+    memcpy(newData, vm->stack.base, curSz);                                        \
+    vm->heap_allocator->free(vm->stack.base);                                      \
+    vm->stack.base = (uint8_t*)newData;                                            \
+    vm->registers[register_names::sp].data = vm->stack.base + curSz;               \
+  } while(false)
 
 namespace adder {
   namespace impl {
     /// Copy 8 bytes or less
     void tiny_copy(void* dst, void const * src, uint8_t sz) {
-      uint8_t* dstData = (uint8_t*)dst;
-      uint8_t const * srcData = (uint8_t const * )src;
-      switch (sz) {
-      case 8:
-        *(uint64_t*)dst = *(uint64_t const *)src;
-        break;
-      case 7:
-        dstData[6] = srcData[6];
-      case 6:
-        dstData[5] = srcData[5];
-      case 5:
-        dstData[4] = srcData[4];
-      case 4:
-        *(uint32_t*)dst = *(uint32_t const *)src;
-        break;
-      case 3:
-        dstData[2] = srcData[2];
-      case 2:
-        *(uint16_t*)dst = *(uint16_t const *)src;
-        break;
-      case 1:
-        dstData[0] = srcData[0];
-      case 0:
-        break;
-      }
+      inline_small_memcpy(dst, src, sz);
     }
   }
 
@@ -62,14 +90,6 @@ namespace adder {
       std::free(ptr);
     }
 
-    bool decode(machine * vm) {
-      instruction const * pInstruction = reinterpret_cast<instruction const *>((uint8_t*)vm->program_counter());
-      size_t sz = instruction_size(pInstruction->code);
-      vm->registers[register_names::pc].u64 += sz;
-      memcpy(&vm->next_instruction, pInstruction, sz);
-      return true;
-    }
-
     void relocate_program(program_view const & program) {
       program_header header = program.get_header();
       uint64_t base = (uint64_t)program.data();
@@ -82,26 +102,12 @@ namespace adder {
         publicSymbols[i].name_address += base;
       }
 
-      uint8_t * pc  = program.data() + program.get_header().code_offset;
-      uint8_t * end = pc + program.get_header().code_size;
-
-      while (pc < end) {
-        vm::instruction *inst = (vm::instruction*)pc;
-        switch (inst->code)
-        {
-        case vm::op_code::load_addr:
-          inst->load_addr.addr += base;
-          break;
-        case vm::op_code::jump:
-        case vm::op_code::conditional_jump:
-          inst->jump.addr += base;
-          break;
-        case vm::op_code::call:
-          inst->call.addr += base;
-          break;
+      for (program_relocation_table_entry * relocation = program.first_relocation_entry(); relocation != nullptr; relocation = program.next_relocation_entry(relocation)) {
+        auto addr = publicSymbols[relocation->symbol].data_address;
+        uint64_t const * offsets = (uint64_t const *)(relocation + 1);
+        for (size_t i = 0; i < relocation->count; ++i) {
+          *(uint64_t*)(base + header.code_offset + offsets[i]) += addr;
         }
-
-        pc += instruction_size(inst->code);
       }
     }
 
@@ -114,159 +120,167 @@ namespace adder {
       if (relocated) {
         relocate_program(loaded);
       }
+
+      void * initializer = adder::vm::compile_call_handle(vm, *loaded.find_public_symbol("()=>void:$module_init"));
+      adder::vm::call(vm, initializer);
+      adder::vm::free(vm, initializer);
+
       return { loaded.data(), loaded.size() };
     }
 
     namespace op {
-      void load(machine * vm, op_code_args<op_code::load> const & args) {
+      inline void load(machine * vm, op_code_args<op_code::load> const & args) {
         const void * addr = vm->registers[args.src_addr].ptr;
         const uint8_t *mem  = (const uint8_t*)addr;
         vm->registers[args.dst].u64 = 0;
-        memcpy(&vm->registers[args.dst], mem, args.size);
+        small_memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
-      void load_offset(machine * vm, op_code_args<op_code::load_offset> const & args) {
-        const void * addr = vm->registers[args.src_addr].ptr;
-        const uint8_t *mem  = (const uint8_t*)addr + args.offset;
+      inline void load_offset(machine * vm, op_code_args<op_code::load_offset> const & args) {
+        const void    * addr = vm->registers[args.src_addr].ptr;
+        const uint8_t * mem  = (const uint8_t*)addr + args.offset;
         vm->registers[args.dst].u64 = 0;
-        memcpy(&vm->registers[args.dst], mem, args.size);
+        small_memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
-      void load_addr(machine * vm, op_code_args<op_code::load_addr> const & args) {
+      inline void load_addr(machine * vm, op_code_args<op_code::load_addr> const & args) {
         const uint8_t *mem  = (const uint8_t *)args.addr;
         vm->registers[args.dst].u64 = 0;
-        memcpy(&vm->registers[args.dst], mem, args.size);
+        small_memcpy(&vm->registers[args.dst], mem, args.size);
       }
 
-      void store(machine * vm, op_code_args<op_code::store> const & args) {
+      inline void store(machine * vm, op_code_args<op_code::store> const & args) {
         uint8_t *mem = (uint8_t *)vm->registers[args.addr].ptr;
-        memcpy(mem, &vm->registers[args.src], args.size);
+        small_memcpy(mem, &vm->registers[args.src], args.size);
       }
 
-      void store_offset(machine * vm, op_code_args<op_code::store_offset> const & args) {
+      inline void store_offset(machine * vm, op_code_args<op_code::store_offset> const & args) {
         uint8_t *mem = (uint8_t *)vm->registers[args.addr].ptr + args.offset;
-        memcpy(mem, &vm->registers[args.src], args.size);
+        small_memcpy(mem, &vm->registers[args.src], args.size);
       }
 
-      void store_addr(machine * vm, op_code_args<op_code::store_addr> const & args) {
+      inline void store_addr(machine * vm, op_code_args<op_code::store_addr> const & args) {
         uint8_t *mem = (uint8_t *)args.addr;
-        memcpy(mem, &vm->registers[args.src], args.size);
+        small_memcpy(mem, &vm->registers[args.src], args.size);
       }
 
-      void store_value(machine * vm, op_code_args<op_code::store_value> const & args) {
+      inline void store_value(machine * vm, op_code_args<op_code::store_value> const & args) {
         uint8_t *mem = (uint8_t *)vm->registers[args.addr].ptr;
-        memcpy(mem, &args.src, args.size);
+        small_memcpy(mem, &args.src, args.size);
       }
 
-      void store_value_offset(machine * vm, op_code_args<op_code::store_value_offset> const & args) {
+      inline void store_value_offset(machine * vm, op_code_args<op_code::store_value_offset> const & args) {
         uint8_t *mem = (uint8_t *)vm->registers[args.addr].ptr + args.offset;
-        memcpy(mem, &args.src, args.size);
+        small_memcpy(mem, &args.src, args.size);
       }
 
-      void store_value_addr(machine * vm, op_code_args<op_code::store_value_addr> const & args) {
+      inline void store_value_addr(machine * vm, op_code_args<op_code::store_value_addr> const & args) {
         unused(vm);
         uint8_t *mem = (uint8_t *)args.addr;
-        memcpy(mem, &args.src, args.size);
+        small_memcpy(mem, &args.src, args.size);
       }
 
-      void set(machine * vm, op_code_args<op_code::set> const & args) {
+      inline void set(machine * vm, op_code_args<op_code::set> const & args) {
         vm->registers[args.dst].value = args.val;
       }
 
-      void add_i64(machine * vm, op_code_binary_op_args const & args) {
+      inline void add_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
         vm->registers[args.dst].i64 = lhs + rhs;
       }
 
-      void add_i64_constant(machine * vm, op_code_binary_op_args_reg_constant const & args) {
+      inline void add_i64_constant(machine * vm, op_code_binary_op_args_reg_constant const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = static_cast<int64_t>(args.rhs);
         vm->registers[args.dst].i64 = lhs + rhs;
       }
 
-      void add_f64(machine * vm, op_code_binary_op_args const & args) {
+      inline void add_f64(machine * vm, op_code_binary_op_args const & args) {
         const double lhs = vm->registers[args.lhs].d64;
         const double rhs = vm->registers[args.rhs].d64;
         vm->registers[args.dst].d64 = lhs + rhs;
       }
 
-      void sub_i64(machine * vm, op_code_binary_op_args const & args) {
+      inline void sub_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
         vm->registers[args.dst].i64 = lhs - rhs;
       }
 
-      void sub_f64(machine * vm, op_code_binary_op_args const & args) {
+      inline void sub_f64(machine * vm, op_code_binary_op_args const & args) {
         const double lhs = vm->registers[args.lhs].d64;
         const double rhs = vm->registers[args.rhs].d64;
         vm->registers[args.dst].d64 = lhs - rhs;
       }
 
-      void mul_i64(machine * vm, op_code_binary_op_args const & args) {
+      inline void mul_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
         vm->registers[args.dst].i64 = lhs * rhs;
       }
 
-      void mul_f64(machine * vm, op_code_binary_op_args const & args) {
+      inline void mul_f64(machine * vm, op_code_binary_op_args const & args) {
         const double lhs = vm->registers[args.lhs].d64;
         const double rhs = vm->registers[args.rhs].d64;
         vm->registers[args.dst].d64 = lhs * rhs;
       }
 
-      void div_i64(machine * vm, op_code_binary_op_args const & args) {
+      inline void div_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
         vm->registers[args.dst].i64 = lhs / rhs;
       }
 
-      void div_f64(machine * vm, op_code_binary_op_args const & args) {
+      inline void div_f64(machine * vm, op_code_binary_op_args const & args) {
         const double lhs = vm->registers[args.lhs].d64;
         const double rhs = vm->registers[args.rhs].d64;
         vm->registers[args.dst].d64 = lhs / rhs;
       }
 
-      void alloc_stack(machine * vm, op_code_args<op_code::alloc_stack> const & args) {
-        vm->stack.allocate(args.bytes);
-        vm->registers[register_names::sp].ptr = vm->stack.end();
+      inline void alloc_stack(machine * vm, op_code_args<op_code::alloc_stack> const & args) {
+        if (vm->registers[register_names::sp].data + args.bytes >= vm->stack.end) {
+          AD_VM_GROW_STACK(vm);
+        }
+        vm->registers[register_names::sp].data += args.bytes;
       }
 
-      void free_stack(machine * vm, op_code_args<op_code::free_stack> const & args) {
-        vm->stack.free(args.bytes);
-        vm->registers[register_names::sp].ptr = vm->stack.end();
+      inline void free_stack(machine * vm, op_code_args<op_code::free_stack> const & args) {
+        vm->registers[register_names::sp].data -= args.bytes;
       }
 
-      void push(machine * vm, op_code_args<op_code::push> const & args) {
-        vm->stack.push(&vm->registers[args.src], args.size);
-        vm->registers[register_names::sp].ptr = vm->stack.end();
+      inline void push(machine * vm, op_code_args<op_code::push> const & args) {
+        if (vm->registers[register_names::sp].data + args.size >= vm->stack.end) {
+          AD_VM_GROW_STACK(vm);
+        }
+
+        small_memcpy(vm->registers[register_names::sp].data, &vm->registers[args.src], args.size);
+        vm->registers[register_names::sp].data += args.size;
       }
 
-      void pop(machine * vm, op_code_args<op_code::pop> const & args) {
+      inline void pop(machine * vm, op_code_args<op_code::pop> const & args) {
         vm->registers[args.dst].u64 = 0;
-        small_memcpy(&vm->registers[args.dst], vm->stack.end() - args.size, args.size);
-
-        vm->stack.free(args.size);
-        vm->registers[register_names::sp].ptr = vm->stack.end();
+        vm->registers[register_names::sp].data -= args.size;
+        small_memcpy(&vm->registers[args.dst], vm->registers[register_names::sp].data, args.size);
       }
 
-      void jump(machine * vm, op_code_args<op_code::jump> const & args) {
+      inline void jump(machine * vm, op_code_args<op_code::jump> const & args) {
         vm->registers[register_names::pc].u64 = args.addr;
       }
 
-      void jump_indirect(machine * vm, op_code_args<op_code::jump_indirect> const & args) {
+      inline void jump_indirect(machine * vm, op_code_args<op_code::jump_indirect> const & args) {
         vm->registers[register_names::pc] = vm->registers[args.addr];
       }
 
-      void jump_relative(machine * vm, op_code_args<op_code::jump_relative> const & args) {
+      inline void jump_relative(machine * vm, op_code_args<op_code::jump_relative> const & args) {
         vm->registers[register_names::pc].u64 += args.offset - sizeof(vm::instruction);
       }
 
-      void move(machine * vm, op_code_args<op_code::move> const & args) {
+      inline void move(machine * vm, op_code_args<op_code::move> const & args) {
         vm->registers[args.dst] = vm->registers[args.src];
       }
 
-      void compare_i64(machine * vm, op_code_binary_op_args const & args) {
+      inline void compare_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
         uint64_t &dst = vm->registers[args.dst].u64;
@@ -276,7 +290,7 @@ namespace adder {
         if (lhs > rhs) dst  |= cmp_gt_bit;
       }
 
-      void compare_f64(machine * vm, op_code_binary_op_args const & args) {
+      inline void compare_f64(machine * vm, op_code_binary_op_args const & args) {
         const double lhs = vm->registers[args.lhs].d64;
         const double rhs = vm->registers[args.rhs].d64;
 
@@ -287,149 +301,70 @@ namespace adder {
         if (lhs > rhs) dst  |= cmp_gt_bit;
       }
 
-      void conditional_jump(machine * vm, op_code_args<op_code::conditional_jump> const & args) {
+      inline void conditional_jump(machine * vm, op_code_args<op_code::conditional_jump> const & args) {
         if (args.cmp_val == (vm->registers[args.cmp_reg].u64 & 0xFF))
           jump(vm, args);
       }
 
-      void conditional_move(machine * vm, op_code_args<op_code::conditional_move> const & args) {
+      inline void conditional_move(machine * vm, op_code_args<op_code::conditional_move> const & args) {
         if (args.cmp_val == (vm->registers[args.cmp_reg].u64 & 0xFF))
           move(vm, args);
       }
 
-      void call(machine * vm, op_code_args<op_code::call> const & args) {
+      inline void call(machine * vm, op_code_args<op_code::call> const & args) {
         vm->registers[vm::register_names::rp] = vm->registers[vm::register_names::pc];
         vm->registers[vm::register_names::pc].value = args.addr;
       }
 
-      void call_indirect(machine * vm, op_code_args<op_code::call_indirect> const & args) {
+      inline void call_indirect(machine * vm, op_code_args<op_code::call_indirect> const & args) {
         vm->registers[vm::register_names::rp] = vm->registers[vm::register_names::pc];
         vm->registers[vm::register_names::pc].value = vm->registers[args.addr].value;
       }
 
-      void ret(machine * vm, op_code_args<op_code::ret> const &) {
+      inline void ret(machine * vm, op_code_args<op_code::ret> const &) {
         vm->registers[vm::register_names::pc] = vm->registers[vm::register_names::rp];
       }
     }
 
-    bool execute(machine * vm) {
-      instruction const & inst = vm->next_instruction;
-      switch (inst.code) {
-      case op_code::noop:
-        break;
-      case op_code::load:
-        op::load(vm, inst.load);
-        break;
-      case op_code::load_offset:
-        op::load_offset(vm, inst.load_offset);
-        break;
-      case op_code::load_addr:
-        op::load_addr(vm, inst.load_addr);
-        break;
-      case op_code::store:
-        op::store(vm, inst.store);
-        break;
-      case op_code::store_addr:
-        op::store_addr(vm, inst.store_addr);
-        break;
-      case op_code::store_offset:
-        op::store_offset(vm, inst.store_offset);
-        break;
-      case op_code::store_value:
-        op::store_value(vm, inst.store_value);
-        break;
-      case op_code::store_value_addr:
-        op::store_value_addr(vm, inst.store_value_addr);
-        break;
-      case op_code::store_value_offset:
-        op::store_value_offset(vm, inst.store_value_offset);
-        break;
-      case op_code::set:
-        op::set(vm, inst.set);
-        break;
-      case op_code::add_i64:
-        op::add_i64(vm, inst.add);
-        break;
-      case op_code::add_i64_constant:
-        op::add_i64_constant(vm, inst.add_constant);
-        break;
-      case op_code::add_f64:
-        op::add_f64(vm, inst.add);
-        break;
-      case op_code::sub_i64:
-        op::sub_i64(vm, inst.add);
-        break;
-      case op_code::sub_f64:
-        op::sub_f64(vm, inst.add);
-        break;
-      case op_code::mul_i64:
-        op::mul_i64(vm, inst.add);
-        break;
-      case op_code::mul_f64:
-        op::mul_f64(vm, inst.add);
-        break;
-      case op_code::div_i64:
-        op::div_i64(vm, inst.add);
-        break;
-      case op_code::div_f64:
-        op::div_f64(vm, inst.add);
-        break;
-      case op_code::alloc_stack:
-        op::alloc_stack(vm, inst.alloc_stack);
-        break;
-      case op_code::free_stack:
-        op::free_stack(vm, inst.free_stack);
-        break;
-      case op_code::push:
-        op::push(vm, inst.push);
-        break;
-      case op_code::pop:
-        op::pop(vm, inst.pop);
-        break;
-      case op_code::jump:
-        op::jump(vm, inst.jump);
-        break;
-      case op_code::jump_indirect:
-        op::jump_indirect(vm, inst.jump_indirect);
-        break;
-      case op_code::jump_relative:
-        op::jump_relative(vm, inst.jump_relative);
-        break;
-      case op_code::move:
-        op::move(vm, inst.move);
-        break;
-      case op_code::compare_i64:
-        op::compare_i64(vm, inst.compare);
-        break;
-      case op_code::compare_f64:
-        op::compare_f64(vm, inst.compare);
-        break;
-      case op_code::conditional_jump:
-        op::conditional_jump(vm, inst.conditional_jump);
-        break;
-      case op_code::conditional_move:
-        op::conditional_move(vm, inst.conditional_move);
-        break;
-      case op_code::call:
-        op::call(vm, inst.call);
-        break;
-      case op_code::call_indirect:
-        op::call_indirect(vm, inst.call_indirect);
-        break;
-      case op_code::ret:
-        op::ret(vm, inst.ret);
-        break;
-      default:
-        return false;
-      }
-
-      return inst.code != op_code::exit;
-    }
-
-    bool step(machine *vm) {
-      return decode(vm)
-        && execute(vm);
-    }
+    using InstructionMethod = void (*)(machine*, instruction const *);
+    static InstructionMethod instruction_table[(uint8_t)op_code::count] = {
+      [](machine * vm, instruction const * inst) { vm; inst; },                                                              // exit
+      [](machine * vm, instruction const * inst) { vm; inst; },                                                              // noop
+      [](machine * vm, instruction const * inst) { op::load(vm, inst->load); },                                  // load
+      [](machine * vm, instruction const * inst) { op::load_addr(vm, inst->load_addr); },                            // load_addr
+      [](machine * vm, instruction const * inst) { op::load_offset(vm, inst->load_offset); },                            // load_offset
+      [](machine * vm, instruction const * inst) { op::store(vm, inst->store); },                                  // store
+      [](machine * vm, instruction const * inst) { op::store_addr(vm, inst->store_addr); },                            // store_addr
+      [](machine * vm, instruction const * inst) { op::store_offset(vm, inst->store_offset); },                            // store_offset
+      [](machine * vm, instruction const * inst) { op::store_value(vm, inst->store_value); },                            // store_value
+      [](machine * vm, instruction const * inst) { op::store_value_addr(vm, inst->store_value_addr); },               // store_value_addr
+      [](machine * vm, instruction const * inst) { op::store_value_offset(vm, inst->store_value_offset); },               // store_value_offset
+      [](machine * vm, instruction const * inst) { op::set(vm, inst->set); },                                     // set
+      [](machine * vm, instruction const * inst) { op::add_i64(vm, inst->add); },                                    // add_i64
+      [](machine * vm, instruction const * inst) { op::add_i64_constant(vm, inst->add_constant); },               // add_i64_constant
+      [](machine * vm, instruction const * inst) { op::add_f64(vm, inst->add); },                               // add_f64
+      [](machine * vm, instruction const * inst) { op::sub_i64(vm, inst->sub); },                               // sub_i64
+      [](machine * vm, instruction const * inst) { op::sub_f64(vm, inst->sub); },                               // sub_f64
+      [](machine * vm, instruction const * inst) { op::mul_i64(vm, inst->mul); },                               // mul_i64
+      [](machine * vm, instruction const * inst) { op::mul_f64(vm, inst->mul); },                               // mul_f64
+      [](machine * vm, instruction const * inst) { op::div_i64(vm, inst->div); },                               // div_i64
+      [](machine * vm, instruction const * inst) { op::div_f64(vm, inst->div); },                               // div_f64
+      [](machine * vm, instruction const * inst) { op::alloc_stack(vm, inst->alloc_stack); },                   // alloc_stack
+      [](machine * vm, instruction const * inst) { op::free_stack(vm, inst->free_stack); },                     // free_stack
+      [](machine * vm, instruction const * inst) { op::push(vm, inst->push); },                                   // push
+      [](machine * vm, instruction const * inst) { op::pop(vm, inst->pop); },                                   // pop
+      [](machine * vm, instruction const * inst) { op::jump(vm, inst->jump); },                                   // jump
+      [](machine * vm, instruction const * inst) { op::jump_relative(vm, inst->jump_relative); },               // jump_relative
+      [](machine * vm, instruction const * inst) { op::jump_indirect(vm, inst->jump_indirect); },               // jump_indirect
+      [](machine * vm, instruction const * inst) { op::move(vm, inst->move); },                              // move
+      [](machine * vm, instruction const * inst) { op::compare_i64(vm, inst->compare); },                       // compare_i64
+      [](machine * vm, instruction const * inst) { op::compare_f64(vm, inst->compare); },                       // compare_f64
+      [](machine * vm, instruction const * inst) { op::conditional_jump(vm, inst->conditional_jump); },               // conditional_jump
+      [](machine * vm, instruction const * inst) { op::conditional_move(vm, inst->conditional_move); },               // conditional_move
+      [](machine * vm, instruction const * inst) { op::call(vm, inst->call); },                                // call
+      [](machine * vm, instruction const * inst) { op::call_indirect(vm, inst->call_indirect); },               // call_indirect
+      [](machine * vm, instruction const * inst) { op::ret(vm, inst->ret); },                                 // ret
+    };
 
     void* compile_call_handle(machine * vm, program_symbol_table_entry const & symbol) {
       compiler::program_builder stub;
@@ -455,6 +390,10 @@ namespace adder {
       return ret;
     }
 
+    void free(machine * vm, void* ptr) {
+      vm->heap_allocator->free(ptr);
+    }
+
     void call(machine* vm, void* handle)
     {
       // Set program counter to the entry point.
@@ -462,6 +401,7 @@ namespace adder {
 
 #ifdef AD_PRINT_VM_STATE
       int64_t step = 0;
+      instruction const* pInstruction = nullptr;
       do
       {
         int i = 0;
@@ -469,40 +409,34 @@ namespace adder {
           std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.d64 << "]" << std::endl;
 
         std::cout << "\nStack:\n";
-        for (int p = 0; p < vm->stack.size; ++p)
+        for (uint8_t* p = vm->stack.base; p < vm->registers[vm::register_names::sp].data; ++p)
         {
-          if (p % 8 == 0)
+          if ((int64_t)p % 8 == 0)
           {
             std::cout << std::endl;
-            printf("[%lld]: ", (int64_t)(vm->stack.base + p));
+            printf("[%lld]: ", (int64_t)p);
           }
-          printf("0x%.2x ", vm->stack.base[p]);
+          printf("0x%.2x ", *p);
         }
         std::cout << "\n\n";
 
-        adder::vm::decode(vm);
+        AD_VM_DECODE(vm, pInstruction);
 
-        std::cout << "\nInstruction " << step << ": " << op_code_to_string(vm->next_instruction.code) << "\n";
+        std::cout << "\nInstruction " << step << ": " << op_code_to_string(pInstruction->code) << "\n";
 
-        if (!adder::vm::execute(vm))
-        {
-          if (vm->next_instruction.code == adder::vm::op_code::exit)
-            std::cout << "Finished call\n";
-          else
-            std::cout << "Failed\n";
-          break;
-        }
-
+        AD_VM_EXECUTE(vm, pInstruction);
         ++step;
-      } while (true);
+      } while (pInstruction->code != op_code::exit);
+
+      std::cout << "Finished call\n";
 #else
-      while (true)
+      instruction const* pInstruction = nullptr;
+      do
       {
-        bool ok = adder::vm::decode(vm);
-        ok = ok && adder::vm::execute(vm);
-        if (!ok || vm->next_instruction.code == adder::vm::op_code::exit)
-          break;
-      }
+        pInstruction = (instruction const *)vm->registers[register_names::pc].ptr;
+        vm->registers[register_names::pc].u64 += sizeof(instruction);
+        instruction_table[(uint8_t)pInstruction->code](vm, pInstruction);
+      } while (pInstruction->code != op_code::exit);
 #endif
     }
   }

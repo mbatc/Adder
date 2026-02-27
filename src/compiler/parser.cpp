@@ -311,7 +311,7 @@ namespace adder {
         return true;
       }
 
-      bool consume_function_body(ast * tree, block * body, lexer::token_parser * tokenizer) {
+      bool consume_function_body(ast * tree, std::string_view const & scopeName, std::optional<size_t> * body, lexer::token_parser * tokenizer) {
         lexer::token_view token;
         if (!tokenizer->
           parse(rules::or(
@@ -321,21 +321,25 @@ namespace adder {
           return false;
 
         if (token.id == lexer::token_id::open_brace) {
+          expr::block def;
           // Parse function body.
           while (tokenizer->current().id != lexer::token_id::close_brace) {
             std::optional<size_t> expression = consume_expression(tree, tokenizer);
             if (!expression.has_value())
               return false;
 
-            body->statements.push_back(expression.value());
+            def.statements.push_back(expression.value());
           }
+
+          def.scope_name = scopeName;
+          *body = tree->add(def);
 
           tokenizer->next();
         }
         return true;
       }
 
-      std::optional<size_t> add_function_declaration(ast * tree, std::string_view identifier, size_t returnType, std::vector<size_t> &&arguments, size_t bodyId, symbol_flags flags, functor_type funcType) {
+      std::optional<size_t> add_function_declaration(ast * tree, std::string_view identifier, size_t returnType, std::vector<size_t> &&arguments, std::optional<size_t> bodyId, symbol_flags flags, functor_type funcType) {
         type_fn type;
         type.return_type = returnType;
         type.func_type = funcType;
@@ -376,21 +380,16 @@ namespace adder {
           returnType = consume_type_expression(tree, tokenizer);
         }
 
-        block body;
-        body.scope_name = std::string(name.name);
-        if (!consume_function_body(tree, &body, tokenizer))
-          return std::nullopt;
-
         if (!returnType.has_value()) {
           // TODO: Infer return type from body.
           return false;
         }
 
-        // if (!returnType.has_value()) {
-        //   returnType = infer_return_type(body.statements);
-        // }
+        std::optional<size_t> body;
+        if (!consume_function_body(tree, name.name, &body, tokenizer))
+          return std::nullopt;
 
-        return add_function_declaration(tree, name.name, returnType.value(), std::move(arguments), tree->add(std::move(body)), flags, funcType);
+        return add_function_declaration(tree, name.name, returnType.value(), std::move(arguments), body, flags, funcType);
       }
 
       std::optional<size_t> consume_fn(ast * tree, lexer::token_parser * tokenizer, functor_type funcType, symbol_flags flags) {
@@ -564,16 +563,15 @@ namespace adder {
         if (!consume_function_parameter_list(tree, &arguments, tokenizer))
           return std::nullopt;
 
-        block body;
-        body.scope_name = std::string(name.name);
-        if (!consume_function_body(tree, &body, tokenizer))
+        std::optional<size_t> body;
+        if (!consume_function_body(tree, name.name, &body, tokenizer))
           return std::nullopt;
 
         expr::type_name ret;
         ret.name = "void";
         size_t returnType = tree->add(ret);
 
-        return add_function_declaration(tree, name.name, returnType, std::move(arguments), tree->add(std::move(body)), flags, functor_type::initializer);
+        return add_function_declaration(tree, name.name, returnType, std::move(arguments), body, flags, functor_type::initializer);
       }
 
       std::optional<size_t> consume_class(ast * tree, lexer::token_parser * tokenizer) {

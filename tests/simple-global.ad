@@ -1,7 +1,6 @@
 
-let my_global: int64 = 0;
+const test_result: int64 = 1234;
 
 fn main() => void {
-  const amount: int64 = my_global + 10;
-  my_global = amount;
+  // Do nothing
 }

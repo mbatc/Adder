@@ -263,79 +263,6 @@ namespace adder {
       void   free(void * ptr);
     };
 
-    struct stack {
-      stack(allocator* allocator)
-      : allocator(allocator) {}
-
-      /// Push data to the stack
-      void * push(void const * data, size_t bytes) {
-        void* ptr = allocate(bytes);
-        memcpy(ptr, data, bytes);
-        return ptr;
-      }
-
-      void * pop(void * dst, size_t bytes) {
-        memcpy(dst, end() - bytes, bytes);
-        return free(bytes);
-      }
-
-      /// Pop data from the stack
-      void * free(size_t bytes) {
-        size -= bytes;
-        return base + size;
-      }
-
-      /// Allocate data on the stack.
-      void * allocate(size_t bytes) {
-        size_t newSize = size + bytes;
-        if (newSize > capacity && !grow(newSize)) {
-          return nullptr;
-        }
-
-        void* ptr = base + size;
-        size = newSize;
-        return ptr;
-      }
-
-      uint8_t* begin() { return base; }
-      uint8_t* end() { return begin() + size; }
-      uint8_t const * begin() const { return base; }
-      uint8_t const * end() const { return begin() + size; }
-
-      bool grow(size_t requiredCapacity) {
-        if (requiredCapacity <= capacity)
-          return true;
-
-        size_t newCapacity = capacity;
-        while (requiredCapacity > newCapacity)
-          newCapacity = std::max(2ull, newCapacity * 2);
-
-        return reserve(newCapacity);
-      }
-
-      bool reserve(size_t newCapacity) {
-        if (newCapacity <= capacity) {
-          return true;
-        }
-
-        uint8_t * newData = (uint8_t*)allocator->allocate(newCapacity);
-        if (newData == nullptr) {
-          return false;
-        }
-
-        memcpy(newData, base, size);
-        allocator->free(base);
-        base = newData;
-        capacity = newCapacity;
-        return true;
-      }
-
-      uint8_t * base = nullptr;
-      uint64_t size = 0;
-      uint64_t capacity = 0;
-      allocator * allocator = nullptr;
-    };
-
     struct register_names {
       enum {
         r0, ///< General IO 0
@@ -358,11 +285,12 @@ namespace adder {
 
     struct machine {
       machine(allocator *allocator)
-        : heap_allocator(allocator)
-        , stack(allocator) {
-        stack.reserve(4 * 1024 * 1024); // 4mb
+        : heap_allocator(allocator) {
+        const size_t initialStackSize = 4 * 1024 * 1024; // 4mb
+        stack.base = (uint8_t*)heap_allocator->allocate(initialStackSize);
+        stack.end  = stack.base + initialStackSize;
         memset(registers, 0, sizeof(registers));
-        memset(&next_instruction, 0, sizeof(next_instruction));
+
         registers[register_names::pc].u64 = 0;
         registers[register_names::fp].ptr = registers[register_names::sp].ptr = stack.base;
       }
@@ -380,30 +308,30 @@ namespace adder {
         return registers[register_names::pc].u64;
       }
 
-      instruction next_instruction;
+      struct {
+        uint8_t * base = nullptr;
+        uint8_t * end  = nullptr;
+      } stack;
 
       allocator * heap_allocator = nullptr;
-      stack       stack;
     };
 
-    bool decode(machine * vm);
     void relocate_program(program_view const & program);
     const_program_view load_program(machine * vm, program_view const& program, bool relocated = true);
-    bool execute(machine * vm);
-    bool step(machine *vm);
 
     /// Call handle should include metadata for the symbol return/parameter types.
     /// `call` should take a callback used to initialize parameters and receive the return value
     ///   e.g. typedef (*CallParameterInitializer)(void * ptr, int position, type * type, void *userdata);
     ///        typedef (*ReturnValueHandler)(void const * ptr, type * type, void *userdata);
     void* compile_call_handle(machine* vm, program_symbol_table_entry const & symbol);
-
+    void free(machine* vm, void * ptr);
     void call(machine* vm, void * handle);
   }
 
   inline static std::string op_code_to_string(vm::op_code op) {
     switch (op) {
       case adder::vm::op_code::exit: return "exit";                             ///< Stop program execution
+      case adder::vm::op_code::noop: return "no-op";                            ///< No op
       case adder::vm::op_code::load: return "load";                             ///< Load a value from a memory address
       case adder::vm::op_code::load_addr: return "load_addr";                   ///< Load a value from a constant address
       case adder::vm::op_code::load_offset: return "load_offset";               ///< Load a value from an address (stored in a register) with some offset

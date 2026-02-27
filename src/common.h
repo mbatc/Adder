@@ -40,6 +40,10 @@ namespace adder {
         insert(dst, *it);
       }
     }
+
+    inline size_t calc_align_padding(size_t const& alignment, size_t const& offset) {
+      return (alignment - (offset % alignment)) % alignment;
+    }
   }
 
   template<typename... Args>

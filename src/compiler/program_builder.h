@@ -234,9 +234,9 @@ namespace adder {
       struct function {
         inline static constexpr int64_t CallLinkStorageSize = sizeof(vm::register_value) * 2;
 
-        size_t symbol;
-        size_t scope_id;
-        size_t return_type;
+        size_t symbol = 0;
+        size_t scope_id = 0;
+        size_t return_type = 0;
 
         size_t args_size = 0;         ///< Size of the function parameters.
         // size_t arg_count = 0;         ///< Number of arguments to this function.
@@ -276,6 +276,7 @@ namespace adder {
 
       bool begin_function(size_t symbol);
       void end_function();
+      void end_function(function *func);
       function & current_function();
 
       bool begin_scope();

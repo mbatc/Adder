@@ -1,0 +1,6 @@
+
+let test_result: int64 = 1234;
+
+fn main() => void {
+  test_result = 1; // Test should read test_result and assert it is 1
+}

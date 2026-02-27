@@ -356,6 +356,9 @@ namespace adder {
           return false;
         if (get_functor_type(sym.type) != functor_type::operator_)
           return false;
+
+        assert(false && "TODO: Need to handle invoke fn with reference parameter");
+
         size_t const types[2] = { lhsType, rhsType };
         auto score = get_parameter_list_score(scopeId, sym.type, types, 2);
 
@@ -869,20 +872,24 @@ namespace adder {
 
     void program_builder::end_function() {
       auto & func = current_function();
+      end_function(&func);
+      function_stack.pop_back();
+    }
 
+    void program_builder::end_function(function* func) {
       // Process instruction tags
-      for (size_t i = 0; i < func.instructions.size(); ++i) {
-        auto& op = func.instructions[i];
-        auto& tag = func.instruction_tags[i];
+      for (size_t i = 0; i < func->instructions.size(); ++i) {
+        auto& op = func->instructions[i];
+        auto& tag = func->instruction_tags[i];
         switch (tag) {
         case instruction_tag::return_jmp: {
           // Jump to return statement
           assert(op.code == vm::op_code::jump_relative && "invalid op code tagged with instruction_tag::return_jmp");
-          op.jump_relative.offset = (func.return_section_start - i) * sizeof(vm::instruction);
+          op.jump_relative.offset = (func->return_section_start - i) * sizeof(vm::instruction);
           break;
         }
         case instruction_tag::stack_frame: {
-          uint32_t allocSize = (uint32_t)(func.max_stack_storage + func.max_temp_storage);
+          uint32_t allocSize = (uint32_t)(func->max_stack_storage + func->max_temp_storage);
           switch (op.code) {
           case vm::op_code::alloc_stack:
             if (allocSize != 0)
@@ -906,19 +913,19 @@ namespace adder {
           // Temporary storage is allocated after stack storage
           switch (op.code) {
           case vm::op_code::add_i64_constant:
-            op.add_constant.rhs += func.max_stack_storage;
+            op.add_constant.rhs += func->max_stack_storage;
             break;
           case vm::op_code::set:
-            op.set.val += func.max_stack_storage;
+            op.set.val += func->max_stack_storage;
             break;
           case vm::op_code::load_offset:
-            op.load_offset.offset += func.max_stack_storage;
+            op.load_offset.offset += func->max_stack_storage;
             break;
           case vm::op_code::store_offset:
-            op.store_offset.offset += func.max_stack_storage;
+            op.store_offset.offset += func->max_stack_storage;
             break;
           case vm::op_code::store_value_offset:
-            op.store_value_offset.offset += func.max_stack_storage;
+            op.store_value_offset.offset += func->max_stack_storage;
             break;
           default:
             assert(false && "invalid op code tagged with instruction_tag::add_temporary_storage_offset");
@@ -934,8 +941,6 @@ namespace adder {
           break;
         }
       }
-
-      function_stack.pop_back();
     }
 
     program_builder::function& program_builder::current_function() {
@@ -1054,6 +1059,17 @@ namespace adder {
     void program_builder::alloc_stack(size_t bytes) {
       if (bytes == 0)
         return;
+
+      // Just amend previous instruction if it was also an "alloc"
+      // TODO: We need to know that "this" instruction won't be tagged either.
+      //       Probably need to pass the tag into alloc_stack
+      // auto & func = current_function();
+      // if (!func.instructions.empty()
+      //   && func.instructions.back().code == vm::op_code::alloc_stack
+      //   && func.instruction_tags.back() == instruction_tag::none) {
+      //   func.instructions.back().alloc_stack.bytes +=  (uint32_t)bytes;
+      //   return;
+      // }
       
       vm::instruction op;
       op.code = vm::op_code::alloc_stack;
@@ -1064,6 +1080,17 @@ namespace adder {
     void program_builder::free_stack(size_t bytes) {
       if (bytes == 0)
         return;
+
+      // Just amend previous instruction if it was also a "free"
+      // TODO: We need to know that "this" instruction won't be tagged either.
+      //       Probably need to pass the tag into free_stack
+      // auto & func = current_function();
+      // if (!func.instructions.empty()
+      //   && func.instructions.back().code == vm::op_code::free_stack
+      //   && func.instruction_tags.back() == instruction_tag::none) {
+      //   func.instructions.back().free_stack.bytes += (uint32_t)bytes;
+      //   return;
+      // }
 
       vm::instruction op;
       op.code = vm::op_code::free_stack;
@@ -1475,31 +1502,23 @@ namespace adder {
     }
 
     void program_builder::add_instruction(vm::instruction inst) {
-      assert(function_stack.size() > 0);
-
-      auto& func = functions[function_stack.back()];
+      auto& func = current_function();
       func.instructions.push_back(inst);
       func.instruction_tags.push_back(instruction_tag::none);
     }
 
     void program_builder::set_instruction_tag(instruction_tag tag) {
-      assert(function_stack.size() > 0);
-      auto& func = functions[function_stack.back()];
-
+      auto& func = current_function();
       assert(func.instruction_tags.size() > 0);
       func.instruction_tags.back() = tag;
     }
 
     program program_builder::binary() const {
       // Compiled Program Layout
-      // header
-      //  * public_symbol_count: uint64_t
-      //  * extern_symbol_count: uint64_t
-      //  * symbol_data_size:    uint64_t
-      //  * program_data_size:   uint64_t
-      //  * code_size:           uint64_t
+      // header: see program_header
       // public_symbol_table[]
       // extern_symbol_table[]
+      // relocation_table[]
       // symbol_data
       // program_data
       // code
@@ -1520,9 +1539,11 @@ namespace adder {
 
       std::vector<program_symbol_table_entry> publicSymbols;
       std::vector<program_symbol_table_entry> externSymbols;
+      std::vector<uint8_t> relocationTable;
       std::vector<uint8_t> symbolData;
       std::vector<uint8_t> programData;
       std::map<std::string_view, uint64_t> symbolAddress;
+      std::map<std::string_view, uint64_t> symbolIndices;
       
       std::vector<vm::instruction> compiledCode;
       std::vector<uint64_t> functionOffset;
@@ -1544,6 +1565,7 @@ namespace adder {
           // TODO: For variable, lookup address via host.
           //       For function, generate code to call native method.
           item.data_address = 0;
+          symbolIndices[symbol.full_identifier] = externSymbols.size();
           externSymbols.push_back(item);
         }
         else {
@@ -1562,31 +1584,65 @@ namespace adder {
             // TODO: alignas(bytes)
             item.data_address = symbolData.size();
             symbolData.resize(symbolData.size() + bytes, 0);
+
           }
+          symbolIndices[symbol.full_identifier] = publicSymbols.size();
           publicSymbols.push_back(item);
         }
       }
-      
+
+      for (auto& symbol : meta.symbols) {
+        const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
+        const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
+        if (symbol.has_local_storage() || symbol.is_parameter() || isInline || !isExtern) {
+          continue;
+        }
+        symbolIndices[symbol.full_identifier] += publicSymbols.size();
+      }
+
+      {
+        std::map<std::string_view, std::vector<size_t>> reloc_table;
+        for (auto& reloc : relocations) {
+          const auto& func = meta.symbols[functions[reloc.function_id].symbol];
+          reloc_table[reloc.symbol].push_back(symbolAddress[func.full_identifier] + reloc.offset);
+        }
+
+        for (auto& [name, offsets] : reloc_table) {
+          program_relocation_table_entry entry;
+          entry.symbol = symbolIndices[name];
+          entry.count = offsets.size();
+          bytes::insert(relocationTable, entry);
+          for (auto & address : offsets)
+            bytes::insert(relocationTable, address);
+        }
+      }
+
       header.header_size = sizeof(program_header);
       
       header.public_symbol_count  = publicSymbols.size();
       header.public_symbol_offset = header.header_size;
-      
+      header.public_symbol_offset += bytes::calc_align_padding(alignof(program_symbol_table_entry), header.public_symbol_offset);
+
       header.extern_symbol_count  = externSymbols.size();
       header.extern_symbol_offset = header.public_symbol_offset
         + header.public_symbol_count * sizeof(program_symbol_table_entry);
-      
-      header.symbol_data_size = symbolData.size();
-      header.symbol_data_offset = header.extern_symbol_offset
+      header.extern_symbol_offset += bytes::calc_align_padding(alignof(program_symbol_table_entry), header.public_symbol_offset);
+
+      header.relocation_table_size = relocationTable.size();
+      header.relocation_table_offset = header.extern_symbol_offset
         + header.extern_symbol_count * sizeof(program_symbol_table_entry);
-      
+
+      header.symbol_data_size = symbolData.size();
+      header.symbol_data_offset = header.relocation_table_offset + header.relocation_table_size;
+
       header.program_data_size   = 0;
       header.program_data_offset = header.symbol_data_offset + header.symbol_data_size;
       
-      // TODO: alignas(vm::instruction)
-      header.code_offset = header.program_data_offset + header.program_data_size;
-      header.code_size   = compiledCode.size() * sizeof(vm::instruction);
-      
+      header.code_offset  = header.program_data_offset + header.program_data_size;
+      header.code_offset += bytes::calc_align_padding(alignof(vm::instruction), header.code_offset);
+      header.code_size    = compiledCode.size() * sizeof(vm::instruction);
+
+      // Patch initializer entry
       int64_t nextPublicEntry = 0;
       int64_t nextExternEntry = 0;
       for (auto & symbol : meta.symbols) {
@@ -1598,7 +1654,6 @@ namespace adder {
         const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
         if (isExtern) {
           externSymbols[nextExternEntry].name_address += header.symbol_data_offset;
-      
           ++nextExternEntry;
         }
         else {
@@ -1615,52 +1670,22 @@ namespace adder {
           ++nextPublicEntry;
         }
       }
-      
+
       std::vector<uint8_t> executable;
       bytes::insert(executable, header);
+      executable.resize(header.public_symbol_offset, 0);
       bytes::insert(executable, publicSymbols.begin(), publicSymbols.end());
+      executable.resize(header.extern_symbol_offset, 0);
       bytes::insert(executable, externSymbols.begin(), externSymbols.end());
+      executable.resize(header.relocation_table_offset, 0);
+      bytes::insert(executable, relocationTable.begin(), relocationTable.end());
+      executable.resize(header.symbol_data_offset, 0);
       bytes::insert(executable, symbolData.begin(), symbolData.end());
+      executable.resize(header.program_data_offset, 0);
       bytes::insert(executable, programData.begin(), programData.end());
+      executable.resize(header.code_offset, 0);
       bytes::insert(executable, compiledCode.begin(), compiledCode.end());
-      
-      nextPublicEntry = 0;
-      nextExternEntry = 0;
-      
-      for (auto& reloc : relocations) {
-        const auto& func = meta.symbols[functions[reloc.function_id].symbol];
-        memcpy(
-          executable.data() + symbolAddress[func.full_identifier] + reloc.offset,
-          &symbolAddress[reloc.symbol],
-          sizeof(vm::address_t)
-        );
-      }
 
-      // TODO: Below seems to be more efficient.
-      //       Could be nice to get back to this impl by refactoring code and relocation storage a little.
-
-      // for (auto & symbol : meta.symbols) {
-      //   const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
-      //   if (isExtern)
-      //     continue;
-      // 
-      //   if (meta.is_function(symbol.type)) {
-      //     auto& func = functions[symbol.function_index.value()];
-      //     
-      //     for (size_t reloc = symbol.function->relocation_start; reloc < symbol.function->relocation_end; ++reloc) {
-      //       auto& [name, offset] = relocations[reloc];
-      // 
-      //       uint64_t relativeOffset = offset - symbol.function->instruction_offset * sizeof(vm::instruction);
-      //       memcpy(
-      //         executable.data() + symbolAddress[symbol.name] + relativeOffset,
-      //         &symbolAddress[name],
-      //         sizeof(vm::address_t)
-      //       );
-      //     }
-      //   }
-      //   ++nextPublicEntry;
-      // }
-      
       return executable;
     }
 

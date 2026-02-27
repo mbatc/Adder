@@ -12,11 +12,11 @@ namespace adder {
           return false;
         }
 
-        std::optional<size_t> selfType = program->get_value_type(self.value());
-        // std::optional<size_t> argType = program->get_value_type(arg.value());
-        // if (!(program->meta.is_integer(program->meta.unwrap_type(selfType))
-        //   && program->meta.is_integer(argType)))
-        //   return false;
+        std::optional<size_t> selfType = program->meta.decay_type(program->get_value_type(self.value()));
+        std::optional<size_t> argType  = program->meta.decay_type(program->get_value_type(arg.value()));
+        if (!(program->meta.is_integer(selfType)
+          && program->meta.is_integer(argType)))
+          return false;
 
         const uint8_t sz = (uint8_t)program->meta.get_type_size(selfType.value());
         vm::register_index addr = program->load_value_of(self.value()); // self is a reference, so load the address it points to.
@@ -32,43 +32,34 @@ namespace adder {
         return true;
       }
 
-      bool init_int_float(program_builder * program) {
-        
-      }
+      // bool init_int_float(program_builder * program) {
+      //   
+      // }
 
       bool int_assign_int(program_builder * program) {
-        // vm::register_index lhs  = program->load_value_of(a.value());
-        // vm::register_index rhs  = program->load_value_of(b.value());
-        // vm::register_index addr = program->load_address_of(ret);
-        // program->addi(lhs, lhs, rhs);
-        // program->store(lhs, addr, (uint8_t)sz);
-        // 
-        // program->release_register(addr);
-        // program->release_register(rhs);
-        // program->release_register(lhs);
-      }
-
-      bool add_int_int(program_builder * program) {
-        auto a = program->find_value_by_identifier("a");
-        auto b = program->find_value_by_identifier("b");
+        auto const a = program->find_value_by_identifier("a");
+        auto const b = program->find_value_by_identifier("b");
         if (!a.has_value() || !b.has_value()) {
           return false;
         }
 
-        auto ret = program->get_return_value();
-        // if (a->constant.has_value() && b->constant.has_value()) {
-        //   const uint8_t sz = (uint8_t)program->meta.get_type_size(addr);
-        //   program->store_constant(a->constant.value() + b->constant.value(), addr, sz);
-        // }
+        auto const ret = program->get_return_value();
+        std::optional<size_t> retType = program->meta.decay_type(program->get_value_type(ret));
+        std::optional<size_t> lhsType = program->meta.decay_type(program->get_value_type(a.value()));
+        std::optional<size_t> rhsType  = program->meta.decay_type(program->get_value_type(b.value()));
+        if (!(program->meta.is_integer(retType)
+          && program->meta.is_integer(lhsType)
+          && program->meta.is_integer(rhsType)))
+          return false;
 
-        // Could abstract 'register_index' with 'register/instruction_operand' 
-        // This might store a register index + optional offset along with if it is indirect or not.
-        size_t sz = program->meta.get_type_size(a->type_index.value());
-        vm::register_index lhs  = program->load_value_of(a.value());
-        vm::register_index rhs  = program->load_value_of(b.value());
-        vm::register_index addr = program->load_address_of(ret);
-        program->addi(lhs, lhs, rhs);
-        program->store(lhs, addr, (uint8_t)sz);
+        vm::register_index lhs  = program->load_value_of(a.value()); // Load address of ref
+        vm::register_index rhs  = program->load_value_of(b.value()); // Load value of rhs
+        vm::register_index addr = program->load_address_of(ret);     // Load a
+
+        const uint8_t sz = (uint8_t)program->meta.get_type_size(lhsType.value());
+
+        program->store(rhs, lhs, sz);
+        program->store(lhs, addr, sizeof(vm::address_t)); // Init reference
 
         program->release_register(addr);
         program->release_register(rhs);
@@ -76,25 +67,82 @@ namespace adder {
         return true;
       }
 
-      bool eq_int_int(program_builder * program) {
+      bool op_int_int(program_builder * program, expr::operator_type op) {
+        auto const a = program->find_value_by_identifier("a");
+        auto const b = program->find_value_by_identifier("b");
+        if (!a.has_value() || !b.has_value()) {
+          return false;
+        }
 
+        auto const ret = program->get_return_value();
+        // if (a->constant.has_value() && b->constant.has_value()) {
+        //   const uint8_t sz = (uint8_t)program->meta.get_type_size(addr);
+        //   program->store_constant(a->constant.value() + b->constant.value(), addr, sz);
+        // }
+
+        // Could abstract 'register_index' with 'register/instruction_operand' 
+        // This might store a register index + optional offset along with if it is indirect or not.
+        size_t const sz = program->meta.get_type_size(a->type_index.value());
+        vm::register_index const lhs  = program->load_value_of(a.value());
+        vm::register_index const rhs  = program->load_value_of(b.value());
+        vm::register_index const addr = program->load_address_of(ret);
+        switch (op)
+        {
+        case expr::operator_type::add:
+          program->addi(lhs, lhs, rhs);
+          break;
+        case expr::operator_type::minus:
+          program->subi(lhs, lhs, rhs);
+          break;
+        case expr::operator_type::multiply:
+          program->muli(lhs, lhs, rhs);
+          break;
+        case expr::operator_type::divide:
+          program->divi(lhs, lhs, rhs);
+          break;
+        }
+        program->store(lhs, addr, (uint8_t)sz);
+        program->release_register(addr);
+        program->release_register(rhs);
+        program->release_register(lhs);
+        return true;
       }
 
-      bool gt_int_int(program_builder * program) {
-
+      bool add_int_int(program_builder * program) {
+        return op_int_int(program, expr::operator_type::add);
       }
 
-      bool lt_int_int(program_builder * program) {
-
+      bool sub_int_int(program_builder * program) {
+        return op_int_int(program, expr::operator_type::minus);
       }
 
-      bool le_int_int(program_builder * program) {
-
+      bool mul_int_int(program_builder * program) {
+        return op_int_int(program, expr::operator_type::multiply);
       }
 
-      bool ge_int_int(program_builder * program) {
-
+      bool div_int_int(program_builder * program) {
+        return op_int_int(program, expr::operator_type::divide);
       }
+
+      // bool eq_int_int(program_builder * program) {
+      // 
+      // }
+      // 
+      // bool gt_int_int(program_builder * program) {
+      // 
+      // }
+      // 
+      // bool lt_int_int(program_builder * program) {
+      // 
+      // }
+      // 
+      // bool le_int_int(program_builder * program) {
+      // 
+      // }
+      // 
+      // bool ge_int_int(program_builder * program) {
+      // 
+      // }
     }
 
     struct parameter_desc {
@@ -124,28 +172,31 @@ namespace adder {
       expr::type_fn fnType;
       for (auto& arg : func.args) {
         auto argType = declare_type(tree, arg.type);
-        decl.arguments.push_back(argType);
+        fnType.argument_list.push_back(argType);
 
-        expr::variable_declaration decl;
-        decl.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
-        decl.name = arg.name;
-        decl.type = argType;
-        fnType.argument_list.push_back(tree->add(decl));
+        expr::variable_declaration varDecl;
+        varDecl.flags = symbol_flags::const_ | symbol_flags::fn_parameter;
+        varDecl.name = arg.name;
+        varDecl.type = argType;
+        decl.arguments.push_back(tree->add(varDecl));
+
       }
       fnType.return_type = declare_type(tree, func.return_type);
       fnType.func_type   = func.flavour;
 
-      expr::byte_code code;
-      code.callback = func.bytecode;
-
       decl.identifier = func.identifier;
-      decl.flags      = symbol_flags::inline_;
       decl.type       = tree->add(fnType);
-      decl.body       = tree->add(code);
+
+      if (func.bytecode != nullptr) {
+        expr::byte_code code;
+        code.callback = func.bytecode;
+        decl.body     = tree->add(code);
+        decl.flags    = symbol_flags::inline_;
+      }
+
+      return tree->add(decl);
     }
 
-    size_t init_int(ast* tree, size_t refType, std::string_view const & argType) {
-    }
     size_t declare_initializer(ast* tree, size_t selfType, std::variant<size_t, std::string_view> argType, bool (*bytecode)(program_builder*)) {
       return declare_func(tree, {
         functor_type::initializer,
@@ -158,20 +209,21 @@ namespace adder {
       });
     }
 
-    size_t declare_binary_operator(ast* tree, expr::operator_type op, size_t valueType, bool (*bytecode)(program_builder*)) {
+    size_t declare_binary_operator(ast* tree, expr::operator_type op, size_t retType, size_t lhsType, size_t rhsType, bool (*bytecode)(program_builder*)) {
       return declare_func(tree, {
         functor_type::operator_,
         expr::get_operator_identifer(op),
-        valueType,
+        retType,
         {
-          { "a", valueType },
-          { "b", valueType },
+          { "a", lhsType },
+          { "b", rhsType },
         },
         bytecode
       });
     }
-
-    size_t add_int(ast* tree, size_t valueType) {
+    
+    size_t declare_binary_operator(ast* tree, expr::operator_type op, size_t valueType, bool (*bytecode)(program_builder*)) {
+      return declare_binary_operator(tree, op, valueType, valueType, valueType, bytecode);
     }
 
     void declare_integer(ast* tree, expr::block *scope, type_primitive primitive) {
@@ -188,22 +240,39 @@ namespace adder {
       scope->statements.insert(
         scope->statements.end(),
         {
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int64), builtin::init_int_int),
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int32), builtin::init_int_int),
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int16), builtin::init_int_int),
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int8), builtin::init_int_int),
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint64), builtin::init_int_int),
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint32), builtin::init_int_int),
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint16), builtin::init_int_int),
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint8), builtin::init_int_int),
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float32), builtin::init_int_float),
-          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float64), builtin::init_int_float),
-          declare_binary_operator(tree, expr::operator_type::add, valueType, builtin::add_int_int)
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int64),   builtin::init_int_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int32),   builtin::init_int_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int16),   builtin::init_int_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int8),    builtin::init_int_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint64),  builtin::init_int_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint32),  builtin::init_int_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint16),  builtin::init_int_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint8),   builtin::init_int_int),
+
+          // declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float32), builtin::init_int_float),
+          // declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float64), builtin::init_int_float),
+
+          declare_binary_operator(tree, expr::operator_type::assign,   refType, refType, valueType, builtin::int_assign_int),
+          declare_binary_operator(tree, expr::operator_type::add,      valueType, builtin::add_int_int),
+          declare_binary_operator(tree, expr::operator_type::minus,    valueType, builtin::sub_int_int),
+          declare_binary_operator(tree, expr::operator_type::divide,   valueType, builtin::div_int_int),
+          declare_binary_operator(tree, expr::operator_type::multiply, valueType, builtin::mul_int_int)
         }
       );
     }
 
+    void declare_module_initializer() {
+
+    }
+
     void define_builtins(ast* tree, expr::block *scope) {
+      scope->statements.push_back(
+        declare_func(tree, { functor_type::free, "$module_init", "void", {}, nullptr })
+      );
+      scope->statements.push_back(
+        declare_func(tree, { functor_type::free, "$module_destroy", "void", {}, nullptr })
+      );
+
       declare_integer(tree, scope, type_primitive::int64);
       declare_integer(tree, scope, type_primitive::int32);
       declare_integer(tree, scope, type_primitive::int16);
