@@ -115,9 +115,10 @@ namespace adder {
       std::optional<size_t> get_type_index(ast const & tree, size_t statement) const;
       type const * get_type(ast const & tree, size_t statement) const;
 
-      std::optional<size_t> unwrap_type   (std::optional<size_t> const & type) const;
-      std::optional<size_t> decay_type    (std::optional<size_t> const & type) const;
-      std::optional<size_t> return_type_of(std::optional<size_t> const & func) const;
+      std::optional<size_t> unwrap_type     (std::optional<size_t> const & type) const;
+      std::optional<size_t> decay_type      (std::optional<size_t> const & type) const;
+      std::optional<size_t> remove_reference(std::optional<size_t> const & type) const;
+      std::optional<size_t> return_type_of  (std::optional<size_t> const & func) const;
 
       bool is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const;
       bool is_reference(std::optional<size_t> const & type) const;
@@ -339,6 +340,11 @@ namespace adder {
       void jump_to(uint64_t address);
       void jump_indirect(vm::register_index const & address);
       void jump_relative(int64_t offset);
+      
+      void comparei(vm::register_index dst, vm::register_index a, vm::register_index b);
+      void comparef(vm::register_index dst, vm::register_index a, vm::register_index b);
+      void conditional_move(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue);
+      void conditional_jump(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue);
 
       void push_return_pointer();
       void push_frame_pointer();

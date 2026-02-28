@@ -223,6 +223,7 @@ namespace adder {
       if (statement.initializer.has_value()) {
         const size_t count = program->value_stack.size();
         if (!generate_code(ast, program, statement.initializer.value())) {
+          printf("Error: failed to generate code for initializer statement of symbol '%s'\n", symbol.full_identifier.c_str());
           return false;
         }
 
@@ -231,6 +232,7 @@ namespace adder {
         auto initializer = program->pop_value();
         assert(initializer.has_value());
         if (!initialize_variable(ast, program, receiver, initializer.value())) {
+          printf("Error: failed initialize symbol '%s' from result of the initializer statement\n", symbol.full_identifier.c_str());
           return false;
         }
       }
@@ -326,15 +328,16 @@ namespace adder {
       }
       default: {
         auto callableSymbolIndex = program->meta.statement_info[statementId].symbol_index;
-        if (!callableSymbolIndex.has_value())
+        if (!callableSymbolIndex.has_value()) {
+          printf("Error: no suitable binary operator\n");
           return false;
-
+        }
 
         if (!(generate_code(ast, program, statement.right.value())
           && generate_code(ast, program, statement.left.value())))
           return false;
-        auto rhs = program->pop_value();
         auto lhs = program->pop_value();
+        auto rhs = program->pop_value();
 
         auto callableSymbol = program->meta.symbols[callableSymbolIndex.value()];
         program_builder::value function;
@@ -728,8 +731,10 @@ namespace adder {
       for (size_t statementId : scope.statements) {
         size_t temporaries = program->scopes.back().temporaries.size();
 
-        if (!generate_code(ast, program, statementId))
+        if (!generate_code(ast, program, statementId)) {
+          printf("Failed to generate code for statement: %lld\n", statementId);
           return false;
+        }
 
         // Destroy any dangling temporaries
         while (program->scopes.back().temporaries.size() > temporaries)
@@ -942,16 +947,31 @@ namespace adder {
         assert(op.left.has_value());
         assert(op.right.has_value());
         if (!(evaluate_symbols(ast, meta, op.left.value(), ctx) &&
-          evaluate_symbols(ast, meta, op.right.value(), ctx)))
+          evaluate_symbols(ast, meta, op.right.value(), ctx))) {
+          printf("Error: failed to evaluate symbols for binary operator operands\n");
           return false;
+        }
 
-        auto lhsType = meta->statement_info[op.left.value()].type_id;
-        auto rhsType = meta->statement_info[op.right.value()].type_id;
-        if (!(lhsType.has_value() && rhsType.has_value()))
+        const auto lhsType = meta->statement_info[op.left.value()].type_id;
+        const auto rhsType = meta->statement_info[op.right.value()].type_id;
+        if (!(lhsType.has_value() && rhsType.has_value())) {
+          printf("Error: type of binary operator operands could not be determined\n");
           return false;
-        auto symbol = meta->search_for_operator_symbol_index(ctx.scope_id, op.type_name, lhsType.value(), rhsType.value());
-        if (!symbol.has_value())
+        }
+        const auto symbol = meta->search_for_operator_symbol_index(ctx.scope_id, op.type_name, lhsType.value(), rhsType.value());
+        if (!symbol.has_value()) {
+          const auto opName = expr::get_operator_identifer(op.type_name);
+          const auto lhsName = meta->types[lhsType.value()].identifier;
+          const auto rhsName = meta->types[rhsType.value()].identifier;
+          
+          printf("Error: no suitable binary operator: op='%.*s', lhs='%.*s', rhs='%.*s'\n",
+            (int)opName.length(), opName.data(),
+            (int)lhsName.length(), lhsName.data(),
+            (int)rhsName.length(), rhsName.data()
+          );
+
           return false;
+        }
 
         meta->statement_info[id].symbol_index = symbol;
         meta->statement_info[id].type_id       = meta->return_type_of(meta->symbols[symbol.value()].type);
@@ -1129,12 +1149,14 @@ namespace adder {
       return true;
     }
 
-    program generate_code(ast const & ast) {
+    std::optional<program> generate_code(ast const & ast) {
       program_builder ret;
 
       ret.meta.statement_info.resize(ast.statements.size());
 
-      evaluate_symbols(ast, &ret.meta);
+      if (!evaluate_symbols(ast, &ret.meta)) {
+        return std::nullopt;
+      }
 
       auto moduleInit = ret.meta.find_symbol("()=>void:$module_init");
       assert(moduleInit.has_value() && "$module_init was not declared");
@@ -1150,7 +1172,7 @@ namespace adder {
       expr::block const & top = ast.get<expr::block>(ast.statements.size() - 1);
       for (size_t statementId : top.statements) {
         if (!generate_code(ast, &ret, statementId)) {
-          return program({});
+          return std::nullopt;
         }
       }
 
@@ -1165,13 +1187,14 @@ namespace adder {
     }
   }
 
-  program compile(std::string const & source) {
+  std::optional<program> compile(std::string const & source) {
     compiler::lexer::token_parser tokenizer(source);
     compiler::ast ast = compiler::parse(&tokenizer);
     if (!tokenizer.ok()) {
       for (auto & error : tokenizer.errors()) {
         printf("Error: %s\n", error.c_str());
       }
+      return std::nullopt;
     }
 
     return generate_code(ast);

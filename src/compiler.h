@@ -3,6 +3,7 @@
 #include <string_view>
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace adder {
   template<bool Const>
@@ -11,5 +12,5 @@ namespace adder {
   using program_view       = program_view_impl<false>;
   using const_program_view = program_view_impl<true>;
 
-  program compile(std::string const & source);
+  std::optional<program> compile(std::string const & source);
 }

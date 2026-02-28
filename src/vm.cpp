@@ -106,7 +106,7 @@ namespace adder {
         auto addr = publicSymbols[relocation->symbol].data_address;
         uint64_t const * offsets = (uint64_t const *)(relocation + 1);
         for (size_t i = 0; i < relocation->count; ++i) {
-          *(uint64_t*)(base + header.code_offset + offsets[i]) += addr;
+          *(uint64_t*)(base + offsets[i]) += addr;
         }
       }
     }
@@ -280,6 +280,34 @@ namespace adder {
         vm->registers[args.dst] = vm->registers[args.src];
       }
 
+      inline void bitwise_and(machine * vm, op_code_bitwise_op_args const & args) {
+        vm->registers[args.lhs].value &= vm->registers[args.rhs].value;
+      }
+
+      inline void bitwise_or(machine * vm, op_code_bitwise_op_args const & args) {
+        vm->registers[args.lhs].value |= vm->registers[args.rhs].value;
+      }
+
+      inline void bitwise_xor(machine * vm, op_code_bitwise_op_args const & args) {
+        vm->registers[args.lhs].value ^= vm->registers[args.rhs].value;
+      }
+
+      inline void bitwise_and_value(machine * vm, op_code_bitwise_op_constant_args const & args) {
+        vm->registers[args.reg].value &= args.val;
+      }
+
+      inline void bitwise_or_value(machine * vm, op_code_bitwise_op_constant_args const & args) {
+        vm->registers[args.reg].value |= args.val;
+      }
+
+      inline void bitwise_xor_value(machine * vm, op_code_bitwise_op_constant_args const & args) {
+        vm->registers[args.reg].value ^= args.val;
+      }
+
+      inline void set_non_zero(machine* vm, op_code_args<op_code::set_non_zero> const & args) {
+        vm->registers[args.dst].i64 = (int64_t)(vm->registers[args.dst].i64 == 0 ? args.if_zero : args.if_non_zero);
+      }
+
       inline void compare_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
@@ -357,6 +385,13 @@ namespace adder {
       [](machine * vm, instruction const * inst) { op::jump_relative(vm, inst->jump_relative); },               // jump_relative
       [](machine * vm, instruction const * inst) { op::jump_indirect(vm, inst->jump_indirect); },               // jump_indirect
       [](machine * vm, instruction const * inst) { op::move(vm, inst->move); },                              // move
+      [](machine * vm, instruction const * inst) { op::bitwise_and(vm, inst->bitwise_op); },                                                                                 // bitwise_and
+      [](machine * vm, instruction const * inst) { op::bitwise_or(vm, inst->bitwise_op); },                                                                                // bitwise_or
+      [](machine * vm, instruction const * inst) { op::bitwise_xor(vm, inst->bitwise_op); },                                                                                 // bitwise_xor
+      [](machine * vm, instruction const * inst) { op::bitwise_and_value(vm, inst->bitwise_op_constant); },                                                                                 // bitwise_and_value
+      [](machine * vm, instruction const * inst) { op::bitwise_or_value(vm, inst->bitwise_op_constant); },                                                                                // bitwise_or_value
+      [](machine * vm, instruction const * inst) { op::bitwise_xor_value(vm, inst->bitwise_op_constant); },                                                                                 // bitwise_xor_value
+      [](machine * vm, instruction const * inst) { op::set_non_zero(vm, inst->set_non_zero); },                                                                                // set_non_zero
       [](machine * vm, instruction const * inst) { op::compare_i64(vm, inst->compare); },                       // compare_i64
       [](machine * vm, instruction const * inst) { op::compare_f64(vm, inst->compare); },                       // compare_f64
       [](machine * vm, instruction const * inst) { op::conditional_jump(vm, inst->conditional_jump); },               // conditional_jump

@@ -40,11 +40,15 @@ int main(int argc, char ** argv) {
     printf("Compile and run: %s\n", file.c_str());
 
     auto result = adder::compile(source);
+    if (!result.has_value()) {
+      printf("! Failed to compile: %s\n", file.c_str());
+      continue;
+    }
 
     adder::vm::allocator allocator;
     adder::vm::machine vm(&allocator);
 
-    auto loaded = adder::vm::load_program(&vm, result.view());
+    auto loaded = adder::vm::load_program(&vm, result->view());
     auto mainSymbol = loaded.find_public_symbol("()=>void:main");
     if (mainSymbol == nullptr) {
       printf(" ! %s has no ()=>void:main symbol. Skipping\n", file.c_str());

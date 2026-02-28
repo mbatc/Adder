@@ -12,8 +12,8 @@ namespace adder {
           return false;
         }
 
-        std::optional<size_t> selfType = program->meta.decay_type(program->get_value_type(self.value()));
-        std::optional<size_t> argType  = program->meta.decay_type(program->get_value_type(arg.value()));
+        std::optional<size_t> selfType = program->meta.remove_reference(program->get_value_type(self.value()));
+        std::optional<size_t> argType  = program->meta.remove_reference(program->get_value_type(arg.value()));
         if (!(program->meta.is_integer(selfType)
           && program->meta.is_integer(argType)))
           return false;
@@ -44,9 +44,9 @@ namespace adder {
         }
 
         auto const ret = program->get_return_value();
-        std::optional<size_t> retType = program->meta.decay_type(program->get_value_type(ret));
-        std::optional<size_t> lhsType = program->meta.decay_type(program->get_value_type(a.value()));
-        std::optional<size_t> rhsType  = program->meta.decay_type(program->get_value_type(b.value()));
+        std::optional<size_t> retType = program->meta.remove_reference(program->get_value_type(ret));
+        std::optional<size_t> lhsType = program->meta.remove_reference(program->get_value_type(a.value()));
+        std::optional<size_t> rhsType  = program->meta.remove_reference(program->get_value_type(b.value()));
         if (!(program->meta.is_integer(retType)
           && program->meta.is_integer(lhsType)
           && program->meta.is_integer(rhsType)))
@@ -75,11 +75,6 @@ namespace adder {
         }
 
         auto const ret = program->get_return_value();
-        // if (a->constant.has_value() && b->constant.has_value()) {
-        //   const uint8_t sz = (uint8_t)program->meta.get_type_size(addr);
-        //   program->store_constant(a->constant.value() + b->constant.value(), addr, sz);
-        // }
-
         // Could abstract 'register_index' with 'register/instruction_operand' 
         // This might store a register index + optional offset along with if it is indirect or not.
         size_t const sz = program->meta.get_type_size(a->type_index.value());
@@ -124,10 +119,42 @@ namespace adder {
         return op_int_int(program, expr::operator_type::divide);
       }
 
-      // bool eq_int_int(program_builder * program) {
-      // 
-      // }
-      // 
+      bool cmp_int_int(program_builder* program) {
+        return true;
+      }
+
+      bool eq_int_int(program_builder * program) {
+        auto const a = program->find_value_by_identifier("a");
+        auto const b = program->find_value_by_identifier("b");
+        if (!a.has_value() || !b.has_value()) {
+          return false;
+        }
+        auto const ret = program->get_return_value();
+        std::optional<size_t> retType = program->meta.remove_reference(program->get_value_type(ret));
+        std::optional<size_t> lhsType = program->meta.remove_reference(program->get_value_type(a.value()));
+        std::optional<size_t> rhsType  = program->meta.remove_reference(program->get_value_type(b.value()));
+        if (!(program->meta.is_bool(retType)
+          && program->meta.is_integer(lhsType)
+          && program->meta.is_integer(rhsType)))
+          return false;
+
+        vm::register_index lhs       = program->load_value_of(a.value());
+        vm::register_index rhs       = program->load_value_of(b.value());
+        vm::register_index result    = program->pin_register();
+        program->comparei(result, lhs, rhs);
+        program->test(result, vm::cmp_eq_bit);
+        program->set_non_zero(result, 1, 0);
+
+        const uint8_t sz = (uint8_t)program->meta.get_type_size(lhsType.value());
+
+        program->store(result, lhs, sz);
+
+        program->release_register(addr);
+        program->release_register(rhs);
+        program->release_register(lhs);
+        return true;
+      }
+
       // bool gt_int_int(program_builder * program) {
       // 
       // }

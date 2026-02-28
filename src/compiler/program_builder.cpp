@@ -56,6 +56,21 @@ namespace adder {
       return type;
     }
 
+    std::optional<size_t> program_metadata::remove_reference(std::optional<size_t> const & type) const {
+      if (!type.has_value())
+        return std::nullopt;
+
+      const auto& desc = types[type.value()].desc;
+      if (std::holds_alternative<type_modifier>(desc)) {
+        const auto &modifier = std::get<type_modifier>(desc);
+        if (modifier.reference) {
+          return decay_type(modifier.base);
+        }
+      }
+
+      return type;
+    }
+
     std::optional<size_t> program_metadata::return_type_of(std::optional<size_t> const& func) const {
       if (!func.has_value())
         return std::nullopt;
@@ -357,7 +372,7 @@ namespace adder {
         if (get_functor_type(sym.type) != functor_type::operator_)
           return false;
 
-        assert(false && "TODO: Need to handle invoke fn with reference parameter");
+        // assert(false && "TODO: Need to handle invoke fn with reference parameter");
 
         size_t const types[2] = { lhsType, rhsType };
         auto score = get_parameter_list_score(scopeId, sym.type, types, 2);
@@ -401,6 +416,9 @@ namespace adder {
 
           auto& arg = signature->arguments[i++];
           if (param != arg) {
+            if (meta->is_reference_of(arg, param))
+              return true;
+
             auto initializer = meta->find_unnamed_initializer(scope_id, arg, param);
             if (!initializer.has_value())
               return false; // No conversion available
@@ -1039,6 +1057,43 @@ namespace adder {
       op.jump_relative.offset = offset;
       add_instruction(op);
     }
+    
+    void program_builder::comparei(vm::register_index dst, vm::register_index a, vm::register_index b) {
+      vm::instruction op;
+      op.code = vm::op_code::compare_i64;
+      op.compare.dst = dst;
+      op.compare.lhs = a;
+      op.compare.rhs = b;
+      add_instruction(op);
+    }
+
+    void program_builder::comparef(vm::register_index dst, vm::register_index a, vm::register_index b) {
+      vm::instruction op;
+      op.code = vm::op_code::compare_f64;
+      op.compare.dst = dst;
+      op.compare.lhs = a;
+      op.compare.rhs = b;
+      add_instruction(op);
+    }
+
+    void program_builder::conditional_move(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue) {
+      vm::instruction op;
+      op.code = vm::op_code::conditional_move;
+      op.conditional_move.dst = dst;
+      op.conditional_move.src = src;
+      op.conditional_move.cmp_reg = cmpReg;
+      op.conditional_move.cmp_val = cmpValue;
+      add_instruction(op);
+    }
+
+    void program_builder::conditional_jump(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue) {
+      vm::instruction op;
+      op.code = vm::op_code::conditional_jump;
+      op.conditional_jump.addr = dst;
+      op.conditional_jump.cmp_reg = cmpReg;
+      op.conditional_jump.cmp_val = cmpValue;
+      add_instruction(op);
+    }
 
     void program_builder::push_return_pointer() {
       push(vm::register_names::rp);
@@ -1600,22 +1655,27 @@ namespace adder {
         symbolIndices[symbol.full_identifier] += publicSymbols.size();
       }
 
-      {
+      static const auto write_relocations = [&]() { // 
         std::map<std::string_view, std::vector<size_t>> reloc_table;
         for (auto& reloc : relocations) {
           const auto& func = meta.symbols[functions[reloc.function_id].symbol];
           reloc_table[reloc.symbol].push_back(symbolAddress[func.full_identifier] + reloc.offset);
         }
 
+        relocationTable.clear();
         for (auto& [name, offsets] : reloc_table) {
           program_relocation_table_entry entry;
           entry.symbol = symbolIndices[name];
           entry.count = offsets.size();
           bytes::insert(relocationTable, entry);
-          for (auto & address : offsets)
+          for (auto& address : offsets)
             bytes::insert(relocationTable, address);
         }
-      }
+      };
+      
+      // Write relocation table so we know how big it is.
+      // Need to know this so we can write the correct offsets in the header and calculate symbol addresses correctly.
+      write_relocations();
 
       header.header_size = sizeof(program_header);
       
@@ -1628,11 +1688,11 @@ namespace adder {
         + header.public_symbol_count * sizeof(program_symbol_table_entry);
       header.extern_symbol_offset += bytes::calc_align_padding(alignof(program_symbol_table_entry), header.public_symbol_offset);
 
-      header.relocation_table_size = relocationTable.size();
+      header.relocation_table_size   = relocationTable.size();
       header.relocation_table_offset = header.extern_symbol_offset
         + header.extern_symbol_count * sizeof(program_symbol_table_entry);
 
-      header.symbol_data_size = symbolData.size();
+      header.symbol_data_size   = symbolData.size();
       header.symbol_data_offset = header.relocation_table_offset + header.relocation_table_size;
 
       header.program_data_size   = 0;
@@ -1670,7 +1730,11 @@ namespace adder {
           ++nextPublicEntry;
         }
       }
+      
+      // Now all the symbol addresses are final, write the final relocation table.
+      write_relocations();
 
+      // Assemble the program
       std::vector<uint8_t> executable;
       bytes::insert(executable, header);
       executable.resize(header.public_symbol_offset, 0);

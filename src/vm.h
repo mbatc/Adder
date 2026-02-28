@@ -47,6 +47,16 @@ namespace adder {
       jump_relative,      ///< Add a value to the program counter
       jump_indirect,      ///< Set the program counter to a value stored in a register
       move,               ///< Move a value from a register
+
+      bitwise_and,        ///< Perform a bitwise-and on two registers. Store the result in lhs
+      bitwise_or,         ///< Perform a bitwise-or on two registers. Store the result in lhs
+      bitwise_xor,        ///< Perform a bitwise-xor on two registers. Store the result in lhs
+      bitwise_and_value,  ///< Perform a bitwise-and on two registers. Store the result in lhs
+      bitwise_or_value,   ///< Perform a bitwise-or on two registers. Store the result in lhs
+      bitwise_xor_value,  ///< Perform a bitwise-xor on two registers. Store the result in lhs
+
+      set_non_zero,       ///< Load a value from a memory address
+      
       compare_i64,        ///< Compare the values in two registers as integers
       compare_f64,        ///< Compare the values in two registers as floats
       conditional_jump,   ///< Set the program counter if the specified comparison bits are set.
@@ -135,6 +145,22 @@ namespace adder {
       register_value rhs;
       register_index dst;
       register_index lhs;
+    };
+    
+    struct op_code_bitwise_op_args {
+      register_index lhs;
+      register_index rhs;
+    };
+
+    struct op_code_bitwise_op_constant_args {
+      register_value val;
+      register_index reg;
+    };
+    
+    template<> struct op_code_args<op_code::set_non_zero> {
+      register_index dst;
+      uint8_t if_non_zero;
+      uint8_t if_zero;
     };
 
     template<> struct op_code_args<op_code::add_i64> : op_code_binary_op_args {};
@@ -241,6 +267,9 @@ namespace adder {
         op_code_args<op_code::jump_indirect> jump_indirect;
         op_code_args<op_code::jump_relative> jump_relative;
         op_code_args<op_code::move> move;
+        op_code_bitwise_op_args bitwise_op;
+        op_code_bitwise_op_constant_args bitwise_op_constant;
+        op_code_args<op_code::set_non_zero> set_non_zero;
         op_code_binary_op_args compare;
         op_code_args<op_code::conditional_jump> conditional_jump;
         op_code_args<op_code::conditional_move> conditional_move;
@@ -359,6 +388,13 @@ namespace adder {
       case adder::vm::op_code::jump_indirect: return "jump_indirect";           ///< Set the program counter to a value stored in a register
       case adder::vm::op_code::jump_relative: return "jump_relative";           ///< Set the program counter to a location relative to the current instruction
       case adder::vm::op_code::move: return "move";                             ///< Move a value from a register
+      case adder::vm::op_code::bitwise_and: return "bitwise_and";               ///< Move a value from a register
+      case adder::vm::op_code::bitwise_or: return "bitwise_or";                 ///< Move a value from a register
+      case adder::vm::op_code::bitwise_xor: return "bitwise_xor";               ///< Move a value from a register
+      case adder::vm::op_code::bitwise_and_value: return "bitwise_and_value";   ///< Move a value from a register
+      case adder::vm::op_code::bitwise_or_value: return "bitwise_or_value";     ///< Move a value from a register
+      case adder::vm::op_code::bitwise_xor_value: return "bitwise_xor_value";   ///< Move a value from a register
+      case adder::vm::op_code::set_non_zero: return "set_non_zero";             ///< Move a value from a register
       case adder::vm::op_code::compare_i64: return "compare_i64";               ///< Compare the values in two registers as integers
       case adder::vm::op_code::compare_f64: return "compare_f64";               ///< Compare the values in two registers as floats
       case adder::vm::op_code::conditional_jump: return "conditional_jump";     ///< Set the program counter if the specified comparison bits are set.

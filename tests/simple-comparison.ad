@@ -1,0 +1,12 @@
+
+let test_result: int64 = 0;
+
+fn main() => void {
+  const first: int64 = 3;
+  const second: int64 = 3;
+  const third: int64 = 4;
+  const same_eq: bool = first == second;
+  const same_neq: bool = first != second;
+  const diff_eq: bool = first == third;
+  const diff_neq: bool = first != third;
+}
