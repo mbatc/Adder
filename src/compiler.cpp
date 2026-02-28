@@ -313,13 +313,7 @@ namespace adder {
         }
 
         // TODO: When generating code,
-        //   1. value_stack should have the lhs or dst of the final return value at the top.
-        //   2. implement a prepare_call function that evaluates parameters and allocates temporaries.
-        //      prepare_call will also allocate the return value.
-        //      All temporaries must be allocated before the return value and parameters.
         //      [optimize] If a temporary can be forwarded as a parameter, it should be allocated in the correct place.
-        //      [optimize] For inline calls, if the top of the value stack already has a valid candidate for the return value, use that.
-
         if (!(prepare_call(ast, program, statement.right)
           && generate_call(ast, program)))
           return false;

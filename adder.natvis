@@ -43,6 +43,17 @@
     <DisplayString Condition="code == adder::vm::op_code::jump_relative">jump_relative {jump_relative.offset}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::jump_indirect">jump_indirect {jump_indirect.addr}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::move">move r{(int)move.dst} r{(int)move.src}</DisplayString>
+
+    <DisplayString Condition="code == adder::vm::op_code::bitwise_and">and r{(int)bitwise_op.lhs} r{(int)bitwise_op.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::bitwise_or">or r{(int)bitwise_op.lhs} r{(int)bitwise_op.rhs}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::bitwise_xor">xor r{(int)bitwise_op.lhs} r{(int)bitwise_op.rhs}</DisplayString>
+
+    <DisplayString Condition="code == adder::vm::op_code::bitwise_and_value">and r{(int)bitwise_op_constant.reg} {bitwise_op_constant.val}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::bitwise_or_value">or r{(int)bitwise_op_constant.reg} {bitwise_op_constant.val}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::bitwise_xor_value">xor r{(int)bitwise_op_constant.reg} {bitwise_op_constant.val}</DisplayString>
+    
+    <DisplayString Condition="code == adder::vm::op_code::set_non_zero">setnz r{(int)set_non_zero.dst} {(int)set_non_zero.if_non_zero} {(int)set_non_zero.if_zero}</DisplayString>
+
     <DisplayString Condition="code == adder::vm::op_code::compare_i64">comparei r{(int)compare.dst} r{(int)compare.lhs} r{(int)compare.rhs}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::compare_f64">comparef r{(int)compare.dst} r{(int)compare.lhs} r{(int)compare.rhs}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::conditional_jump">cond_jump r{conditional_jump.cmp_reg} {(int)conditional_jump.cmp_val}</DisplayString>

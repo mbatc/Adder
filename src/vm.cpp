@@ -356,52 +356,52 @@ namespace adder {
 
     using InstructionMethod = void (*)(machine*, instruction const *);
     static InstructionMethod instruction_table[(uint8_t)op_code::count] = {
-      [](machine * vm, instruction const * inst) { vm; inst; },                                                              // exit
-      [](machine * vm, instruction const * inst) { vm; inst; },                                                              // noop
-      [](machine * vm, instruction const * inst) { op::load(vm, inst->load); },                                  // load
-      [](machine * vm, instruction const * inst) { op::load_addr(vm, inst->load_addr); },                            // load_addr
-      [](machine * vm, instruction const * inst) { op::load_offset(vm, inst->load_offset); },                            // load_offset
-      [](machine * vm, instruction const * inst) { op::store(vm, inst->store); },                                  // store
-      [](machine * vm, instruction const * inst) { op::store_addr(vm, inst->store_addr); },                            // store_addr
-      [](machine * vm, instruction const * inst) { op::store_offset(vm, inst->store_offset); },                            // store_offset
-      [](machine * vm, instruction const * inst) { op::store_value(vm, inst->store_value); },                            // store_value
-      [](machine * vm, instruction const * inst) { op::store_value_addr(vm, inst->store_value_addr); },               // store_value_addr
-      [](machine * vm, instruction const * inst) { op::store_value_offset(vm, inst->store_value_offset); },               // store_value_offset
-      [](machine * vm, instruction const * inst) { op::set(vm, inst->set); },                                     // set
-      [](machine * vm, instruction const * inst) { op::add_i64(vm, inst->add); },                                    // add_i64
-      [](machine * vm, instruction const * inst) { op::add_i64_constant(vm, inst->add_constant); },               // add_i64_constant
-      [](machine * vm, instruction const * inst) { op::add_f64(vm, inst->add); },                               // add_f64
-      [](machine * vm, instruction const * inst) { op::sub_i64(vm, inst->sub); },                               // sub_i64
-      [](machine * vm, instruction const * inst) { op::sub_f64(vm, inst->sub); },                               // sub_f64
-      [](machine * vm, instruction const * inst) { op::mul_i64(vm, inst->mul); },                               // mul_i64
-      [](machine * vm, instruction const * inst) { op::mul_f64(vm, inst->mul); },                               // mul_f64
-      [](machine * vm, instruction const * inst) { op::div_i64(vm, inst->div); },                               // div_i64
-      [](machine * vm, instruction const * inst) { op::div_f64(vm, inst->div); },                               // div_f64
-      [](machine * vm, instruction const * inst) { op::alloc_stack(vm, inst->alloc_stack); },                   // alloc_stack
-      [](machine * vm, instruction const * inst) { op::free_stack(vm, inst->free_stack); },                     // free_stack
-      [](machine * vm, instruction const * inst) { op::push(vm, inst->push); },                                   // push
-      [](machine * vm, instruction const * inst) { op::pop(vm, inst->pop); },                                   // pop
-      [](machine * vm, instruction const * inst) { op::jump(vm, inst->jump); },                                   // jump
-      [](machine * vm, instruction const * inst) { op::jump_relative(vm, inst->jump_relative); },               // jump_relative
-      [](machine * vm, instruction const * inst) { op::jump_indirect(vm, inst->jump_indirect); },               // jump_indirect
-      [](machine * vm, instruction const * inst) { op::move(vm, inst->move); },                              // move
-      [](machine * vm, instruction const * inst) { op::bitwise_and(vm, inst->bitwise_op); },                                                                                 // bitwise_and
-      [](machine * vm, instruction const * inst) { op::bitwise_or(vm, inst->bitwise_op); },                                                                                // bitwise_or
-      [](machine * vm, instruction const * inst) { op::bitwise_xor(vm, inst->bitwise_op); },                                                                                 // bitwise_xor
-      [](machine * vm, instruction const * inst) { op::bitwise_and_value(vm, inst->bitwise_op_constant); },                                                                                 // bitwise_and_value
-      [](machine * vm, instruction const * inst) { op::bitwise_or_value(vm, inst->bitwise_op_constant); },                                                                                // bitwise_or_value
-      [](machine * vm, instruction const * inst) { op::bitwise_xor_value(vm, inst->bitwise_op_constant); },                                                                                 // bitwise_xor_value
-      [](machine * vm, instruction const * inst) { op::set_non_zero(vm, inst->set_non_zero); },                                                                                // set_non_zero
-      [](machine * vm, instruction const * inst) { op::compare_i64(vm, inst->compare); },                       // compare_i64
-      [](machine * vm, instruction const * inst) { op::compare_f64(vm, inst->compare); },                       // compare_f64
-      [](machine * vm, instruction const * inst) { op::conditional_jump(vm, inst->conditional_jump); },               // conditional_jump
-      [](machine * vm, instruction const * inst) { op::conditional_move(vm, inst->conditional_move); },               // conditional_move
-      [](machine * vm, instruction const * inst) { op::call(vm, inst->call); },                                // call
-      [](machine * vm, instruction const * inst) { op::call_indirect(vm, inst->call_indirect); },               // call_indirect
-      [](machine * vm, instruction const * inst) { op::ret(vm, inst->ret); },                                 // ret
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::exit); vm; inst; },                                                              // exit
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::noop); vm; inst; },                                                              // noop
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::load); op::load(vm, inst->load); },                                  // load
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::load_addr); op::load_addr(vm, inst->load_addr); },                            // load_addr
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::load_offset );op::load_offset(vm, inst->load_offset); },                            // load_offset
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store); op::store(vm, inst->store); },                                  // store
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store_addr); op::store_addr(vm, inst->store_addr); },                            // store_addr
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store_offset); op::store_offset(vm, inst->store_offset); },                            // store_offset
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store_value); op::store_value(vm, inst->store_value); },                            // store_value
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store_value_addr); op::store_value_addr(vm, inst->store_value_addr); },               // store_value_addr
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store_value_offset); op::store_value_offset(vm, inst->store_value_offset); },               // store_value_offset
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::set); op::set(vm, inst->set); },                                     // set
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::add_i64); op::add_i64(vm, inst->add); },                                    // add_i64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::add_i64_constant); op::add_i64_constant(vm, inst->add_constant); },               // add_i64_constant
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::add_f64); op::add_f64(vm, inst->add); },                               // add_f64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::sub_i64); op::sub_i64(vm, inst->sub); },                               // sub_i64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::sub_f64); op::sub_f64(vm, inst->sub); },                               // sub_f64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::mul_i64); op::mul_i64(vm, inst->mul); },                               // mul_i64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::mul_f64); op::mul_f64(vm, inst->mul); },                               // mul_f64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::div_i64); op::div_i64(vm, inst->div); },                               // div_i64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::div_f64); op::div_f64(vm, inst->div); },                               // div_f64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::alloc_stack); op::alloc_stack(vm, inst->alloc_stack); },                   // alloc_stack
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::free_stack); op::free_stack(vm, inst->free_stack); },                     // free_stack
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::push); op::push(vm, inst->push); },                                   // push
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::pop); op::pop(vm, inst->pop); },                                   // pop
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::jump); op::jump(vm, inst->jump); },                                   // jump
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::jump_relative); op::jump_relative(vm, inst->jump_relative); },               // jump_relative
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::jump_indirect); op::jump_indirect(vm, inst->jump_indirect); },               // jump_indirect
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::move); op::move(vm, inst->move); },                              // move
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::bitwise_and); op::bitwise_and(vm, inst->bitwise_op); },                                                                                 // bitwise_and
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::bitwise_or); op::bitwise_or(vm, inst->bitwise_op); },                                                                                // bitwise_or
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::bitwise_xor); op::bitwise_xor(vm, inst->bitwise_op); },                                                                                 // bitwise_xor
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::bitwise_and_value); op::bitwise_and_value(vm, inst->bitwise_op_constant); },                                                                                 // bitwise_and_value
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::bitwise_or_value); op::bitwise_or_value(vm, inst->bitwise_op_constant); },                                                                                // bitwise_or_value
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::bitwise_xor_value); op::bitwise_xor_value(vm, inst->bitwise_op_constant); },                                                                                 // bitwise_xor_value
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::set_non_zero); op::set_non_zero(vm, inst->set_non_zero); },                                                                                // set_non_zero
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::compare_i64); op::compare_i64(vm, inst->compare); },                       // compare_i64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::compare_f64); op::compare_f64(vm, inst->compare); },                       // compare_f64
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::conditional_jump); op::conditional_jump(vm, inst->conditional_jump); },               // conditional_jump
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::conditional_move); op::conditional_move(vm, inst->conditional_move); },               // conditional_move
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::call); op::call(vm, inst->call); },                                // call
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::call_indirect); op::call_indirect(vm, inst->call_indirect); },               // call_indirect
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::ret); op::ret(vm, inst->ret); },                                 // ret
     };
 
-    void* compile_call_handle(machine * vm, program_symbol_table_entry const & symbol) {
+    void * compile_call_handle(machine * vm, program_symbol_table_entry const & symbol) {
       compiler::program_builder stub;
       stub.functions.emplace_back();
       stub.function_stack.push_back(0);

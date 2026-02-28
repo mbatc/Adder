@@ -344,7 +344,7 @@ namespace adder {
       void comparei(vm::register_index dst, vm::register_index a, vm::register_index b);
       void comparef(vm::register_index dst, vm::register_index a, vm::register_index b);
       void conditional_move(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue);
-      void conditional_jump(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue);
+      void conditional_jump(vm::register_index dst, vm::register_index cmpReg, uint8_t cmpValue);
 
       void push_return_pointer();
       void push_frame_pointer();
@@ -381,6 +381,16 @@ namespace adder {
 
       bool store(vm::register_index src, program_builder::value const & dst);
       // bool store(program_builder::value const & src, program_builder::value const & dst);
+
+      void bitwise_and(vm::register_index dst, vm::register_index val);
+      void bitwise_or(vm::register_index dst, vm::register_index val);
+      void bitwise_xor(vm::register_index dst, vm::register_index val);
+      
+      void bitwise_and_constant(vm::register_index dst, vm::register_value val);
+      void bitwise_or_constant(vm::register_index dst, vm::register_value val);
+      void bitwise_xor_constant(vm::register_index dst, vm::register_value val);
+
+      void set_non_zero(vm::register_index reg, uint8_t ifNonZero, uint8_t ifZero);
 
       void addi(vm::register_index dst, vm::register_index a, vm::register_index b);
       void addi_constant(vm::register_index dst, vm::register_index a, vm::register_value b);

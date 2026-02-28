@@ -22,7 +22,7 @@ std::string read_file(std::string const & path) {
 
 int main(int argc, char ** argv) {
   adder::unused(argc, argv);
-  const bool testPerf = false;
+  const bool testPerf = true;
   std::map<std::string, std::string> tests;
   {
     for (auto& item : std::filesystem::directory_iterator( "../../tests/")) {
@@ -33,7 +33,7 @@ int main(int argc, char ** argv) {
   }
 
   // tests = {
-  //   { "../../tests/simple-global.ad", read_file("../../tests/simple-global.ad") }
+  //   { "../../tests/simple-comparison.ad", read_file("../../tests/simple-comparison.ad") }
   // };
 
   for (auto& [file, source] : tests) {
@@ -79,7 +79,7 @@ int main(int argc, char ** argv) {
         tm += (double)(end - start).count() / (1000 * 1000 * 1000ll);
       }
       tm /= 100;
-      printf(" - Average run time of %lld calls: %.2f\n", batches * batchSize, tm);
+      printf(" - Average run time of %lld calls: %.2f\n", batchSize, tm);
     }
 
     adder::vm::free(&vm, entry);

@@ -1086,7 +1086,7 @@ namespace adder {
       add_instruction(op);
     }
 
-    void program_builder::conditional_jump(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue) {
+    void program_builder::conditional_jump(vm::register_index dst, vm::register_index cmpReg, uint8_t cmpValue) {
       vm::instruction op;
       op.code = vm::op_code::conditional_jump;
       op.conditional_jump.addr = dst;
@@ -1474,6 +1474,62 @@ namespace adder {
     //   }
     // 
     // }
+    void program_builder::bitwise_and(vm::register_index dst, vm::register_index val) {
+      vm::instruction op;
+      op.code = vm::op_code::bitwise_and;
+      op.bitwise_op.lhs = dst;
+      op.bitwise_op.rhs = val;
+      add_instruction(op);
+    }
+
+    void program_builder::bitwise_or(vm::register_index dst, vm::register_index val) {
+      vm::instruction op;
+      op.code = vm::op_code::bitwise_or;
+      op.bitwise_op.lhs = dst;
+      op.bitwise_op.rhs = val;
+      add_instruction(op);
+    }
+
+    void program_builder::bitwise_xor(vm::register_index dst, vm::register_index val) {
+      vm::instruction op;
+      op.code = vm::op_code::bitwise_xor;
+      op.bitwise_op.lhs = dst;
+      op.bitwise_op.rhs = val;
+      add_instruction(op);
+    }
+      
+    void program_builder::bitwise_and_constant(vm::register_index dst, vm::register_value val) {
+      vm::instruction op;
+      op.code = vm::op_code::bitwise_and_value;
+      op.bitwise_op_constant.reg = dst;
+      op.bitwise_op_constant.val = val;
+      add_instruction(op);
+    }
+
+    void program_builder::bitwise_or_constant(vm::register_index dst, vm::register_value val) {
+      vm::instruction op;
+      op.code = vm::op_code::bitwise_or_value;
+      op.bitwise_op_constant.reg = dst;
+      op.bitwise_op_constant.val = val;
+      add_instruction(op);
+    }
+
+    void program_builder::bitwise_xor_constant(vm::register_index dst, vm::register_value val) {
+      vm::instruction op;
+      op.code = vm::op_code::bitwise_xor_value;
+      op.bitwise_op_constant.reg = dst;
+      op.bitwise_op_constant.val = val;
+      add_instruction(op);
+    }
+
+    void program_builder::set_non_zero(vm::register_index reg, uint8_t ifNonZero, uint8_t ifZero) { {
+      vm::instruction op;
+      op.code = vm::op_code::set_non_zero;
+      op.set_non_zero.dst = reg;
+      op.set_non_zero.if_non_zero = ifNonZero;
+      op.set_non_zero.if_zero = ifZero;
+      add_instruction(op);
+    }}
 
     void program_builder::addi(vm::register_index dst, vm::register_index a, vm::register_index b) {
       vm::instruction op;
