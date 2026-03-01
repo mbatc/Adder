@@ -46,6 +46,7 @@ int main(int argc, char ** argv) {
   // singleFileTest = "branch-else.ad";
   // singleFileTest = "branch-if.ad";
   // singleFileTest = "branch-if-false.ad";
+  singleFileTest = "call-recursive.ad";
 
   if (singleFileTest.has_value()) {
     tests = {

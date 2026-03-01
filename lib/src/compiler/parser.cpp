@@ -451,7 +451,8 @@ namespace adder {
 
         if (!returnType.has_value()) {
           // TODO: Infer return type from body.
-          return false;
+          printf("No return type specified\n");
+          return std::nullopt;
         }
 
         std::optional<size_t> body;

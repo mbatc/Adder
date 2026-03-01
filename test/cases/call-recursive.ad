@@ -1,0 +1,16 @@
+
+let test_result: int64 = 0;
+
+fn recursive(i: int64, end: int64) => int64 {
+  if (i >= end) {
+    return i;
+  }
+
+  test_result = test_result + i;
+
+  return recursive(i + 1, end);
+}
+
+fn main() => void {
+  recursive(0, 10);
+}

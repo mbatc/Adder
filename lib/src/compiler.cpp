@@ -123,17 +123,30 @@ namespace adder {
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::identifier const & statement, size_t statementId) {
-      unused(ast, statement, statementId);
-      std::optional<program_builder::value> value = program->find_value_by_identifier(statement.name);
+      unused(ast);
 
-      if (!value.has_value()) {
-        printf("Error: Undeclared identifier '%.*s'\n", (int)statement.name.length(), statement.name.data());
-        // Push Error: Undeclared identifier `statement.name`
-        return false;
+      std::optional<program_builder::value> variable = program->find_value_by_identifier(statement.name);
+      if (variable.has_value()) {
+        program->push_value(variable.value());
+        return true;
       }
 
-      program->push_value(value.value());
-      return true;
+      // Allow referencing functions defined anywhere in an outer scope
+      const auto symbolIndex = program->meta.statement_info[statementId].symbol_index;
+      if (symbolIndex.has_value()) {
+        const auto& symbol = program->meta.symbols[symbolIndex.value()];
+        if (!symbol.has_local_storage() && symbol.is_function()) {
+          program_builder::value fn;
+          fn.symbol_index = symbolIndex.value();
+          fn.type_index = symbol.type;
+          program->push_value(fn);
+          return true;
+        }
+      }
+
+      printf("Error: Undeclared identifier '%.*s'\n", (int)statement.name.length(), statement.name.data());
+      // Push Error: Undeclared identifier `statement.name`
+      return false;
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::list const & statement, size_t statementId) {
@@ -908,6 +921,7 @@ namespace adder {
         expr::type_modifier const & modifier = ast.get<expr::type_modifier>(statementId);
         auto modified = evaluate_type_index(ast, meta, modifier.modified);
         if (!modified.has_value()) {
+          printf("Error: class decl not implemented");
           return std::nullopt;
         }
         type_modifier mod;
@@ -934,6 +948,7 @@ namespace adder {
         for (auto const & arg : fn.argument_list) {
           auto argType = evaluate_type_index(ast, meta, arg);
           if (!argType.has_value()) {
+            printf("Error: unknown type argument type");
             // TODO: Push error. Unable to evaluate argument type at index
             return std::nullopt;
           }
@@ -950,7 +965,8 @@ namespace adder {
 
       if (ast.is<expr::class_decl>(statementId)) {
         // Parse class definition
-
+        printf("Error: class decl not implemented");
+        return std::nullopt;
       }
 
       if (!typeId.has_value()) {
@@ -1104,6 +1120,8 @@ namespace adder {
     }
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::block const & block, symbol_eval_context const & ctx) {
+      assert(false && "some wierd shit going on here. parent scopes are not being evaluated correctly - broken in recursive call example");
+      
       auto & statementInfo = meta->statement_info[id];
       size_t thisBlockScopeId = 0;
       symbol_eval_context thisBlockCtx = ctx;
