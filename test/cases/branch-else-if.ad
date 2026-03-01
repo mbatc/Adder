@@ -1,0 +1,12 @@
+
+let test_result: int64 = 0;
+
+fn main() => void {
+  if (false) {
+    test_result = 10;
+  } elseif (true) {
+    test_result = 1;
+  } else {
+    test_result = 11;
+  }
+}

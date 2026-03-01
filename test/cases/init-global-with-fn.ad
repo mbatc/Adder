@@ -1,0 +1,8 @@
+
+fn get_test_value() => int64 {
+  return 1 + 5;
+}
+
+let test_result: int64 = get_test_value();
+
+fn main() => void {}

@@ -1,0 +1,20 @@
+
+let test_result: int64 = 0;
+
+fn main() => void {
+  if (false) {
+    test_result = 2;
+  } elseif (false) {
+    test_result = 3;
+  } elseif (false) {
+    test_result = 4;
+  } elseif (true) {
+    test_result = 1; // Only this branch should run
+  } elseif (false) {
+    test_result = 5;
+  } elseif (true) {
+    test_result = 6;
+  } else {
+    test_result = 7;
+  }
+}

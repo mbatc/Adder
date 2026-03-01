@@ -1,4 +1,4 @@
-#include "types.h"
+#include "compiler/types.h"
 
 namespace adder {
   namespace compiler {

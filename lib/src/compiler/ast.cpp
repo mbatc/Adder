@@ -1,4 +1,4 @@
-#include "ast.h"
+#include "compiler/ast.h"
 
 namespace adder {
   namespace compiler {

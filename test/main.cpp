@@ -8,9 +8,17 @@
 #include <chrono>
 #include <filesystem>
 
+
 std::string read_file(std::string const & path) {
   std::string content;
-  FILE * file = fopen(path.c_str(), "r");
+  FILE * file = 0;
+
+#ifdef _WIN32
+  if (fopen_s(&file, path.c_str(), "r") != 0)
+    return "";
+#else
+  file = fopen();
+#endif
   while (!feof(file)) {
     char buffer[1024];
     size_t numRead = fread(buffer, 1, sizeof(buffer), file);
@@ -22,10 +30,11 @@ std::string read_file(std::string const & path) {
 
 int main(int argc, char ** argv) {
   adder::unused(argc, argv);
-  const bool testPerf = false;
+  std::string testsRoot = "../../test/cases";
+  bool testPerf = false;
   std::map<std::string, std::string> tests;
   {
-    for (auto& item : std::filesystem::directory_iterator( "../../tests/")) {
+    for (auto& item : std::filesystem::directory_iterator(testsRoot)) {
       if (item.is_regular_file()) {
         tests[item.path().string()] = read_file(item.path().string());
       }
@@ -33,14 +42,14 @@ int main(int argc, char ** argv) {
   }
 
   std::optional<std::string> singleFileTest;
-  singleFileTest = "branch-else-if-chain.ad";
+  // singleFileTest = "branch-else-if-chain.ad";
   // singleFileTest = "branch-else.ad";
   // singleFileTest = "branch-if.ad";
   // singleFileTest = "branch-if-false.ad";
 
   if (singleFileTest.has_value()) {
     tests = {
-      { "../../tests/" + singleFileTest.value(), read_file("../../tests/" + singleFileTest.value())}
+      { testsRoot + "/" + singleFileTest.value(), read_file(testsRoot + "/" + singleFileTest.value())}
     };
   }
 

@@ -1,0 +1,4 @@
+
+let test_result: int64 = 1;
+
+fn main() => void {}

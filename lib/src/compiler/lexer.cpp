@@ -1,5 +1,5 @@
-#include "lexer.h"
-#include "../common.h"
+#include "compiler/lexer.h"
+#include "common.h"
 
 #include <optional>
 #include <algorithm>

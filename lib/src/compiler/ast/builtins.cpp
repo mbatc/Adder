@@ -1,6 +1,6 @@
-#include "builtins.h"
-#include "../ast.h"
-#include "../program_builder.h"
+#include "compiler/ast/builtins.h"
+#include "compiler/ast.h"
+#include "compiler/program_builder.h"
 
 namespace adder {
   namespace compiler {

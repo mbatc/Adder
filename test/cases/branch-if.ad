@@ -1,0 +1,8 @@
+
+let test_result: int64 = 0;
+
+fn main() => void {
+  if (true) {
+    test_result = 1;
+  }
+}

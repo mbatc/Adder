@@ -1,6 +1,6 @@
-#include "parser.h"
-#include "ast.h"
-#include "ast/builtins.h"
+#include "compiler/parser.h"
+#include "compiler/ast.h"
+#include "compiler/ast/builtins.h"
 
 using namespace adder::compiler::expr;
 

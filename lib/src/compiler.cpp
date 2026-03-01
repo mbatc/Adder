@@ -752,6 +752,8 @@ namespace adder {
     }
 
     bool generate_code(ast const& ast, program_builder* program, expr::branch const & branch, size_t statementId) {
+      unused(statementId);
+
       if (!generate_code(ast, program, branch.condition)) {
         printf("Error: failed to generate code for if condition\n");
         return false;

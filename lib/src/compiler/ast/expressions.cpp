@@ -1,5 +1,5 @@
-#include "expressions.h"
-#include "../lexer.h"
+#include "compiler/ast/expressions.h"
+#include "compiler/lexer.h"
 
 namespace adder {
   namespace compiler {

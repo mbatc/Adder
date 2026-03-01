@@ -1,6 +1,6 @@
-#include "program_builder.h"
-#include "../compiler.h"
-#include "../program.h"
+#include "compiler/program_builder.h"
+#include "compiler.h"
+#include "program.h"
 
 namespace adder {
   namespace compiler {
