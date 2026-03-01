@@ -1,2 +1,2 @@
 
-const MyValue: int32 = 1234;
+const test_result: int32 = 1234;

@@ -623,8 +623,7 @@ namespace adder {
 
     void program_builder::emit_scope_cleanup(size_t upToScopeId) {
       assert(!scopes.empty());
-      assert(scopes.back().temporaries.size() == 0);
-
+      // assert(scopes.back().temporaries.size() == 0);
       for (size_t scopeId = scopes.size() - 1; scopeId >= upToScopeId; --scopeId) {
         auto & scope = scopes[scopeId];
         for (auto it = scope.variables.rbegin(); it != scope.variables.rend(); ++it) {
@@ -633,6 +632,11 @@ namespace adder {
           if ((it->flags & value_flags::stack_variable) == value_flags::stack_variable) {
             destroy_value(&(*it));
           }
+        }
+
+        // Destroy any lingering temporaries
+        for (auto it = scope.temporaries.rbegin(); it != scope.temporaries.rend(); ++it) {
+          destroy_value(&(*it));
         }
       }
     }
@@ -1057,6 +1061,14 @@ namespace adder {
       op.jump_relative.offset = offset;
       add_instruction(op);
     }
+
+    void program_builder::jump_if_zero_rel(int64_t offset, vm::register_index dst) {
+      vm::instruction op;
+      op.code = vm::op_code::jump_if_zero_relative;
+      op.jump_if_zero_relative.offset = offset;
+      op.jump_if_zero_relative.cmp    = dst;
+      add_instruction(op);
+    }
     
     void program_builder::comparei(vm::register_index dst, vm::register_index a, vm::register_index b) {
       vm::instruction op;
@@ -1076,24 +1088,24 @@ namespace adder {
       add_instruction(op);
     }
 
-    void program_builder::conditional_move(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue) {
-      vm::instruction op;
-      op.code = vm::op_code::conditional_move;
-      op.conditional_move.dst = dst;
-      op.conditional_move.src = src;
-      op.conditional_move.cmp_reg = cmpReg;
-      op.conditional_move.cmp_val = cmpValue;
-      add_instruction(op);
-    }
-
-    void program_builder::conditional_jump(vm::register_index dst, vm::register_index cmpReg, uint8_t cmpValue) {
-      vm::instruction op;
-      op.code = vm::op_code::conditional_jump;
-      op.conditional_jump.addr = dst;
-      op.conditional_jump.cmp_reg = cmpReg;
-      op.conditional_jump.cmp_val = cmpValue;
-      add_instruction(op);
-    }
+    // void program_builder::conditional_move(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue) {
+    //   vm::instruction op;
+    //   op.code = vm::op_code::conditional_move;
+    //   op.conditional_move.dst = dst;
+    //   op.conditional_move.src = src;
+    //   op.conditional_move.cmp_reg = cmpReg;
+    //   op.conditional_move.cmp_val = cmpValue;
+    //   add_instruction(op);
+    // }
+    //
+    // void program_builder::conditional_jump_relative(vm::register_value offset, vm::register_index cmpReg, uint8_t cmpValue) {
+    //   vm::instruction op;
+    //   op.code = vm::op_code::conditional_jump_relative;
+    //   op.conditional_jump_relative.offset  = offset;
+    //   op.conditional_jump_relative.cmp_reg = cmpReg;
+    //   op.conditional_jump_relative.cmp_val = cmpValue;
+    //   add_instruction(op);
+    // }
 
     void program_builder::push_return_pointer() {
       push(vm::register_names::rp);

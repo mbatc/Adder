@@ -45,6 +45,7 @@ namespace adder {
       pop,                ///< Pop a register value from the stack. Store in named register
       jump,               ///< Set the program counter.
       jump_relative,      ///< Add a value to the program counter
+      jump_if_zero_relative, ///< Add a value to the program counter if the comparison register is zero
       jump_indirect,      ///< Set the program counter to a value stored in a register
       move,               ///< Move a value from a register
 
@@ -59,7 +60,7 @@ namespace adder {
       
       compare_i64,        ///< Compare the values in two registers as integers
       compare_f64,        ///< Compare the values in two registers as floats
-      conditional_jump,   ///< Set the program counter if the specified comparison bits are set.
+      conditional_jump_relative, ///< Add a value to the program counter if the specified comparison bits are set.
       conditional_move,   ///< Compare the specified register with a value. Move if equal
       call,               ///< Call a function
       call_indirect,      ///< Call an address stored in a register
@@ -203,6 +204,11 @@ namespace adder {
       int64_t offset;
     };
 
+    template<> struct op_code_args<op_code::jump_if_zero_relative> {
+      int64_t        offset;
+      register_index cmp;
+    };
+
     template<> struct op_code_args<op_code::move> {
       register_index dst;
       register_index src;
@@ -215,7 +221,7 @@ namespace adder {
     template<> struct op_code_args<op_code::compare_i64> : op_code_binary_op_args {};
     template<> struct op_code_args<op_code::compare_f64> : op_code_binary_op_args {};
 
-    template<> struct op_code_args<op_code::conditional_jump> : op_code_args<op_code::jump> {
+    template<> struct op_code_args<op_code::conditional_jump_relative> : op_code_args<op_code::jump_relative> {
       register_index cmp_reg;
       uint8_t        cmp_val;
     };
@@ -266,12 +272,13 @@ namespace adder {
         op_code_args<op_code::jump> jump;
         op_code_args<op_code::jump_indirect> jump_indirect;
         op_code_args<op_code::jump_relative> jump_relative;
+        op_code_args<op_code::jump_if_zero_relative> jump_if_zero_relative;
         op_code_args<op_code::move> move;
         op_code_bitwise_op_args bitwise_op;
         op_code_bitwise_op_constant_args bitwise_op_constant;
         op_code_args<op_code::set_non_zero> set_non_zero;
         op_code_binary_op_args compare;
-        op_code_args<op_code::conditional_jump> conditional_jump;
+        op_code_args<op_code::conditional_jump_relative> conditional_jump_relative;
         op_code_args<op_code::conditional_move> conditional_move;
         op_code_args<op_code::call> call;
         op_code_args<op_code::call_indirect> call_indirect;
@@ -387,6 +394,7 @@ namespace adder {
       case adder::vm::op_code::jump: return "jump";                             ///< Set the program counter.
       case adder::vm::op_code::jump_indirect: return "jump_indirect";           ///< Set the program counter to a value stored in a register
       case adder::vm::op_code::jump_relative: return "jump_relative";           ///< Set the program counter to a location relative to the current instruction
+      case adder::vm::op_code::jump_if_zero_relative: return "jump_if_zero_relative";   ///< Set the program counter to a location relative to the current instruction
       case adder::vm::op_code::move: return "move";                             ///< Move a value from a register
       case adder::vm::op_code::bitwise_and: return "bitwise_and";               ///< Move a value from a register
       case adder::vm::op_code::bitwise_or: return "bitwise_or";                 ///< Move a value from a register
@@ -397,7 +405,7 @@ namespace adder {
       case adder::vm::op_code::set_non_zero: return "set_non_zero";             ///< Move a value from a register
       case adder::vm::op_code::compare_i64: return "compare_i64";               ///< Compare the values in two registers as integers
       case adder::vm::op_code::compare_f64: return "compare_f64";               ///< Compare the values in two registers as floats
-      case adder::vm::op_code::conditional_jump: return "conditional_jump";     ///< Set the program counter if the specified comparison bits are set.
+      case adder::vm::op_code::conditional_jump_relative: return "conditional_jump";     ///< Set the program counter if the specified comparison bits are set.
       case adder::vm::op_code::conditional_move: return "conditional_move";     ///< Compare the specified register with a value. Move if equal
       case adder::vm::op_code::call: return "call";                             ///< Compare the specified register with a value. Move if equal
       case adder::vm::op_code::call_indirect: return "call_indirect";           ///< Compare the specified register with a value. Move if equal

@@ -276,6 +276,10 @@ namespace adder {
         vm->registers[register_names::pc].u64 += args.offset - sizeof(vm::instruction);
       }
 
+      inline void jump_if_zero_relative(machine * vm, op_code_args<op_code::jump_if_zero_relative> const & args) {
+        vm->registers[register_names::pc].u64 += (vm->registers[args.cmp].u64 == 0) * (args.offset - sizeof(vm::instruction));
+      }
+
       inline void move(machine * vm, op_code_args<op_code::move> const & args) {
         vm->registers[args.dst] = vm->registers[args.src];
       }
@@ -329,9 +333,9 @@ namespace adder {
         if (lhs > rhs) dst  |= cmp_gt_bit;
       }
 
-      inline void conditional_jump(machine * vm, op_code_args<op_code::conditional_jump> const & args) {
+      inline void conditional_jump_relative(machine * vm, op_code_args<op_code::conditional_jump_relative> const & args) {
         if (args.cmp_val == (vm->registers[args.cmp_reg].u64 & 0xFF))
-          jump(vm, args);
+          jump_relative(vm, args);
       }
 
       inline void conditional_move(machine * vm, op_code_args<op_code::conditional_move> const & args) {
@@ -383,6 +387,7 @@ namespace adder {
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::pop); op::pop(vm, inst->pop); },                                   // pop
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::jump); op::jump(vm, inst->jump); },                                   // jump
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::jump_relative); op::jump_relative(vm, inst->jump_relative); },               // jump_relative
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::jump_if_zero_relative); op::jump_if_zero_relative(vm, inst->jump_if_zero_relative); },               // jump_relative
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::jump_indirect); op::jump_indirect(vm, inst->jump_indirect); },               // jump_indirect
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::move); op::move(vm, inst->move); },                              // move
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::bitwise_and); op::bitwise_and(vm, inst->bitwise_op); },                                                                                 // bitwise_and
@@ -394,7 +399,7 @@ namespace adder {
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::set_non_zero); op::set_non_zero(vm, inst->set_non_zero); },                                                                                // set_non_zero
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::compare_i64); op::compare_i64(vm, inst->compare); },                       // compare_i64
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::compare_f64); op::compare_f64(vm, inst->compare); },                       // compare_f64
-      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::conditional_jump); op::conditional_jump(vm, inst->conditional_jump); },               // conditional_jump
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::conditional_jump_relative); op::conditional_jump_relative(vm, inst->conditional_jump_relative); },               // conditional_jump
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::conditional_move); op::conditional_move(vm, inst->conditional_move); },               // conditional_move
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::call); op::call(vm, inst->call); },                                // call
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::call_indirect); op::call_indirect(vm, inst->call_indirect); },               // call_indirect

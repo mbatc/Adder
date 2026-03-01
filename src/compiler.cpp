@@ -57,7 +57,6 @@ namespace adder {
       return std::visit([&](auto&& o) { return eval_decltype_impl(ast, meta, statementId, o); }, ast.statements[statementId]);
     }
 
-    bool prepare_operator_call(program_builder* program, expr::operator_type);
     bool prepare_call(ast const& ast, program_builder* program, std::optional<size_t> const& parameters);
     bool generate_call(ast const & ast, program_builder * program);
 
@@ -276,8 +275,6 @@ namespace adder {
       if (program->meta.is_void(receiver.type_index)) {
         if (statement.expression.has_value()) {
           auto symbol = program->meta.symbols[program->current_function().symbol];
-
-          // TODO: Push error. Unexpected expression for function that returns void.
           printf("Error: fn %.*s returns void, not a value\n", (int)symbol.name.length(), symbol.name.data());
           return false;
         }
@@ -752,6 +749,58 @@ namespace adder {
 
       program->end_scope();
       return true;
+    }
+
+    bool generate_code(ast const& ast, program_builder* program, expr::branch const & branch, size_t statementId) {
+      if (!generate_code(ast, program, branch.condition)) {
+        printf("Error: failed to generate code for if condition\n");
+        return false;
+      }
+
+      auto condition = program->pop_value();
+      if (!condition.has_value()) {
+        printf("Error: if condition did not resolve to a value\n");
+        return false;
+      }
+      auto booleanCond = condition.value();
+      if (!program->meta.is_bool(condition->type_index)) {
+        booleanCond = program->allocate_temporary_value(program->meta.get_type_index(get_primitive_type_name(type_primitive::bool_)).value());
+        initialize_variable(ast, program, booleanCond, condition.value());
+      }
+
+      vm::register_index val  = program->load_value_of(booleanCond);
+      const size_t skipTrueBranchInstruction = program->current_function().instructions.size();
+      program->jump_if_zero_rel(0, val);
+      program->release_register(val);
+
+      if (!generate_code(ast, program, branch.true_branch)) {
+        printf("Error: failed to generate code for if body\n");
+        return false;
+      }
+      size_t trueBranchSize = 0;
+      if (branch.false_branch.has_value()) {
+        size_t skipFalseBranchInstruction = program->current_function().instructions.size();
+        program->jump_relative(0);
+        trueBranchSize = program->current_function().instructions.size() - skipTrueBranchInstruction;
+
+        if (!generate_code(ast, program, branch.false_branch.value())) {
+          printf("Error: failed to generate code for else/elseif body\n");
+          return false;
+        }
+
+        const size_t falseBranchSize = program->current_function().instructions.size() - skipFalseBranchInstruction;
+        program->current_function().instructions[skipFalseBranchInstruction].jump_relative.offset = falseBranchSize * sizeof(vm::instruction);
+      }
+      else {
+        trueBranchSize = program->current_function().instructions.size() - skipTrueBranchInstruction;
+      }
+      program->current_function().instructions[skipTrueBranchInstruction].jump_relative.offset = trueBranchSize * sizeof(vm::instruction);
+      return true;
+    }
+
+    bool generate_code(ast const& ast, program_builder* program, expr::loop const & loop, size_t statementId) {
+      unused(ast, program, loop, statementId);
+      return false;
     }
 
     bool generate_code(ast const& ast, program_builder* program, expr::byte_code const & code, size_t statementId) {

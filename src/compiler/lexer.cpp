@@ -23,6 +23,7 @@ namespace adder {
         { "if",     token_id::if_,                 token_class::keyword },
         { "else",   token_id::else_,               token_class::keyword },
         { "elseif", token_id::elseif,              token_class::keyword },
+        { "for",    token_id::for_,                token_class::keyword },
 
         { "return", token_id::return_,             token_class::keyword },
 
@@ -56,6 +57,9 @@ namespace adder {
         { "+",      token_id::add,                 token_class::operator_ },
         { "-",      token_id::minus,               token_class::operator_ },
         { ".",      token_id::dot,                 token_class::operator_ },
+
+        { "true",   token_id::true_,               token_class::literal_ },
+        { "false",  token_id::false_,              token_class::literal_ },
       };
 
       // Sorted by token length. When tokenizing, we search for the longest token first.

@@ -47,6 +47,10 @@ namespace adder {
       std::optional<size_t> consume_call(ast* tree, lexer::token_parser* tokenizer);
       bool is_callable(ast* tree, size_t expressionId);
       std::optional<size_t> consume_init_expression(ast* tree, lexer::token_parser* tokenizer);
+      std::optional<size_t> consume_if(ast* tree, lexer::token_parser* tokenizer);
+      // std::optional<size_t> consume_else_expression(ast* tree, lexer::token_parser* tokenizer);
+      // std::optional<size_t> consume_elseif_expression(ast* tree, lexer::token_parser* tokenizer);
+      std::optional<size_t> consume_for(ast* tree, lexer::token_parser* tokenizer);
       std::optional<size_t> consume_statement(ast* tree, lexer::token_parser* tokenizer);
       bool consume_function_parameter_list(ast* tree, std::vector<size_t> * arguments, lexer::token_parser* tokenizer);
       bool consume_function_body(ast * tree, std::string_view const & scopeName, std::optional<size_t> * body, lexer::token_parser * tokenizer);

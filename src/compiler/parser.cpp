@@ -80,6 +80,8 @@ namespace adder {
         if (tokenizer->eof())
           return std::nullopt;
 
+        tokenizer->next(); // Skip close brace
+
         return tree->add(std::move(scope));
       }
 
@@ -211,6 +213,64 @@ namespace adder {
         return tree->add(initializer);
       }
 
+      std::optional<size_t> consume_if_chain(ast* tree, lexer::token_parser* tokenizer) {
+        if (!tokenizer->parse(lexer::token_id::open_paren).ok())
+          return std::nullopt;
+
+        branch exp;
+        std::optional<size_t> condition = consume_expression(tree, tokenizer, lexer::token_id::close_paren);
+        if (!condition.has_value()) {
+          return std::nullopt;
+        }
+        exp.condition = condition.value();
+
+        std::optional<size_t> body = consume_statement(tree, tokenizer);
+        if (!body.has_value()) {
+          return std::nullopt;
+        }
+        exp.true_branch = body.value();
+
+        switch (tokenizer->current().id) {
+        case lexer::token_id::else_:
+          tokenizer->next();
+          exp.false_branch = consume_statement(tree, tokenizer);
+          break;
+        case lexer::token_id::elseif:
+          tokenizer->next();
+          exp.false_branch = consume_if_chain(tree, tokenizer);
+          break;
+        default:
+          return tree->add(exp);
+
+        }
+        if (!exp.false_branch.has_value()) {
+          return std::nullopt;
+        }
+
+        return tree->add(exp);
+      }
+
+      std::optional<size_t> consume_if(ast* tree, lexer::token_parser* tokenizer) {
+        if (!tokenizer->parse(lexer::token_id::if_).ok())
+          return std::nullopt;
+        return consume_if_chain(tree, tokenizer);
+      }
+
+      std::optional<size_t> consume_else_expression(ast* tree, lexer::token_parser* tokenizer) {
+        unused(tree, tokenizer);
+        return std::nullopt;
+      }
+
+      std::optional<size_t> consume_elseif_expression(ast* tree, lexer::token_parser* tokenizer) {
+        unused(tree, tokenizer);
+        return std::nullopt;
+      }
+
+      std::optional<size_t> consume_for(ast* tree, lexer::token_parser* tokenizer) {
+        unused(tree, tokenizer);
+        return std::nullopt;
+      }
+
       std::optional<size_t> consume_expression(ast * tree, lexer::token_parser * tokenizer, rules::token_rule const & terminator) {
         std::optional<size_t> ret;
         lexer::token_view token, previous;
@@ -287,7 +347,8 @@ namespace adder {
         case lexer::token_id::class_:     return consume_class(tree, tokenizer);
         case lexer::token_id::extern_:    return consume_extern(tree, tokenizer);
         case lexer::token_id::open_brace: return consume_block(tree, tokenizer);
-          // case lexer::token_id::if_:        return consume_if(tree, tokenizer);
+        case lexer::token_id::if_:        return consume_if(tree, tokenizer);
+        case lexer::token_id::for_:       return consume_for(tree, tokenizer);
         default:                          return consume_expression(tree, tokenizer);
         }
       }
@@ -324,11 +385,11 @@ namespace adder {
           expr::block def;
           // Parse function body.
           while (tokenizer->current().id != lexer::token_id::close_brace) {
-            std::optional<size_t> expression = consume_expression(tree, tokenizer);
-            if (!expression.has_value())
+            std::optional<size_t> statement = consume_statement(tree, tokenizer);
+            if (!statement.has_value())
               return false;
 
-            def.statements.push_back(expression.value());
+            def.statements.push_back(statement.value());
           }
 
           def.scope_name = scopeName;

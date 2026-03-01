@@ -41,6 +41,7 @@
     <DisplayString Condition="code == adder::vm::op_code::pop">pop r{(int)pop.dst} {(int)push.size}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::jump">jump {jump.addr}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::jump_relative">jump_relative {jump_relative.offset}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::jump_if_zero_relative">jump_if_zero_relative {jump_if_zero_relative.offset} r{(int)jump_if_zero_relative.cmp}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::jump_indirect">jump_indirect {jump_indirect.addr}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::move">move r{(int)move.dst} r{(int)move.src}</DisplayString>
 
@@ -56,8 +57,6 @@
 
     <DisplayString Condition="code == adder::vm::op_code::compare_i64">comparei r{(int)compare.dst} r{(int)compare.lhs} r{(int)compare.rhs}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::compare_f64">comparef r{(int)compare.dst} r{(int)compare.lhs} r{(int)compare.rhs}</DisplayString>
-    <DisplayString Condition="code == adder::vm::op_code::conditional_jump">cond_jump r{conditional_jump.cmp_reg} {(int)conditional_jump.cmp_val}</DisplayString>
-    <DisplayString Condition="code == adder::vm::op_code::conditional_move">cond_move r{conditional_move.cmp_reg} {(int)conditional_jump.cmp_val}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::call">call {call.addr}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::call_indirect">call_indirect r{(int)call_indirect.addr}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::ret">ret</DisplayString>

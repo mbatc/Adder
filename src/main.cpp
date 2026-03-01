@@ -22,7 +22,7 @@ std::string read_file(std::string const & path) {
 
 int main(int argc, char ** argv) {
   adder::unused(argc, argv);
-  const bool testPerf = true;
+  const bool testPerf = false;
   std::map<std::string, std::string> tests;
   {
     for (auto& item : std::filesystem::directory_iterator( "../../tests/")) {
@@ -32,9 +32,17 @@ int main(int argc, char ** argv) {
     }
   }
 
-  // tests = {
-  //   { "../../tests/simple-comparison.ad", read_file("../../tests/simple-comparison.ad") }
-  // };
+  std::optional<std::string> singleFileTest;
+  singleFileTest = "branch-else-if-chain.ad";
+  // singleFileTest = "branch-else.ad";
+  // singleFileTest = "branch-if.ad";
+  // singleFileTest = "branch-if-false.ad";
+
+  if (singleFileTest.has_value()) {
+    tests = {
+      { "../../tests/" + singleFileTest.value(), read_file("../../tests/" + singleFileTest.value())}
+    };
+  }
 
   for (auto& [file, source] : tests) {
     printf("Compile and run: %s\n", file.c_str());
@@ -50,20 +58,25 @@ int main(int argc, char ** argv) {
 
     auto loaded = adder::vm::load_program(&vm, result->view());
     auto mainSymbol = loaded.find_public_symbol("()=>void:main");
-    if (mainSymbol == nullptr) {
-      printf(" ! %s has no ()=>void:main symbol. Skipping\n", file.c_str());
-      continue;
-    }
+    void * entry = nullptr;
 
-    void* entry = adder::vm::compile_call_handle(&vm, *mainSymbol);
-    adder::vm::call(&vm, entry);
+    if (mainSymbol != nullptr) {
+      entry = adder::vm::compile_call_handle(&vm, *mainSymbol);
+      adder::vm::call(&vm, entry);
+    }
+    else {
+      printf(" - %s has no ()=>void:main symbol.\n", file.c_str());
+    }
 
     auto testResultSymbol = loaded.find_public_symbol("int64:test_result");
     if (testResultSymbol != nullptr) {
       printf(" - test_result: %lld\n", *(int64_t*)testResultSymbol->data_address);
     }
+    else {
+      printf(" - %s has no int64:test_result symbol.\n", file.c_str());
+    }
 
-    if (testPerf) {
+    if (testPerf && entry) {
       double tm = 0;
       const int64_t batches = 100;
       const int64_t batchSize = 100000;
@@ -82,7 +95,8 @@ int main(int argc, char ** argv) {
       printf(" - Average run time of %lld calls: %.2f\n", batchSize, tm);
     }
 
-    adder::vm::free(&vm, entry);
+    if (entry != nullptr)
+      adder::vm::free(&vm, entry);
   }
 
   return 0;

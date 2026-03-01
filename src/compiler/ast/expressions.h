@@ -101,6 +101,19 @@ namespace adder {
         std::vector<size_t> statements;
       };
 
+      struct branch {
+        size_t condition;
+        size_t true_branch;
+        std::optional<size_t> false_branch;
+      };
+
+      struct loop {
+        std::optional<size_t> pre;
+        size_t condition;
+        std::optional<size_t> body;
+        std::optional<size_t> post;
+      };
+
       struct byte_code {
         bool (*callback)(program_builder * program) = nullptr;
       };
@@ -147,6 +160,8 @@ namespace adder {
         function_return,
         binary_operator,
         block,
+        branch,
+        loop,
         byte_code,
         function_declaration,
         call_parameter,
@@ -223,6 +238,27 @@ namespace adder {
       unused(ast, id);
       for (size_t i = 0; i < o.statements.size(); ++i)
         callable(o.statements[i]);
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::branch const & o, Visitor const & callable) {
+      unused(ast, id);
+      callable(o.condition);
+      callable(o.true_branch);
+      if (o.false_branch.has_value())
+        callable(o.false_branch.value());
+    }
+
+    template<typename Visitor>
+    void visit_sub_expressions(ast const& ast, size_t id, expr::loop const & o, Visitor const & callable) {
+      unused(ast, id);
+      if (o.pre.has_value())
+        callable(o.pre.value());
+      callable(o.condition);
+      if (o.post.has_value())
+        callable(o.post.value());
+      if (o.body.has_value())
+        callable(o.body.value());
     }
 
     template<typename Visitor>

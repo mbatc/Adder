@@ -340,11 +340,12 @@ namespace adder {
       void jump_to(uint64_t address);
       void jump_indirect(vm::register_index const & address);
       void jump_relative(int64_t offset);
+      void jump_if_zero_rel(int64_t offset, vm::register_index dst);
       
       void comparei(vm::register_index dst, vm::register_index a, vm::register_index b);
       void comparef(vm::register_index dst, vm::register_index a, vm::register_index b);
-      void conditional_move(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue);
-      void conditional_jump(vm::register_index dst, vm::register_index cmpReg, uint8_t cmpValue);
+      // void conditional_move(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue);
+      // void conditional_jump_relative(vm::register_value offset, vm::register_index cmpReg, uint8_t cmpValue);
 
       void push_return_pointer();
       void push_frame_pointer();

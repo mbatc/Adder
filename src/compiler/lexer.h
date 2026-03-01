@@ -40,6 +40,7 @@ namespace adder {
         if_,
         else_,
         elseif,
+        for_,
 
         return_,
 
