@@ -256,19 +256,27 @@ namespace adder {
         return consume_if_chain(tree, tokenizer);
       }
 
-      std::optional<size_t> consume_else_expression(ast* tree, lexer::token_parser* tokenizer) {
-        unused(tree, tokenizer);
-        return std::nullopt;
-      }
+      std::optional<size_t> consume_for(ast * tree, lexer::token_parser* tokenizer) {
+        if (!tokenizer->parse(lexer::token_id::for_)
+          .parse(lexer::token_id::open_paren)
+          .ok())
+          return std::nullopt;
 
-      std::optional<size_t> consume_elseif_expression(ast* tree, lexer::token_parser* tokenizer) {
-        unused(tree, tokenizer);
-        return std::nullopt;
-      }
+        loop branch;
+        branch.pre = consume_expression(tree, tokenizer, rules::or(lexer::token_id::semi_colon, lexer::token_id::close_paren));
+        if (tokenizer->previous().id == lexer::token_id::semi_colon) {
+          branch.condition = consume_expression(tree, tokenizer, rules::or(lexer::token_id::semi_colon, lexer::token_id::close_paren));
+          if (tokenizer->previous().id == lexer::token_id::semi_colon) {
+            branch.post = consume_expression(tree, tokenizer, rules::or(lexer::token_id::semi_colon, lexer::token_id::close_paren));
+          }
+        }
 
-      std::optional<size_t> consume_for(ast* tree, lexer::token_parser* tokenizer) {
-        unused(tree, tokenizer);
-        return std::nullopt;
+        if (tokenizer->previous().id != lexer::token_id::close_paren) {
+          return std::nullopt;
+        }
+
+        branch.body = consume_statement(tree, tokenizer);
+        return tree->add(branch);
       }
 
       std::optional<size_t> consume_expression(ast * tree, lexer::token_parser * tokenizer, rules::token_rule const & terminator) {

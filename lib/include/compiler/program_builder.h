@@ -262,6 +262,23 @@ namespace adder {
       };
       std::vector<scope> scopes;
 
+      struct scoped_temporary_cleaner {
+        scoped_temporary_cleaner(program_builder* builder, size_t scopeId)
+          : builder(builder)
+          , scope_id(scopeId)
+          , initial_temporary_count(builder->scopes[scopeId].temporaries.size())
+        {}
+
+        ~scoped_temporary_cleaner() {
+          while (builder->scopes[scope_id].temporaries.size() > initial_temporary_count)
+            builder->free_temporary_value();
+        }
+
+        program_builder * builder;
+        const size_t scope_id;
+        const size_t initial_temporary_count;
+      };
+
       struct relocation {
         std::string_view symbol;
         uint64_t         offset;

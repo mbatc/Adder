@@ -800,9 +800,86 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const& ast, program_builder* program, expr::loop const & loop, size_t statementId) {
-      unused(ast, program, loop, statementId);
-      return false;
+    bool generate_code(ast const& ast, program_builder* program, expr::loop const& loop, size_t statementId) {
+      unused(statementId);
+
+      program->begin_scope();
+
+      if (loop.pre.has_value()) {
+        // Generate pre-condition code
+        program_builder::scoped_temporary_cleaner tempCleanup(program, program->scopes.size() - 1);
+        if (!generate_code(ast, program, loop.pre.value())) {
+          printf("Error: loop pre-statement is not valid\n");
+          return false;
+        }
+      }
+
+      std::optional<size_t> skipBranchInstruction;
+      const size_t topOfLoop = program->current_function().instructions.size();
+
+      { // Check branch condition
+        program_builder::scoped_temporary_cleaner tempCleanup(program, program->scopes.size() - 1);
+
+        std::optional<program_builder::value> condition;
+        if (loop.condition.has_value()) {
+          if (!generate_code(ast, program, loop.condition.value())) {
+            printf("Error: failed to generate code for if condition\n");
+            return false;
+          }
+        
+          auto result = program->pop_value();
+          if (!result.has_value()) {
+            printf("Error: if condition did not resolve to a value\n");
+            return false;
+          }
+        
+          condition = result;
+          if (!program->meta.is_bool(condition->type_index)) {
+            condition = program->allocate_temporary_value(program->meta.get_type_index(get_primitive_type_name(type_primitive::bool_)).value());
+            initialize_variable(ast, program, condition.value(), result.value());
+          }
+        }
+        else {
+          condition.emplace();
+          condition->constant = 1;
+          condition->type_index = program->meta.get_type_index(get_primitive_type_name(type_primitive::bool_));
+        }
+        
+        vm::register_index val = program->load_value_of(condition.value());
+        skipBranchInstruction = program->current_function().instructions.size();
+        program->jump_if_zero_rel(0, val);
+        program->release_register(val);
+      }
+
+      if (loop.body.has_value()) {
+        program_builder::scoped_temporary_cleaner tempCleanup(program, program->scopes.size() - 1);
+
+        if (!generate_code(ast, program, loop.body.value())) {
+          printf("Error: failed to generate code for loop body\n");
+          return false;
+        }
+      }
+
+      if (loop.post.has_value()) {
+        program_builder::scoped_temporary_cleaner tempCleanup(program, program->scopes.size() - 1);
+        if (!generate_code(ast, program, loop.post.value())) {
+          printf("Error: loop post-statement is not valid\n");
+          return false;
+        }
+      }
+
+      // Jump to top of loop
+      const int64_t offsetToTop = (topOfLoop - program->current_function().instructions.size()) * sizeof(vm::instruction);
+      program->jump_relative(offsetToTop);
+
+      if (skipBranchInstruction.has_value()) {
+        const int64_t bodySize = program->current_function().instructions.size() - skipBranchInstruction.value();
+        program->current_function().instructions[skipBranchInstruction.value()].jump_relative.offset = bodySize * sizeof(vm::instruction);
+      }
+
+      program->end_scope();
+
+      return true;
     }
 
     bool generate_code(ast const& ast, program_builder* program, expr::byte_code const & code, size_t statementId) {

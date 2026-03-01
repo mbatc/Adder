@@ -109,7 +109,7 @@ namespace adder {
 
       struct loop {
         std::optional<size_t> pre;
-        size_t condition;
+        std::optional<size_t> condition;
         std::optional<size_t> body;
         std::optional<size_t> post;
       };
@@ -254,7 +254,8 @@ namespace adder {
       unused(ast, id);
       if (o.pre.has_value())
         callable(o.pre.value());
-      callable(o.condition);
+      if (o.condition.has_value())
+        callable(o.condition.value());
       if (o.post.has_value())
         callable(o.post.value());
       if (o.body.has_value())
