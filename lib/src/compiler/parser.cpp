@@ -517,11 +517,11 @@ namespace adder {
             break;
           if (tokenizer->current().id != lexer::token_id::comma)
             return false;
-
           tokenizer->next();
         }
 
-        return false;
+        tokenizer->next();
+        return true;
       }
 
       std::optional<size_t> consume_type_fn(ast * tree, lexer::token_parser * tokenizer) {
@@ -711,7 +711,7 @@ namespace adder {
     ast parse(lexer::token_parser * tokenizer) {
       ast ast;
       block topScope;
-      compiler::define_builtins(&ast, &topScope);
+      // compiler::define_builtins(&ast, &topScope);
 
       while (!tokenizer->eof()) {
         std::optional<size_t> nextStatement;

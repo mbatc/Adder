@@ -989,6 +989,7 @@ namespace adder {
 
     struct symbol_eval_context
     {
+      std::optional<size_t> function_root_scope_id = 0;
       size_t scope_id = 0;
       bool is_call = false;
       std::optional<size_t> call_parameter_list;
@@ -1120,10 +1121,10 @@ namespace adder {
     }
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::block const & block, symbol_eval_context const & ctx) {
-      assert(false && "some wierd shit going on here. parent scopes are not being evaluated correctly - broken in recursive call example");
+      // assert(false && "some wierd shit going on here. parent scopes are not being evaluated correctly - broken in recursive call example");
       
       auto & statementInfo = meta->statement_info[id];
-      size_t thisBlockScopeId = 0;
+      // size_t thisBlockScopeId = 0;
       symbol_eval_context thisBlockCtx = ctx;
       if (statementInfo.scope_index.has_value()) {
         // Already have a scope index.
@@ -1131,14 +1132,12 @@ namespace adder {
         thisBlockCtx.scope_id = statementInfo.scope_index.value();
       } else {
         thisBlockCtx.scope_id = meta->new_scope(ctx.scope_id);
-        statementInfo.scope_index = thisBlockScopeId;
 
-        program_metadata::scope & newScope = meta->scopes[thisBlockScopeId];
-        if (newScope.parent.has_value()) {
-          program_metadata::scope& parentScope = meta->scopes[newScope.parent.value()];
-          newScope.parent_function_scope = parentScope.parent_function_scope;
-        }
-        newScope.prefix = adder::format("%s/%s/", meta->scopes[ctx.scope_id].prefix.c_str(), block.scope_name.c_str());
+        statementInfo.scope_index = thisBlockCtx.scope_id;
+
+        program_metadata::scope & newScope = meta->scopes[thisBlockCtx.scope_id];
+        newScope.parent_function_scope = ctx.function_root_scope_id;
+        newScope.prefix = adder::format("%s%s/", meta->scopes[ctx.scope_id].prefix.c_str(), block.scope_name.c_str());
       }
 
       for (auto & statement : block.statements) {
@@ -1187,6 +1186,8 @@ namespace adder {
       if (decl.body.has_value()) {
         symbol_eval_context thisBlockCtx = ctx;
         thisBlockCtx.scope_id = meta->new_scope(ctx.scope_id);
+        thisBlockCtx.function_root_scope_id = thisBlockCtx.scope_id;
+
         meta->statement_info[id].scope_index = thisBlockCtx.scope_id;
         meta->statement_info[decl.body.value()].scope_index = thisBlockCtx.scope_id;
 
