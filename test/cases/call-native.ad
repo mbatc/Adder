@@ -1,0 +1,8 @@
+
+let test_result: int64 = 0;
+
+extern fn sum_sequence(i: int64, end: int64) => int64;
+
+fn main() => void {
+  test_result = sum_sequence(0, 10);
+}

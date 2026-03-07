@@ -9,6 +9,7 @@
 
 namespace adder {
   struct program;
+  enum class relocation_linkage : uint8_t;
 
   namespace compiler {
     // struct stack_frame_offset {
@@ -236,7 +237,7 @@ namespace adder {
         inline static constexpr int64_t CallLinkStorageSize = sizeof(vm::register_value) * 2;
 
         size_t symbol = 0;
-        size_t scope_id = 0;
+        std::optional<size_t> scope_id; ///< Extern functions don't have a scope id
         size_t return_type = 0;
 
         size_t args_size = 0;         ///< Size of the function parameters.
@@ -280,9 +281,10 @@ namespace adder {
       };
 
       struct relocation {
-        std::string_view symbol;
-        uint64_t         offset;
-        size_t           function_id;
+        relocation_linkage linkage;
+        std::string_view   symbol;
+        uint64_t           offset;
+        size_t             function_id;
       };
 
       /// Identifiers whose location needs to be resolved.
@@ -345,11 +347,12 @@ namespace adder {
 
       size_t current_scope_id() const;
 
-      void add_relocation(std::string_view const& symbol, uint64_t offset);
+      void add_relocation(relocation_linkage const & linkage, std::string_view const& symbol, uint64_t offset);
 
       void call(value const & func);
       void call(uint64_t address);
       void call_indirect(vm::register_index const & symbol);
+      void call_native(size_t const& symbol);
       void ret();
 
       void jump_to(value const & location);

@@ -9,6 +9,22 @@
 #include <chrono>
 #include <filesystem>
 
+namespace native_methods {
+  int64_t sum_sequence(int64_t start, int64_t end) {
+    int64_t sum = 0;
+    for (int64_t i = start; i < end; ++i) {
+      sum += i;
+    }
+    return sum;
+  }
+
+  void sum_sequence_cb(adder::vm::native_call_context *ctx) {
+    int64_t end   = *(int64_t*)adder::vm::native_read_arg(ctx, sizeof(int64_t));
+    int64_t start = *(int64_t*)adder::vm::native_read_arg(ctx, sizeof(int64_t));
+    int64_t * ret = *(int64_t**)adder::vm::native_read_arg(ctx, sizeof(int64_t*));
+    *ret = sum_sequence(start, end);
+  }
+}
 
 std::string read_file(std::string const & path) {
   std::string content;
@@ -72,10 +88,14 @@ int main(int argc, char ** argv) {
   // singleFileTest = "branch-if-false.ad";
   // singleFileTest = "call-recursive.ad";
   // singleFileTest = "function-ptr.ad";
+  singleFileTest = "call-native.ad";
 
   if (singleFileTest.has_value()) {
     tests = {
-      { testsRoot + "/" + singleFileTest.value(), { read_file(testsRoot + "/" + singleFileTest.value()) }}
+      { testsRoot + "/" + singleFileTest.value(), {
+        read_file(testsRoot + "/" + singleFileTest.value()),
+        adder::test::expected{}
+      }}
     };
   }
 
@@ -92,6 +112,11 @@ int main(int argc, char ** argv) {
 
     adder::vm::allocator allocator;
     adder::vm::machine vm(&allocator);
+
+    vm.lookup_extern_symbol = [](char const * symbol) -> adder::vm::address_t {
+      printf("extern_lookup: %s\n", symbol);
+      return (adder::vm::address_t)native_methods::sum_sequence_cb;
+    };
 
     bool ok = true;
     if (test.expected_result.has_value()) {

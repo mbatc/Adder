@@ -830,16 +830,16 @@ namespace adder {
     }
 
     size_t program_builder::current_scope_id() const {
-      return functions[function_stack.back()].scope_id;
+      return functions[function_stack.back()].scope_id.value();
     }
 
-    void program_builder::add_relocation(std::string_view const & symbol, uint64_t offset) {
+    void program_builder::add_relocation(relocation_linkage const & linkage, std::string_view const & symbol, uint64_t offset) {
       const size_t funcId = function_stack.back();
       const uint64_t base = sizeof(vm::instruction) * (functions[funcId].instructions.size() - 1);
       const uint64_t addr = base + offset;
       // TODO: Could be stored as a list of addresses per symbol.
       //       Might be more efficient when evaluating the relocations.
-      relocations.push_back({ symbol, addr, function_stack.back() });
+      relocations.push_back({ linkage, symbol, addr, function_stack.back() });
     }
 
     void program_builder::push_value(value r) {
@@ -858,11 +858,6 @@ namespace adder {
     bool program_builder::begin_function(size_t symbolId) {
       program_metadata::symbol & symbol = meta.symbols[symbolId];
 
-      if (!symbol.function_root_scope_id.has_value()) {
-        // TODO: Push error. Cannot begin function body. No scope associated with declaration. (possibly forward decl).
-        return false;
-      }
-
       function func;
       auto const & type = meta.types[symbol.type];
       auto const& funcDesc = std::get<type_function>(type.desc);
@@ -871,7 +866,7 @@ namespace adder {
       }
       func.return_type = funcDesc.return_type;
       func.symbol      = symbolId;
-      func.scope_id    = symbol.function_root_scope_id.value();
+      func.scope_id    = symbol.function_root_scope_id;
 
       value rv;
       rv.indirect_register_index = (vm::register_index)vm::register_names::fp;
@@ -974,7 +969,7 @@ namespace adder {
 
         if (symbol.function_index.has_value()) {
           call(0);
-          add_relocation(symbol.full_identifier, AD_IOFFSET(call.addr));
+          add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(call.addr));
         }
         else if (meta.is_reference(func.type_index)) {
           const auto addr = load_value_of(func);
@@ -1004,6 +999,14 @@ namespace adder {
       add_instruction(op);
     }
 
+    void program_builder::call_native(size_t const & symbol) {
+      vm::instruction op;
+      op.code = vm::op_code::call_native;
+      op.call_native.callback = nullptr;
+      add_instruction(op);
+      add_relocation(relocation_linkage::extern_, meta.symbols[symbol].full_identifier, AD_IOFFSET(call_native.callback));
+    }
+
     void program_builder::jump_to(value const & location) {
       if (!meta.is_function(location.type_index))
         return;
@@ -1021,7 +1024,7 @@ namespace adder {
         // TODO: load address and jump indirect.
 
         jump_to(location.address_offset);
-        add_relocation(symbol.full_identifier, AD_IOFFSET(jump.addr));
+        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(jump.addr));
         return;
       }
 
@@ -1198,7 +1201,7 @@ namespace adder {
 
         vm::register_index ret = pin_register();
         load_from_constant_address(ret, value.address_offset, sz);
-        add_relocation(symbol.full_identifier, AD_IOFFSET(load_addr.addr));
+        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(load_addr.addr));
         return ret;
       }
 
@@ -1235,7 +1238,7 @@ namespace adder {
 
         vm::register_index ret = pin_register();
         set(ret, value.address_offset);
-        add_relocation(symbol.full_identifier, AD_IOFFSET(set.val));
+        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(set.val));
         return ret;
       }
 
@@ -1396,7 +1399,7 @@ namespace adder {
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
         store_constant_to_constant_address(src, dst.address_offset, (uint8_t)sz);
-        add_relocation(symbol.full_identifier, AD_IOFFSET(store_value_addr.addr));
+        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(store_value_addr.addr));
         return true;
       }
 
@@ -1430,7 +1433,7 @@ namespace adder {
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
         store_to_constant_address(src, dst.address_offset, (uint8_t)sz);
-        add_relocation(symbol.full_identifier, AD_IOFFSET(store_addr.addr));
+        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(store_addr.addr));
         return true;
       }
 
@@ -1460,7 +1463,6 @@ namespace adder {
     //     add_relocation(symbol.full_identifier, AD_IOFFSET(store_addr.addr));
     //     return true;
     //   }
-    // 
     // }
 
     void program_builder::bitwise_and(vm::register_index dst, vm::register_index val) {
@@ -1617,7 +1619,6 @@ namespace adder {
       // Compiled Program Layout
       // header: see program_header
       // public_symbol_table[]
-      // extern_symbol_table[]
       // relocation_table[]
       // symbol_data
       // program_data
@@ -1637,8 +1638,7 @@ namespace adder {
 
       program_header header;
 
-      std::vector<program_symbol_table_entry> publicSymbols;
-      std::vector<program_symbol_table_entry> externSymbols;
+      std::vector<program_symbol_table_entry> symbolTable;
       std::vector<uint8_t> relocationTable;
       std::vector<uint8_t> symbolData;
       std::vector<uint8_t> programData;
@@ -1661,60 +1661,52 @@ namespace adder {
         for (char c : symbol.full_identifier)
           symbolData.push_back(c);
         symbolData.push_back('\0');
-        if (isExtern) {
-          // TODO: For variable, lookup address via host.
-          //       For function, generate code to call native method.
-          item.data_address = 0;
-          symbolIndices[symbol.full_identifier] = externSymbols.size();
-          externSymbols.push_back(item);
+
+        if (meta.is_function(symbol.type) && symbol.function_index.has_value()) {
+          // Stub is generated for functions with extern linkage.
+          // Relocation linkage handles address resolution
+          auto& func = functions[symbol.function_index.value()];
+          item.data_address = compiledCode.size() * sizeof(decltype(compiledCode)::value_type);
+          functionOffset[symbol.function_index.value()] = compiledCode.size();
+          compiledCode.insert(
+            compiledCode.end(),
+            func.instructions.begin(),
+            func.instructions.end()
+          );
         }
         else {
-          if (meta.is_function(symbol.type) && symbol.function_index.has_value()) {
-            auto& func = functions[symbol.function_index.value()];
-            item.data_address = compiledCode.size() * sizeof(decltype(compiledCode)::value_type);
-            functionOffset[symbol.function_index.value()] = compiledCode.size();
-            compiledCode.insert(
-              compiledCode.end(),
-              func.instructions.begin(),
-              func.instructions.end()
-            );
+          if (isExtern) {
+            item.data_address = 0;
           }
           else {
             size_t bytes = meta.get_type_size(symbol.type);
             // TODO: alignas(bytes)
             item.data_address = symbolData.size();
             symbolData.resize(symbolData.size() + bytes, 0);
-
           }
-          symbolIndices[symbol.full_identifier] = publicSymbols.size();
-          publicSymbols.push_back(item);
         }
-      }
-
-      for (auto& symbol : meta.symbols) {
-        const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
-        const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
-        if (symbol.has_local_storage() || symbol.is_parameter() || isInline || !isExtern) {
-          continue;
-        }
-        symbolIndices[symbol.full_identifier] += publicSymbols.size();
+        symbolIndices[symbol.full_identifier] = symbolTable.size();
+        symbolTable.push_back(item);
       }
 
       static const auto write_relocations = [&]() { // 
-        std::map<std::string_view, std::vector<size_t>> reloc_table;
+        std::map<relocation_linkage, std::map<std::string_view, std::vector<size_t>>> reloc_table;
         for (auto& reloc : relocations) {
           const auto& func = meta.symbols[functions[reloc.function_id].symbol];
-          reloc_table[reloc.symbol].push_back(symbolAddress[func.full_identifier] + reloc.offset);
+          reloc_table[reloc.linkage][reloc.symbol].push_back(symbolAddress[func.full_identifier] + reloc.offset);
         }
 
         relocationTable.clear();
-        for (auto& [name, offsets] : reloc_table) {
-          program_relocation_table_entry entry;
-          entry.symbol = symbolIndices[name];
-          entry.count = offsets.size();
-          bytes::insert(relocationTable, entry);
-          for (auto& address : offsets)
-            bytes::insert(relocationTable, address);
+        for (auto& [linkage, symbol_relocs] : reloc_table) {
+          for (auto & [name, offsets] : symbol_relocs) {
+            program_relocation_table_entry entry;
+            entry.symbol  = symbolIndices[name];
+            entry.count   = offsets.size();
+            entry.linkage = linkage;
+            bytes::insert(relocationTable, entry);
+            for (auto& address : offsets)
+              bytes::insert(relocationTable, address);
+          }
         }
       };
       
@@ -1724,18 +1716,13 @@ namespace adder {
 
       header.header_size = sizeof(program_header);
       
-      header.public_symbol_count  = publicSymbols.size();
-      header.public_symbol_offset = header.header_size;
-      header.public_symbol_offset += bytes::calc_align_padding(alignof(program_symbol_table_entry), header.public_symbol_offset);
-
-      header.extern_symbol_count  = externSymbols.size();
-      header.extern_symbol_offset = header.public_symbol_offset
-        + header.public_symbol_count * sizeof(program_symbol_table_entry);
-      header.extern_symbol_offset += bytes::calc_align_padding(alignof(program_symbol_table_entry), header.public_symbol_offset);
+      header.symbol_count        = symbolTable.size();
+      header.symbol_table_offset = header.header_size;
+      header.symbol_table_offset += bytes::calc_align_padding(alignof(program_symbol_table_entry), header.symbol_table_offset);
 
       header.relocation_table_size   = relocationTable.size();
-      header.relocation_table_offset = header.extern_symbol_offset
-        + header.extern_symbol_count * sizeof(program_symbol_table_entry);
+      header.relocation_table_offset = header.symbol_table_offset
+        + header.symbol_count * sizeof(program_symbol_table_entry);
 
       header.symbol_data_size   = symbolData.size();
       header.symbol_data_offset = header.relocation_table_offset + header.relocation_table_size;
@@ -1747,9 +1734,7 @@ namespace adder {
       header.code_offset += bytes::calc_align_padding(alignof(vm::instruction), header.code_offset);
       header.code_size    = compiledCode.size() * sizeof(vm::instruction);
 
-      // Patch initializer entry
-      int64_t nextPublicEntry = 0;
-      int64_t nextExternEntry = 0;
+      int64_t nextEntry = 0;
       for (auto & symbol : meta.symbols) {
         const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
         if (symbol.has_local_storage() || symbol.is_parameter() || isInline) {
@@ -1758,21 +1743,21 @@ namespace adder {
 
         const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
         if (isExtern) {
-          externSymbols[nextExternEntry].name_address += header.symbol_data_offset;
-          ++nextExternEntry;
+          symbolTable[nextEntry].name_address += header.symbol_data_offset;
+          ++nextEntry;
         }
         else {
-          publicSymbols[nextPublicEntry].name_address += header.symbol_data_offset;
-      
+          symbolTable[nextEntry].name_address += header.symbol_data_offset;
+
           if (meta.is_function(symbol.type)) {
-            publicSymbols[nextPublicEntry].data_address += header.code_offset;
+            symbolTable[nextEntry].data_address += header.code_offset;
           }
           else {
-            publicSymbols[nextPublicEntry].data_address += header.symbol_data_offset;
+            symbolTable[nextEntry].data_address += header.symbol_data_offset;
           }
       
-          symbolAddress[symbol.full_identifier] += publicSymbols[nextPublicEntry].data_address;
-          ++nextPublicEntry;
+          symbolAddress[symbol.full_identifier] += symbolTable[nextEntry].data_address;
+          ++nextEntry;
         }
       }
       
@@ -1782,10 +1767,8 @@ namespace adder {
       // Assemble the program
       std::vector<uint8_t> executable;
       bytes::insert(executable, header);
-      executable.resize(header.public_symbol_offset, 0);
-      bytes::insert(executable, publicSymbols.begin(), publicSymbols.end());
-      executable.resize(header.extern_symbol_offset, 0);
-      bytes::insert(executable, externSymbols.begin(), externSymbols.end());
+      executable.resize(header.symbol_table_offset, 0);
+      bytes::insert(executable, symbolTable.begin(), symbolTable.end());
       executable.resize(header.relocation_table_offset, 0);
       bytes::insert(executable, relocationTable.begin(), relocationTable.end());
       executable.resize(header.symbol_data_offset, 0);

@@ -373,8 +373,18 @@ namespace adder {
         return false;
       }
 
-      if (statement.body.has_value() && (statement.flags & symbol_flags::inline_) == symbol_flags::none) {
-        program->begin_function(symbolIndex.value());
+      if ((statement.flags & symbol_flags::extern_) == symbol_flags::extern_) {
+        if (!program->begin_function(symbolIndex.value())) {
+          return false;
+        }
+        program->call_native(symbolIndex.value());
+        program->ret();
+        program->end_function();
+      }
+      else if (statement.body.has_value() && (statement.flags & symbol_flags::inline_) == symbol_flags::none) {
+        if (!program->begin_function(symbolIndex.value())) {
+          return false;
+        }
         program->push_return_pointer();
         program->push_frame_pointer();
         program->move(vm::register_names::fp, vm::register_names::sp);

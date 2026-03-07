@@ -362,9 +362,11 @@ namespace adder {
       } stack;
 
       allocator * heap_allocator = nullptr;
+
+      address_t (*lookup_extern_symbol)(char const* symbol) = nullptr;
     };
 
-    void relocate_program(program_view const & program);
+    void relocate_program(machine * vm, program_view const & program);
 
     const_program_view load_program(machine * vm, program_view const& program, bool relocated = true);
 

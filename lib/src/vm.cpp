@@ -7,7 +7,7 @@
 #include <iostream>
 #include <iomanip>
 
-// #define AD_PRINT_VM_STATE
+#define AD_PRINT_VM_STATE
 
 #define use_small_memcpy 1
 #define use_inline_small_memcpy 1
@@ -100,21 +100,35 @@ namespace adder {
       std::free(ptr);
     }
 
-    void relocate_program(program_view const & program) {
+    void relocate_program(vm::machine * vm, program_view const & program) {
       program_header header = program.get_header();
       uint64_t base = (uint64_t)program.data();
 
-      auto publicSymbols = program.get_public_symbols();
+      auto symbols = program.get_symbols();
       // auto externSymbols = program.get_extern_symbols();
 
-      for (size_t i = 0; i < header.public_symbol_count; ++i) {
-        publicSymbols[i].data_address += base;
-        publicSymbols[i].name_address += base;
+      for (size_t i = 0; i < header.symbol_count; ++i) {
+        if (symbols[i].data_address == 0)
+          continue; // extern, skip (could do with a flag instead of infering this)
+        symbols[i].data_address += base;
+        symbols[i].name_address += base;
       }
 
       for (program_relocation_table_entry * relocation = program.first_relocation_entry(); relocation != nullptr; relocation = program.next_relocation_entry(relocation)) {
-        auto addr = publicSymbols[relocation->symbol].data_address;
-        uint64_t const * offsets = (uint64_t const *)(relocation + 1);
+        address_t addr = 0;
+        switch (relocation->linkage) {
+        case relocation_linkage::internal:
+          addr = symbols[relocation->symbol].data_address;
+          break;
+        case relocation_linkage::extern_:
+          addr = vm->lookup_extern_symbol((char const *)symbols[relocation->symbol].name_address);
+          break;
+        default:
+          assert(false && "relocation linkage not supported (or implemented)");
+          break;
+        }
+
+        uint64_t const* offsets = (uint64_t const*)(relocation + 1);
         for (size_t i = 0; i < relocation->count; ++i) {
           *(uint64_t*)(base + offsets[i]) += addr;
         }
@@ -128,7 +142,7 @@ namespace adder {
       memcpy(loaded.data(), program.data(), program.size());
       // Relocate the program to the loaded base address
       if (relocated) {
-        relocate_program(loaded);
+        relocate_program(vm, loaded);
       }
 
       void * initializer = adder::vm::compile_call_handle(vm, *loaded.find_public_symbol("()=>void:$module_init"));
