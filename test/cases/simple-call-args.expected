@@ -1,0 +1,15 @@
+entry: ()=>void:main
+
+symbol:
+  name: ()=>void:main
+  exists: true
+
+symbol:
+  name: int64:test_first
+  exists: true
+  value: 5
+
+symbol:
+  name: int64:test_second
+  exists: true
+  value: 13

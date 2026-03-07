@@ -73,7 +73,8 @@ add_variant("adderTest", "consoleApp", {
     "test/**.hpp",
     "test/**.inl",
     "test/**.cpp",
-    "test/**.ad"
+    "test/**.ad",
+    "test/**.expected"
   },
   { "adder" }
 )

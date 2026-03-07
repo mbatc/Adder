@@ -1,0 +1,9 @@
+entry: ()=>void:main
+
+symbol:
+  name: ()=>void:main
+  exists: true
+
+symbol:
+  name: ()=>int64:test
+  exists: true

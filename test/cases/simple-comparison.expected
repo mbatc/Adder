@@ -1,0 +1,5 @@
+entry: ()=>void:main
+
+symbol:
+  name: ()=>void:main
+  exists: true

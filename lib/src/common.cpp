@@ -16,8 +16,8 @@ namespace adder {
       auto it = str.end() - 1;
       for (; it >= str.begin(); --it)
         if (chars.find(*it) == std::string::npos)
-          break;
-      return str.substr(0, str.end() - it - 1);
+          return str.substr(0, it - str.begin() + 1);
+      return "";
     }
 
     bool starts_with(std::string_view const & str, std::string_view const & needle) {

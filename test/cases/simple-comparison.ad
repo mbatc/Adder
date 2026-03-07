@@ -9,4 +9,6 @@ fn main() => void {
   const same_neq: bool = first != second;
   const diff_eq: bool = first == third;
   const diff_neq: bool = first != third;
+
+  // TODO: Expected results should be able to handle all primitive types
 }
