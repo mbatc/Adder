@@ -1,0 +1,12 @@
+
+let test_result: int64 = 0;
+
+fn my_fn(i: int64) => int64 {
+  test_result = i;
+}
+
+let my_fn_ptr: [ref](int64)=>int64 = my_fn;
+
+fn main() => void {
+  my_fn_ptr(10);
+}

@@ -200,7 +200,6 @@ namespace adder {
         return false;
       }
 
-      // program->allocate_temporary_value(returnType.value());
       program->push_value({}); // Null return value
       program->push_value(initializer);
       program->push_value(receiver);
@@ -208,6 +207,7 @@ namespace adder {
       if (!generate_call(ast, program)) {
         return false;
       }
+
       // Pop return value of call
       program->pop_value();
       return true;
@@ -591,18 +591,19 @@ namespace adder {
       if (function->symbol_index.has_value())
         callable = program->meta.symbols[function->symbol_index.value()];
 
-      auto & symbolType = program->meta.types[function->type_index.value()];
-      
+      auto decayedSymbolTypeIndex = program->meta.remove_reference(program->meta.decay_type(function->type_index.value()));
+      auto const & symbolType = program->meta.types[function->type_index.value()];
+      auto const & decayedSymbolType = program->meta.types[decayedSymbolTypeIndex.value()];
       // Pointer to the actual function definition.
-      // Allows us to inline the call if possible
+      // Allows us to inline the call if possible.
       expr::function_declaration const * func =
-        callable.has_value() && callable->declaration_id.has_value()
+        callable.has_value() && callable->declaration_id.has_value() && ast.is<expr::function_declaration>(callable->declaration_id.value())
         ? &ast.get<expr::function_declaration>(callable->declaration_id.value())
         : nullptr;
 
       type_function const * signature =
-        std::holds_alternative<type_function>(symbolType.desc)
-        ? &std::get<type_function>(symbolType.desc)
+        std::holds_alternative<type_function>(decayedSymbolType.desc)
+        ? &std::get<type_function>(decayedSymbolType.desc)
         : nullptr;
 
       if (signature == nullptr) {

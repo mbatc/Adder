@@ -372,8 +372,6 @@ namespace adder {
         if (get_functor_type(sym.type) != functor_type::operator_)
           return false;
 
-        // assert(false && "TODO: Need to handle invoke fn with reference parameter");
-
         size_t const types[2] = { lhsType, rhsType };
         auto score = get_parameter_list_score(scopeId, sym.type, types, 2);
 
@@ -438,7 +436,7 @@ namespace adder {
       if (!is_function(funcType)) {
         return std::nullopt;
       }
-      auto decayed = decay_type(funcType);
+      auto decayed = remove_reference(decay_type(funcType));
       if (!decayed.has_value()) {
         return std::nullopt;
       }
@@ -623,7 +621,6 @@ namespace adder {
 
     void program_builder::emit_scope_cleanup(size_t upToScopeId) {
       assert(!scopes.empty());
-      // assert(scopes.back().temporaries.size() == 0);
       for (size_t scopeId = scopes.size() - 1; scopeId >= upToScopeId; --scopeId) {
         auto & scope = scopes[scopeId];
         for (auto it = scope.variables.rbegin(); it != scope.variables.rend(); ++it) {
@@ -817,8 +814,6 @@ namespace adder {
         func.temp_storage_used -= sz;
       } 
       else if (val.indirect_register_index == vm::register_names::sp) {
-        // func.call_params_used -= sz;
-
         // Ammend other temporaries with addresses relative to the stack pointer
         for (auto& temporary : scopes.back().temporaries) {
           if (temporary.indirect_register_index == vm::register_names::sp) {
@@ -843,7 +838,7 @@ namespace adder {
       const uint64_t base = sizeof(vm::instruction) * (functions[funcId].instructions.size() - 1);
       const uint64_t addr = base + offset;
       // TODO: Could be stored as a list of addresses per symbol.
-      //       Might be more efficient when evaluating the relocations..
+      //       Might be more efficient when evaluating the relocations.
       relocations.push_back({ symbol, addr, function_stack.back() });
     }
 
@@ -864,7 +859,7 @@ namespace adder {
       program_metadata::symbol & symbol = meta.symbols[symbolId];
 
       if (!symbol.function_root_scope_id.has_value()) {
-        // TODO: Push error. Cannot begin function body. No scope assocated with declaration. (possibly forward decl).
+        // TODO: Push error. Cannot begin function body. No scope associated with declaration. (possibly forward decl).
         return false;
       }
 
@@ -1087,25 +1082,6 @@ namespace adder {
       op.compare.rhs = b;
       add_instruction(op);
     }
-
-    // void program_builder::conditional_move(vm::register_index dst, vm::register_index src, vm::register_index cmpReg, uint8_t cmpValue) {
-    //   vm::instruction op;
-    //   op.code = vm::op_code::conditional_move;
-    //   op.conditional_move.dst = dst;
-    //   op.conditional_move.src = src;
-    //   op.conditional_move.cmp_reg = cmpReg;
-    //   op.conditional_move.cmp_val = cmpValue;
-    //   add_instruction(op);
-    // }
-    //
-    // void program_builder::conditional_jump_relative(vm::register_value offset, vm::register_index cmpReg, uint8_t cmpValue) {
-    //   vm::instruction op;
-    //   op.code = vm::op_code::conditional_jump_relative;
-    //   op.conditional_jump_relative.offset  = offset;
-    //   op.conditional_jump_relative.cmp_reg = cmpReg;
-    //   op.conditional_jump_relative.cmp_val = cmpValue;
-    //   add_instruction(op);
-    // }
 
     void program_builder::push_return_pointer() {
       push(vm::register_names::rp);
@@ -1486,6 +1462,7 @@ namespace adder {
     //   }
     // 
     // }
+
     void program_builder::bitwise_and(vm::register_index dst, vm::register_index val) {
       vm::instruction op;
       op.code = vm::op_code::bitwise_and;

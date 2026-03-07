@@ -553,7 +553,7 @@ namespace adder {
         switch (tokenizer->current().id) {
         case lexer::token_id::open_paren: {
           return consume_type_fn(tree, tokenizer);
-        } break;
+        }
         case lexer::token_id::open_bracket: {
           auto modifier = consume_type_modifiers(tree, tokenizer, lexer::token_id::close_bracket);
           if (!modifier.has_value()) {
@@ -565,13 +565,13 @@ namespace adder {
           }
           modifier->modified = modified.value();
           return tree->add(modifier.value());
-        } break;
+        }
         case lexer::token_id::identifier: {
           type_name name;
           name.name = tokenizer->current().name;
           tokenizer->next();
           return tree->add(name);
-        } break;
+        }
         default: {
           // TODO: Log error. Invalid type expression
           return std::nullopt;
@@ -711,7 +711,7 @@ namespace adder {
     ast parse(lexer::token_parser * tokenizer) {
       ast ast;
       block topScope;
-      // compiler::define_builtins(&ast, &topScope);
+      compiler::define_builtins(&ast, &topScope);
 
       while (!tokenizer->eof()) {
         std::optional<size_t> nextStatement;
