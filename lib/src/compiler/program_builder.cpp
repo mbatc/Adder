@@ -1741,24 +1741,18 @@ namespace adder {
           continue;
         }
 
-        const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
-        if (isExtern) {
-          symbolTable[nextEntry].name_address += header.symbol_data_offset;
-          ++nextEntry;
+        symbolTable[nextEntry].name_address += header.symbol_data_offset;
+        if (meta.is_function(symbol.type)) {
+          symbolTable[nextEntry].data_address += header.code_offset;
         }
         else {
-          symbolTable[nextEntry].name_address += header.symbol_data_offset;
-
-          if (meta.is_function(symbol.type)) {
-            symbolTable[nextEntry].data_address += header.code_offset;
-          }
-          else {
+          const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
+          if (!isExtern) {
             symbolTable[nextEntry].data_address += header.symbol_data_offset;
           }
-      
-          symbolAddress[symbol.full_identifier] += symbolTable[nextEntry].data_address;
-          ++nextEntry;
         }
+        symbolAddress[symbol.full_identifier] += symbolTable[nextEntry].data_address;
+        ++nextEntry;
       }
       
       // Now all the symbol addresses are final, write the final relocation table.

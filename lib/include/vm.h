@@ -17,11 +17,13 @@ namespace adder {
     using register_index = uint8_t;
     using address_t      = uint64_t;
 
-    struct native_call_context;
+    struct call_context;
+    struct machine;
 
-    uint8_t* native_read_arg(native_call_context * ctx, size_t sz);
+    uint8_t* call_context_read_arg(call_context * ctx, size_t sz);
+    machine* call_context_get_machine(call_context * ctx);
 
-    using native_method_t = void (*)(native_call_context *);
+    using native_method_t = void (*)(call_context *);
 
     enum class op_code : uint8_t {
       exit,               ///< Load a value from a memory address
@@ -375,6 +377,7 @@ namespace adder {
     ///   e.g. typedef (*CallParameterInitializer)(void * ptr, int position, type * type, void *userdata);
     ///        typedef (*ReturnValueHandler)(void const * ptr, type * type, void *userdata);
     void* compile_call_handle(machine* vm, program_symbol_table_entry const & symbol);
+    void* compile_call_handle(machine* vm, address_t const & routineAddress);
     void free(machine* vm, void * ptr);
     void call(machine* vm, void * handle);
   }

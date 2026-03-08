@@ -7,7 +7,7 @@
 #include <iostream>
 #include <iomanip>
 
-#define AD_PRINT_VM_STATE
+// #define AD_PRINT_VM_STATE
 
 #define use_small_memcpy 1
 #define use_inline_small_memcpy 1
@@ -78,14 +78,19 @@ namespace adder {
   }
 
   namespace vm {
-    struct native_call_context {
+    struct call_context {
       uint8_t * stack_start = nullptr;
       uint8_t * stack       = nullptr;
+      machine * vm          = nullptr;
     };
 
-    uint8_t* native_read_arg(native_call_context * ctx, size_t sz) {
+    uint8_t* call_context_read_arg(call_context * ctx, size_t sz){
       ctx->stack -= sz;
       return ctx->stack;
+    }
+
+    machine* call_context_get_machine(call_context* ctx) {
+      return ctx->vm;
     }
 
     size_t instruction_size(op_code /*code*/) {
@@ -127,6 +132,8 @@ namespace adder {
           assert(false && "relocation linkage not supported (or implemented)");
           break;
         }
+
+        assert(addr != 0 && "Failed to find symbol address. TODO: Fail more gracefully.");
 
         uint64_t const* offsets = (uint64_t const*)(relocation + 1);
         for (size_t i = 0; i < relocation->count; ++i) {
@@ -378,8 +385,9 @@ namespace adder {
       }
 
       inline void call_native(machine * vm, op_code_args<op_code::call_native> const & args) {
-        native_call_context ctx;
+        call_context ctx;
         ctx.stack = ctx.stack_start = vm->registers[vm::register_names::sp].data;
+        ctx.vm    = vm;
         args.callback(&ctx);
       }
 
@@ -438,6 +446,10 @@ namespace adder {
     };
 
     void * compile_call_handle(machine * vm, program_symbol_table_entry const & symbol) {
+      return compile_call_handle(vm, symbol.data_address);
+    }
+
+    void* compile_call_handle(machine* vm, address_t const& routineAddress) {
       compiler::program_builder stub;
       stub.functions.emplace_back();
       stub.function_stack.push_back(0);
@@ -446,7 +458,7 @@ namespace adder {
       stub.push_frame_pointer();
       stub.move(register_names::fp, register_names::sp);
       stub.begin_scope();
-      stub.call(symbol.data_address);
+      stub.call(routineAddress);
       stub.end_scope();
       stub.pop_frame_pointer();
       stub.pop_return_pointer();
@@ -514,50 +526,51 @@ namespace adder {
 
   std::string op_code_to_string(vm::op_code op) {
       switch (op) {
-      case adder::vm::op_code::exit: return "exit";                             ///< Stop program execution
-      case adder::vm::op_code::noop: return "no-op";                            ///< No op
-      case adder::vm::op_code::load: return "load";                             ///< Load a value from a memory address
-      case adder::vm::op_code::load_addr: return "load_addr";                   ///< Load a value from a constant address
-      case adder::vm::op_code::load_offset: return "load_offset";               ///< Load a value from an address (stored in a register) with some offset
-      case adder::vm::op_code::store: return "store";                           ///< Store a value to a memory address
-      case adder::vm::op_code::store_addr: return "store_addr";                 ///< Store a value to a constant address
-      case adder::vm::op_code::store_offset: return "store_offset";             ///< Store a value to an address (stored in a register) with some offset
-      case adder::vm::op_code::store_value: return "store_value";               ///< Store a constant to a memory address
-      case adder::vm::op_code::store_value_addr: return "store_value_addr";     ///< Store a constant to a constant address
-      case adder::vm::op_code::store_value_offset: return "store_value_offset"; ///< Store a constant to an address (stored in a register) with some offset
-      case adder::vm::op_code::set: return "set";                               ///< Set the value of a register
-      case adder::vm::op_code::add_i64: return "add_i64";                       ///< Add two registers as integers
-      case adder::vm::op_code::add_i64_constant: return "add_i64_constant";     ///< Add two registers as integers
-      case adder::vm::op_code::add_f64: return "add_f64";                       ///< Add two registers as floats
-      case adder::vm::op_code::sub_i64: return "add_i64";                       ///< Subtract two registers as integers
-      case adder::vm::op_code::sub_f64: return "add_f64";                       ///< Subtract two registers as floats
-      case adder::vm::op_code::mul_i64: return "mul_i64";                       ///< Multiply two registers as integers
-      case adder::vm::op_code::mul_f64: return "mul_f64";                       ///< Multiply two registers as floats
-      case adder::vm::op_code::div_i64: return "div_i64";                       ///< Set the value of a register as integers
-      case adder::vm::op_code::div_f64: return "div_f64";                       ///< Divide two registers as floats
-      case adder::vm::op_code::alloc_stack: return "alloc_stack";               ///< Reserve space on the stack
-      case adder::vm::op_code::free_stack: return "free_stack";                 ///< Free space on the stack
-      case adder::vm::op_code::push: return "push";                             ///< Push a register to the stack
-      case adder::vm::op_code::pop: return "pop";                               ///< Pop a register value from the stack. Store in named register
-      case adder::vm::op_code::jump: return "jump";                             ///< Set the program counter.
-      case adder::vm::op_code::jump_indirect: return "jump_indirect";           ///< Set the program counter to a value stored in a register
-      case adder::vm::op_code::jump_relative: return "jump_relative";           ///< Set the program counter to a location relative to the current instruction
-      case adder::vm::op_code::jump_if_zero_relative: return "jump_if_zero_relative";   ///< Set the program counter to a location relative to the current instruction
-      case adder::vm::op_code::move: return "move";                             ///< Move a value from a register
-      case adder::vm::op_code::bitwise_and: return "bitwise_and";               ///< Move a value from a register
-      case adder::vm::op_code::bitwise_or: return "bitwise_or";                 ///< Move a value from a register
-      case adder::vm::op_code::bitwise_xor: return "bitwise_xor";               ///< Move a value from a register
-      case adder::vm::op_code::bitwise_and_value: return "bitwise_and_value";   ///< Move a value from a register
-      case adder::vm::op_code::bitwise_or_value: return "bitwise_or_value";     ///< Move a value from a register
-      case adder::vm::op_code::bitwise_xor_value: return "bitwise_xor_value";   ///< Move a value from a register
-      case adder::vm::op_code::set_non_zero: return "set_non_zero";             ///< Move a value from a register
-      case adder::vm::op_code::compare_i64: return "compare_i64";               ///< Compare the values in two registers as integers
-      case adder::vm::op_code::compare_f64: return "compare_f64";               ///< Compare the values in two registers as floats
-      case adder::vm::op_code::conditional_jump_relative: return "conditional_jump";     ///< Set the program counter if the specified comparison bits are set.
-      case adder::vm::op_code::conditional_move: return "conditional_move";     ///< Compare the specified register with a value. Move if equal
-      case adder::vm::op_code::call: return "call";                             ///< Compare the specified register with a value. Move if equal
-      case adder::vm::op_code::call_indirect: return "call_indirect";           ///< Compare the specified register with a value. Move if equal
-      case adder::vm::op_code::ret: return "ret";                               ///< Compare the specified register with a value. Move if equal
+      case adder::vm::op_code::exit: return "exit";
+      case adder::vm::op_code::noop: return "no-op";
+      case adder::vm::op_code::load: return "load";
+      case adder::vm::op_code::load_addr: return "load_addr";
+      case adder::vm::op_code::load_offset: return "load_offset";
+      case adder::vm::op_code::store: return "store";
+      case adder::vm::op_code::store_addr: return "store_addr";
+      case adder::vm::op_code::store_offset: return "store_offset";
+      case adder::vm::op_code::store_value: return "store_value";
+      case adder::vm::op_code::store_value_addr: return "store_value_addr";
+      case adder::vm::op_code::store_value_offset: return "store_value_offset";
+      case adder::vm::op_code::set: return "set";
+      case adder::vm::op_code::add_i64: return "add_i64";
+      case adder::vm::op_code::add_i64_constant: return "add_i64_constant";
+      case adder::vm::op_code::add_f64: return "add_f64";
+      case adder::vm::op_code::sub_i64: return "add_i64";
+      case adder::vm::op_code::sub_f64: return "add_f64";
+      case adder::vm::op_code::mul_i64: return "mul_i64";
+      case adder::vm::op_code::mul_f64: return "mul_f64";
+      case adder::vm::op_code::div_i64: return "div_i64";
+      case adder::vm::op_code::div_f64: return "div_f64";
+      case adder::vm::op_code::alloc_stack: return "alloc_stack";
+      case adder::vm::op_code::free_stack: return "free_stack";
+      case adder::vm::op_code::push: return "push";
+      case adder::vm::op_code::pop: return "pop";
+      case adder::vm::op_code::jump: return "jump";
+      case adder::vm::op_code::jump_indirect: return "jump_indirect";
+      case adder::vm::op_code::jump_relative: return "jump_relative";
+      case adder::vm::op_code::jump_if_zero_relative: return "jump_if_zero_relative";
+      case adder::vm::op_code::move: return "move";
+      case adder::vm::op_code::bitwise_and: return "bitwise_and";
+      case adder::vm::op_code::bitwise_or: return "bitwise_or";
+      case adder::vm::op_code::bitwise_xor: return "bitwise_xor";
+      case adder::vm::op_code::bitwise_and_value: return "bitwise_and_value";
+      case adder::vm::op_code::bitwise_or_value: return "bitwise_or_value";
+      case adder::vm::op_code::bitwise_xor_value: return "bitwise_xor_value";
+      case adder::vm::op_code::set_non_zero: return "set_non_zero";
+      case adder::vm::op_code::compare_i64: return "compare_i64";
+      case adder::vm::op_code::compare_f64: return "compare_f64";
+      case adder::vm::op_code::conditional_jump_relative: return "conditional_jump";
+      case adder::vm::op_code::conditional_move: return "conditional_move";
+      case adder::vm::op_code::call: return "call";
+      case adder::vm::op_code::call_indirect: return "call_indirect";
+      case adder::vm::op_code::call_native: return "call_native";
+      case adder::vm::op_code::ret: return "ret";
       default: return "unknown";
       }
   }

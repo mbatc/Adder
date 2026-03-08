@@ -18,11 +18,25 @@ namespace native_methods {
     return sum;
   }
 
-  void sum_sequence_cb(adder::vm::native_call_context *ctx) {
-    int64_t end   = *(int64_t*)adder::vm::native_read_arg(ctx, sizeof(int64_t));
-    int64_t start = *(int64_t*)adder::vm::native_read_arg(ctx, sizeof(int64_t));
-    int64_t * ret = *(int64_t**)adder::vm::native_read_arg(ctx, sizeof(int64_t*));
+  void sum_sequence_cb(adder::vm::call_context *ctx) {
+    int64_t end   = *(int64_t*)adder::vm::call_context_read_arg(ctx, sizeof(int64_t));  // param 1
+    int64_t start = *(int64_t*)adder::vm::call_context_read_arg(ctx, sizeof(int64_t));  // param 0
+    int64_t *ret  =  (int64_t*)adder::vm::call_context_read_arg(ctx, sizeof(int64_t*)); // return
     *ret = sum_sequence(start, end);
+  }
+
+  void reentrant_cb(adder::vm::call_context *ctx) {
+    adder::vm::address_t callback = *(adder::vm::address_t*)adder::vm::call_context_read_arg(ctx, sizeof(int64_t));
+    adder::vm::machine * vm = adder::vm::call_context_get_machine(ctx);
+    void * handle = adder::vm::compile_call_handle(vm, callback);
+
+    // TODO: When we can call with args and handle return values
+    // adder::vm::push_return_value();
+    // adder::vm::push_arg();
+    adder::vm::call(vm, handle);
+    // adder::vm::pop_return_value();
+    adder::vm::free(vm, handle);
+    handle = nullptr;
   }
 }
 
@@ -55,30 +69,31 @@ int main(int argc, char ** argv) {
     std::optional<adder::test::expected> expected_result;
   };
 
-  std::map<std::string, test_details> tests;
-  {
-    for (auto& item : std::filesystem::directory_iterator(testsRoot)) {
-      test_details test;
-      if (item.path().extension() != ".ad" || !item.is_regular_file()) {
-        continue;
+  const auto add_test_details = [](std::map<std::string, test_details> *tests, std::filesystem::path srcFile) {
+    test_details test;
+    test.source = read_file(srcFile.string());
+    std::filesystem::path expectedPath = srcFile;
+    expectedPath.replace_extension("expected");
+    if (std::filesystem::exists(expectedPath)) {
+      test.expected_result = adder::test::expected::parse(read_file(expectedPath.string()));
+      if (!test.expected_result.has_value()) {
+        printf("! Failed to parse expected results: %s", expectedPath.string().c_str());
       }
-
-      test.source = read_file(item.path().string());
-
-      std::filesystem::path expectedPath = item.path();
-      expectedPath.replace_extension("expected");
-      if (std::filesystem::exists(expectedPath)) {
-        test.expected_result = adder::test::expected::parse(read_file(expectedPath.string()));
-        if (!test.expected_result.has_value()) {
-          printf("! Failed to parse expected results: %s", expectedPath.string().c_str());
-        }
-      }
-      else {
-        printf("! No expected results defined for %s\n", item.path().string().c_str());
-      }
-
-      tests[item.path().string()] = test;
     }
+    else {
+      printf("! No expected results defined for %s\n", srcFile.string().c_str());
+    }
+
+    (*tests)[srcFile.string()] = test;
+  };
+
+  std::map<std::string, test_details> tests;
+  for (auto& item : std::filesystem::directory_iterator(testsRoot)) {
+    if (item.path().extension() != ".ad" || !item.is_regular_file()) {
+      continue;
+    }
+
+    add_test_details(&tests, item.path());
   }
 
   std::optional<std::string> singleFileTest;
@@ -88,15 +103,11 @@ int main(int argc, char ** argv) {
   // singleFileTest = "branch-if-false.ad";
   // singleFileTest = "call-recursive.ad";
   // singleFileTest = "function-ptr.ad";
-  singleFileTest = "call-native.ad";
+  // singleFileTest = "call-native.ad";
 
   if (singleFileTest.has_value()) {
-    tests = {
-      { testsRoot + "/" + singleFileTest.value(), {
-        read_file(testsRoot + "/" + singleFileTest.value()),
-        adder::test::expected{}
-      }}
-    };
+    tests.clear();
+    add_test_details(&tests, testsRoot + "/" + singleFileTest.value());
   }
 
   std::vector<std::string> failed;
@@ -114,8 +125,11 @@ int main(int argc, char ** argv) {
     adder::vm::machine vm(&allocator);
 
     vm.lookup_extern_symbol = [](char const * symbol) -> adder::vm::address_t {
-      printf("extern_lookup: %s\n", symbol);
-      return (adder::vm::address_t)native_methods::sum_sequence_cb;
+      if (strcmp(symbol, "(int64,int64)=>int64:sum_sequence") == 0)
+        return (adder::vm::address_t)native_methods::sum_sequence_cb;
+      if (strcmp(symbol, "([ref]()=>void)=>int64:reentrant") == 0)
+        return (adder::vm::address_t)native_methods::reentrant_cb;
+      return 0;
     };
 
     bool ok = true;
