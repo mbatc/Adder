@@ -78,6 +78,21 @@ namespace adder {
   }
 
   namespace vm {
+    struct call_context {
+      uint8_t * stack_start = nullptr;
+      uint8_t * stack       = nullptr;
+      machine * vm          = nullptr;
+    };
+
+    uint8_t* call_context_read_arg(call_context * ctx, size_t sz){
+      ctx->stack -= sz;
+      return ctx->stack;
+    }
+
+    machine* call_context_get_machine(call_context* ctx) {
+      return ctx->vm;
+    }
+
     size_t instruction_size(op_code /*code*/) {
       return sizeof(instruction);
     }
@@ -90,21 +105,37 @@ namespace adder {
       std::free(ptr);
     }
 
-    void relocate_program(program_view const & program) {
+    void relocate_program(vm::machine * vm, program_view const & program) {
       program_header header = program.get_header();
       uint64_t base = (uint64_t)program.data();
 
-      auto publicSymbols = program.get_public_symbols();
+      auto symbols = program.get_symbols();
       // auto externSymbols = program.get_extern_symbols();
 
-      for (size_t i = 0; i < header.public_symbol_count; ++i) {
-        publicSymbols[i].data_address += base;
-        publicSymbols[i].name_address += base;
+      for (size_t i = 0; i < header.symbol_count; ++i) {
+        if (symbols[i].data_address == 0)
+          continue; // extern, skip (could do with a flag instead of infering this)
+        symbols[i].data_address += base;
+        symbols[i].name_address += base;
       }
 
       for (program_relocation_table_entry * relocation = program.first_relocation_entry(); relocation != nullptr; relocation = program.next_relocation_entry(relocation)) {
-        auto addr = publicSymbols[relocation->symbol].data_address;
-        uint64_t const * offsets = (uint64_t const *)(relocation + 1);
+        address_t addr = 0;
+        switch (relocation->linkage) {
+        case relocation_linkage::internal:
+          addr = symbols[relocation->symbol].data_address;
+          break;
+        case relocation_linkage::extern_:
+          addr = vm->lookup_extern_symbol((char const *)symbols[relocation->symbol].name_address);
+          break;
+        default:
+          assert(false && "relocation linkage not supported (or implemented)");
+          break;
+        }
+
+        assert(addr != 0 && "Failed to find symbol address. TODO: Fail more gracefully.");
+
+        uint64_t const* offsets = (uint64_t const*)(relocation + 1);
         for (size_t i = 0; i < relocation->count; ++i) {
           *(uint64_t*)(base + offsets[i]) += addr;
         }
@@ -118,7 +149,7 @@ namespace adder {
       memcpy(loaded.data(), program.data(), program.size());
       // Relocate the program to the loaded base address
       if (relocated) {
-        relocate_program(loaded);
+        relocate_program(vm, loaded);
       }
 
       void * initializer = adder::vm::compile_call_handle(vm, *loaded.find_public_symbol("()=>void:$module_init"));
@@ -353,6 +384,13 @@ namespace adder {
         vm->registers[vm::register_names::pc].value = vm->registers[args.addr].value;
       }
 
+      inline void call_native(machine * vm, op_code_args<op_code::call_native> const & args) {
+        call_context ctx;
+        ctx.stack = ctx.stack_start = vm->registers[vm::register_names::sp].data;
+        ctx.vm    = vm;
+        args.callback(&ctx);
+      }
+
       inline void ret(machine * vm, op_code_args<op_code::ret> const &) {
         vm->registers[vm::register_names::pc] = vm->registers[vm::register_names::rp];
       }
@@ -403,10 +441,15 @@ namespace adder {
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::conditional_move); op::conditional_move(vm, inst->conditional_move); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::call); op::call(vm, inst->call); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::call_indirect); op::call_indirect(vm, inst->call_indirect); },
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::call_native); op::call_native(vm, inst->call_native); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::ret); op::ret(vm, inst->ret); },
     };
 
     void * compile_call_handle(machine * vm, program_symbol_table_entry const & symbol) {
+      return compile_call_handle(vm, symbol.data_address);
+    }
+
+    void* compile_call_handle(machine* vm, address_t const& routineAddress) {
       compiler::program_builder stub;
       stub.functions.emplace_back();
       stub.function_stack.push_back(0);
@@ -415,11 +458,11 @@ namespace adder {
       stub.push_frame_pointer();
       stub.move(register_names::fp, register_names::sp);
       stub.begin_scope();
-      stub.call(symbol.data_address);
+      stub.call(routineAddress);
       stub.end_scope();
       stub.pop_frame_pointer();
       stub.pop_return_pointer();
-      
+
       adder::vm::instruction op;
       op.code = adder::vm::op_code::exit;
       stub.add_instruction(op);
@@ -434,7 +477,7 @@ namespace adder {
       vm->heap_allocator->free(ptr);
     }
 
-    void call(machine* vm, void* handle)
+    void call(machine * vm, void* handle)
     {
       // Set program counter to the entry point.
       vm->registers[adder::vm::register_names::pc].ptr = handle;
@@ -479,5 +522,73 @@ namespace adder {
       } while (pInstruction->code != op_code::exit);
 #endif
     }
+  }
+
+  std::string op_code_to_string(vm::op_code op) {
+      switch (op) {
+      case adder::vm::op_code::exit: return "exit";
+      case adder::vm::op_code::noop: return "no-op";
+      case adder::vm::op_code::load: return "load";
+      case adder::vm::op_code::load_addr: return "load_addr";
+      case adder::vm::op_code::load_offset: return "load_offset";
+      case adder::vm::op_code::store: return "store";
+      case adder::vm::op_code::store_addr: return "store_addr";
+      case adder::vm::op_code::store_offset: return "store_offset";
+      case adder::vm::op_code::store_value: return "store_value";
+      case adder::vm::op_code::store_value_addr: return "store_value_addr";
+      case adder::vm::op_code::store_value_offset: return "store_value_offset";
+      case adder::vm::op_code::set: return "set";
+      case adder::vm::op_code::add_i64: return "add_i64";
+      case adder::vm::op_code::add_i64_constant: return "add_i64_constant";
+      case adder::vm::op_code::add_f64: return "add_f64";
+      case adder::vm::op_code::sub_i64: return "add_i64";
+      case adder::vm::op_code::sub_f64: return "add_f64";
+      case adder::vm::op_code::mul_i64: return "mul_i64";
+      case adder::vm::op_code::mul_f64: return "mul_f64";
+      case adder::vm::op_code::div_i64: return "div_i64";
+      case adder::vm::op_code::div_f64: return "div_f64";
+      case adder::vm::op_code::alloc_stack: return "alloc_stack";
+      case adder::vm::op_code::free_stack: return "free_stack";
+      case adder::vm::op_code::push: return "push";
+      case adder::vm::op_code::pop: return "pop";
+      case adder::vm::op_code::jump: return "jump";
+      case adder::vm::op_code::jump_indirect: return "jump_indirect";
+      case adder::vm::op_code::jump_relative: return "jump_relative";
+      case adder::vm::op_code::jump_if_zero_relative: return "jump_if_zero_relative";
+      case adder::vm::op_code::move: return "move";
+      case adder::vm::op_code::bitwise_and: return "bitwise_and";
+      case adder::vm::op_code::bitwise_or: return "bitwise_or";
+      case adder::vm::op_code::bitwise_xor: return "bitwise_xor";
+      case adder::vm::op_code::bitwise_and_value: return "bitwise_and_value";
+      case adder::vm::op_code::bitwise_or_value: return "bitwise_or_value";
+      case adder::vm::op_code::bitwise_xor_value: return "bitwise_xor_value";
+      case adder::vm::op_code::set_non_zero: return "set_non_zero";
+      case adder::vm::op_code::compare_i64: return "compare_i64";
+      case adder::vm::op_code::compare_f64: return "compare_f64";
+      case adder::vm::op_code::conditional_jump_relative: return "conditional_jump";
+      case adder::vm::op_code::conditional_move: return "conditional_move";
+      case adder::vm::op_code::call: return "call";
+      case adder::vm::op_code::call_indirect: return "call_indirect";
+      case adder::vm::op_code::call_native: return "call_native";
+      case adder::vm::op_code::ret: return "ret";
+      default: return "unknown";
+      }
+  }
+
+  std::string register_to_string(size_t idx) {
+    const std::string names[adder::vm::register_names::count] = {
+      "r0",
+      "r1",
+      "r2",
+      "r3",
+      "r4",
+      "r5",
+      "r6",
+      "pc",
+      "fp",
+      "sp",
+      "rp"
+    };
+    return idx >= adder::vm::register_names::count ? "unknown" : names[idx];
   }
 }
