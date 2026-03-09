@@ -480,6 +480,8 @@ namespace adder {
     void call(machine * vm, void* handle)
     {
       // Set program counter to the entry point.
+      // Save previous program counter so we can restore it after the call.
+      void * const rp = vm->registers[adder::vm::register_names::pc].ptr;
       vm->registers[adder::vm::register_names::pc].ptr = handle;
 
 #ifdef AD_PRINT_VM_STATE
@@ -521,6 +523,8 @@ namespace adder {
         instruction_table[(uint8_t)pInstruction->code](vm, pInstruction);
       } while (pInstruction->code != op_code::exit);
 #endif
+
+      vm->registers[adder::vm::register_names::pc].ptr = rp;
     }
   }
 

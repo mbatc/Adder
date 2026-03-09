@@ -104,6 +104,7 @@ int main(int argc, char ** argv) {
   // singleFileTest = "call-recursive.ad";
   // singleFileTest = "function-ptr.ad";
   // singleFileTest = "call-native.ad";
+  // singleFileTest = "call-native-reentrant.ad";
 
   if (singleFileTest.has_value()) {
     tests.clear();
