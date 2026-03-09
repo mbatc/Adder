@@ -372,13 +372,19 @@ namespace adder {
 
     const_program_view load_program(machine * vm, program_view const& program, bool relocated = true);
 
-    /// Call handle should include metadata for the symbol return/parameter types.
-    /// `call` should take a callback used to initialize parameters and receive the return value
-    ///   e.g. typedef (*CallParameterInitializer)(void * ptr, int position, type * type, void *userdata);
-    ///        typedef (*ReturnValueHandler)(void const * ptr, type * type, void *userdata);
     void* compile_call_handle(machine* vm, program_symbol_table_entry const & symbol);
     void* compile_call_handle(machine* vm, address_t const & routineAddress);
     void free(machine* vm, void * ptr);
+
+    /// Push a parameter for `call`.
+    /// You must ensure the correct parameters are allocated.
+    /// The first parameter is the return value destination.
+    /// The is function simply allocates storage for the parameters.
+    /// It is the callers responsibility to construct the variables.
+    void* call_push_parameter(machine* vm, size_t bytes);
+    /// Pop a call parameter.
+    /// It is up to the caller to pop the correct number of bytes and to destruct the parameters.
+    void* call_pop_parameter(machine* vm, size_t bytes);
     void call(machine* vm, void * handle);
   }
 
