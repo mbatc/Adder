@@ -1,0 +1,12 @@
+
+let test_result: int64 = 0;
+
+fn test_callback() => void {
+  test_result = 1;
+}
+
+extern fn reentrant(cb: [ref]()=>void) => int64;
+
+fn main() => void {
+  reentrant(test_callback);
+}
