@@ -459,14 +459,14 @@ namespace adder {
       stub.functions.emplace_back();
       stub.function_stack.push_back(0);
 
-      stub.push_return_pointer();
-      stub.push_frame_pointer();
-      stub.move(register_names::fp, register_names::sp);
+      // stub.push_return_pointer();
+      // stub.push_frame_pointer();
+      // stub.move(register_names::fp, register_names::sp);
       stub.begin_scope();
       stub.call(routineAddress);
       stub.end_scope();
-      stub.pop_frame_pointer();
-      stub.pop_return_pointer();
+      // stub.pop_frame_pointer();
+      // stub.pop_return_pointer();
 
       adder::vm::instruction op;
       op.code = adder::vm::op_code::exit;

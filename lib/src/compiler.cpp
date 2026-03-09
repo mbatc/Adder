@@ -405,7 +405,6 @@ namespace adder {
           const auto & decl = ast.get<expr::variable_declaration>(argId);
           const auto & argSymbol = program->meta.statement_info[argId].symbol_index;
           if (!argSymbol.has_value()) {
-            // TODO: Report error. Argument has unknown type
             printf("Error: Unknown argument type\n");
             return false;
           }
@@ -422,7 +421,6 @@ namespace adder {
         }
 
         if (!generate_code(ast, program, statement.body.value())) {
-          // TODO: Report error. Failed to generate code for function.
           printf("Error: Failed to generate code for function\n");
           return false;
         }
@@ -494,7 +492,6 @@ namespace adder {
         auto unnamedInit = program->find_unnamed_initializer(argType, argType);
 
         if (!unnamedInit.has_value()) {
-          // TODO: Push error. No unnamed initializer that can create a `receiver` from `initializer`
           auto a = program->meta.types[argType];
           auto b = program->meta.types[argType];
           printf("Error: No unnamed initializer that can create a `%.*s` from `%.*s`\n",
@@ -570,23 +567,6 @@ namespace adder {
       program->push_value(function.value());
       return true;
     }
-
-    // bool prepare_operator_call(program_builder * program, expr::operator_type op) {
-    //   auto rhs = program->pop_value();
-    //   auto lhs = program->pop_value();
-    // 
-    //   if (!rhs.has_value() || !lhs.has_value()) {
-    //     printf("Error: operator must have 2 operands\n");
-    //     return false;
-    //   }
-    // 
-    //   auto ret = program->allocate_temporary_value(program->meta.return_type_of(func->type_index.value()).value());
-    //   program->push_value(ret);
-    //   program->push_value(rhs.value());
-    //   program->push_value(lhs.value());
-    //   program->push_value(func.value());
-    //   return true;
-    // }
 
     /// Generate a call using expressions pushed to the builders result stack.
     bool generate_call(ast const & ast, program_builder * program) {
@@ -1132,8 +1112,6 @@ namespace adder {
     }
 
     bool evaluate_statement_symbols(ast const & ast, program_metadata * meta, size_t id, expr::block const & block, symbol_eval_context const & ctx) {
-      // assert(false && "some wierd shit going on here. parent scopes are not being evaluated correctly - broken in recursive call example");
-      
       auto & statementInfo = meta->statement_info[id];
       // size_t thisBlockScopeId = 0;
       symbol_eval_context thisBlockCtx = ctx;
@@ -1179,7 +1157,7 @@ namespace adder {
         return false;
       }
 
-      const std::string name = std::string(/*decl.identifier.empty() ? adder::format("__unnamed_fn_%lld", ast.id_of(&decl).value()) :*/decl.identifier);
+      const std::string name = std::string(decl.identifier);
       symbol.full_identifier = name;
       symbol.full_identifier = adder::format(
         "%s%s",
