@@ -502,9 +502,11 @@ namespace adder {
     }
 
     void call(machine * vm, void * handle) {
-      // Set program counter to the entry point.
-      // Save previous program counter so we can restore it after the call.
-      void * const rp = vm->registers[adder::vm::register_names::pc].ptr;
+      // Store program counter and return pointer so we can restore it after the call.
+      // Required so the vm is re-entrant.
+      void * const rp = vm->registers[adder::vm::register_names::rp].ptr;
+      void * const pc = vm->registers[adder::vm::register_names::pc].ptr;
+
       vm->registers[adder::vm::register_names::pc].ptr = handle;
 
 #ifdef AD_PRINT_VM_STATE
@@ -547,7 +549,8 @@ namespace adder {
       } while (pInstruction->code != op_code::exit);
 #endif
 
-      vm->registers[adder::vm::register_names::pc].ptr = rp;
+      vm->registers[adder::vm::register_names::pc].ptr = pc;
+      vm->registers[adder::vm::register_names::rp].ptr = rp;
     }
   }
 

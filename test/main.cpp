@@ -140,7 +140,7 @@ int main(int argc, char ** argv) {
   // singleFileTest = "function-ptr.ad";
   // singleFileTest = "call-native.ad";
   // singleFileTest = "call-native-reentrant.ad";
-  singleFileTest = "call-native-reentrant-with-args.ad";
+  // singleFileTest = "call-native-reentrant-with-args.ad";
 
   if (singleFileTest.has_value()) {
     tests.clear();
