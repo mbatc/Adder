@@ -1305,6 +1305,24 @@ namespace adder {
       add_instruction(i);
     }
 
+    void program_builder::itof(vm::register_index dst, vm::register_index src, uint8_t fltSize) {
+      assert((fltSize == 8 || fltSize == 4) && "Float size not supported");
+      vm::instruction i;
+      i.code = vm::op_code::itof;
+      i.itof.dst = dst;
+      i.itof.src = src;
+      add_instruction(i);
+    }
+
+    void program_builder::ftoi(vm::register_index dst, vm::register_index src, uint8_t fltSize) {
+      assert((fltSize == 8 || fltSize == 4) && "Float size not supported");
+      vm::instruction i;
+      i.code = vm::op_code::ftoi;
+      i.ftoi.dst = dst;
+      i.ftoi.src = src;
+      add_instruction(i);
+    }
+
     bool program_builder::store(vm::register_index src, vm::register_index address, uint8_t sz) {
       if (sz > sizeof(vm::address_t))
         return false; // Too large.

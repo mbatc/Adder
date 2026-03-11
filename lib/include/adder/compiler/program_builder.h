@@ -389,6 +389,8 @@ namespace adder {
       void load_from_constant_address(vm::register_index dst, vm::register_value address, size_t size);
       void move(vm::register_index dst, vm::register_index src);
       void set(vm::register_index dst, vm::register_value value);
+      void itof(vm::register_index dst, vm::register_index src, uint8_t fltSize);
+      void ftoi(vm::register_index dst, vm::register_index src, uint8_t fltSize);
 
       bool store(vm::register_index src, vm::register_index address, uint8_t sz);
       bool store(vm::register_index src, vm::register_index address, uint8_t sz, int64_t offset);

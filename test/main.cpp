@@ -51,6 +51,7 @@ namespace native_methods {
     int64_t * callbackResult = (int64_t*)adder::vm::call_push_parameter(vm, sizeof(int64_t));
     int64_t & callbackArg    = *(int64_t*)adder::vm::call_push_parameter(vm, sizeof(int64_t));
     callbackArg = arg;
+
     adder::vm::call(vm, handle);
 
     // free args (TODO: think about destroying args/return value once we have more complex types)

@@ -215,6 +215,14 @@ namespace adder {
         vm->registers[args.dst].value = args.val;
       }
 
+      inline void itof(machine * vm, op_code_args<op_code::itof> const & args) {
+        vm->registers[args.dst].value = vm->registers[args.dst].i64;
+      }
+
+      inline void ftoi(machine * vm, op_code_args<op_code::ftoi> const & args) {
+        vm->registers[args.dst].value = args.val;
+      }
+
       inline void add_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
@@ -228,9 +236,9 @@ namespace adder {
       }
 
       inline void add_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
-        vm->registers[args.dst].d64 = lhs + rhs;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
+        vm->registers[args.dst].f64 = lhs + rhs;
       }
 
       inline void sub_i64(machine * vm, op_code_binary_op_args const & args) {
@@ -240,9 +248,9 @@ namespace adder {
       }
 
       inline void sub_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
-        vm->registers[args.dst].d64 = lhs - rhs;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
+        vm->registers[args.dst].f64 = lhs - rhs;
       }
 
       inline void mul_i64(machine * vm, op_code_binary_op_args const & args) {
@@ -252,9 +260,9 @@ namespace adder {
       }
 
       inline void mul_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
-        vm->registers[args.dst].d64 = lhs * rhs;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
+        vm->registers[args.dst].f64 = lhs * rhs;
       }
 
       inline void div_i64(machine * vm, op_code_binary_op_args const & args) {
@@ -264,9 +272,9 @@ namespace adder {
       }
 
       inline void div_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
-        vm->registers[args.dst].d64 = lhs / rhs;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
+        vm->registers[args.dst].f64 = lhs / rhs;
       }
 
       inline void alloc_stack(machine * vm, op_code_args<op_code::alloc_stack> const & args) {
@@ -356,8 +364,8 @@ namespace adder {
       }
 
       inline void compare_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
 
         uint64_t &dst = vm->registers[args.dst].u64;
         dst = 0;

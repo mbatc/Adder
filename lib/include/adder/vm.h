@@ -38,6 +38,8 @@ namespace adder {
       store_value_addr,   ///< Store a constant value to a constant address
       store_value_offset, ///< Store a constant value to an address (stored in a register) with some offset
       set,                ///< Set the value of a register
+      itof,               ///< Convert the value in src from an integer to a float. Store the result in dst.
+      ftoi,               ///< Convert the value in src from a float to an integer. Store the result in dst.
       add_i64,            ///< Add two registers as integers
       add_i64_constant,   ///< Add two integers lhs is a register, rhs is a constant
       add_f64,            ///< Add two registers as floats
@@ -143,6 +145,16 @@ namespace adder {
     template<> struct op_code_args<op_code::set> {
       register_value val;
       register_index dst;
+    };
+
+    template<> struct op_code_args<op_code::itof> {
+      register_index dst;
+      register_index src;
+    };
+
+    template<> struct op_code_args<op_code::ftoi> {
+      register_index dst;
+      register_index src;
     };
 
     struct op_code_binary_op_args {
@@ -273,6 +285,8 @@ namespace adder {
         op_code_args<op_code::store_value_offset> store_value_offset;
         op_code_args<op_code::store_value_addr> store_value_addr;
         op_code_args<op_code::set> set;
+        op_code_args<op_code::itof> itof;
+        op_code_args<op_code::ftoi> ftoi;
         op_code_binary_op_args add;
         op_code_args<op_code::add_i64_constant> add_constant;
         op_code_binary_op_args sub;
@@ -349,7 +363,8 @@ namespace adder {
         register_value value;
         uint64_t       u64;
         int64_t        i64;
-        double         d64;
+        double         f64;
+        float          f32;
         void*          ptr;
         uint8_t*       data;
       } registers[register_count];
