@@ -1,0 +1,12 @@
+
+let test_result: int64 = 0;
+
+fn multiply_by_2(value: int64) => int64 {
+  return value * 2;
+}
+
+extern fn invoke_callback_with_arg(cb: [ref](int64)=>int64, arg: int64) => int64;
+
+fn main() => void {
+  test_result = invoke_callback_with_arg(multiply_by_2, 10);
+}

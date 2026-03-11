@@ -271,6 +271,7 @@ namespace adder {
 
       inline void alloc_stack(machine * vm, op_code_args<op_code::alloc_stack> const & args) {
         if (vm->registers[register_names::sp].data + args.bytes >= vm->stack.end) {
+          assert(false && "TODO: Registers (e.g. fp, sp) store real addresses. Growing the stack will invalidate any stored addresses");
           AD_VM_GROW_STACK(vm);
         }
         vm->registers[register_names::sp].data += args.bytes;
@@ -282,6 +283,7 @@ namespace adder {
 
       inline void push(machine * vm, op_code_args<op_code::push> const & args) {
         if (vm->registers[register_names::sp].data + args.size >= vm->stack.end) {
+          assert(false && "TODO: Registers (e.g. fp, sp) store real addresses. Growing the stack will invalidate any stored addresses");
           AD_VM_GROW_STACK(vm);
         }
 
@@ -449,19 +451,22 @@ namespace adder {
       return compile_call_handle(vm, symbol.data_address);
     }
 
-    void* compile_call_handle(machine* vm, address_t const& routineAddress) {
+    void * compile_call_handle(machine * vm, address_t const & routineAddress) {
+      // A separate call handle per routine is probably unneccesary.
+      // The instructions to call a method could just be store locally in `call`.
+      // The only difference is the routineAddress.
       compiler::program_builder stub;
       stub.functions.emplace_back();
       stub.function_stack.push_back(0);
 
-      stub.push_return_pointer();
-      stub.push_frame_pointer();
-      stub.move(register_names::fp, register_names::sp);
+      // stub.push_return_pointer();
+      // stub.push_frame_pointer();
+      // stub.move(register_names::fp, register_names::sp);
       stub.begin_scope();
       stub.call(routineAddress);
       stub.end_scope();
-      stub.pop_frame_pointer();
-      stub.pop_return_pointer();
+      // stub.pop_frame_pointer();
+      // stub.pop_return_pointer();
 
       adder::vm::instruction op;
       op.code = adder::vm::op_code::exit;
@@ -477,11 +482,31 @@ namespace adder {
       vm->heap_allocator->free(ptr);
     }
 
-    void call(machine * vm, void* handle)
-    {
-      // Set program counter to the entry point.
-      // Save previous program counter so we can restore it after the call.
-      void * const rp = vm->registers[adder::vm::register_names::pc].ptr;
+    void * call_push_parameter(machine * vm, size_t bytes) {
+      if (vm->registers[register_names::sp].data + bytes >= vm->stack.end) {
+        assert(false && "TODO: Registers (e.g. fp, sp) store real addresses. Growing the stack will invalidate any stored addresses");
+        AD_VM_GROW_STACK(vm);
+      }
+      void * ret = vm->registers[register_names::sp].ptr;
+      vm->registers[register_names::sp].data += bytes;
+      return ret;
+    }
+
+    void * call_pop_parameter(machine * vm, size_t bytes) {
+      if (vm->registers[register_names::sp].u64 < bytes) {
+        return nullptr;
+      }
+      void * ret = vm->registers[register_names::sp].ptr;
+      vm->registers[register_names::sp].data -= bytes;
+      return ret;
+    }
+
+    void call(machine * vm, void * handle) {
+      // Store program counter and return pointer so we can restore it after the call.
+      // Required so the vm is re-entrant.
+      void * const rp = vm->registers[adder::vm::register_names::rp].ptr;
+      void * const pc = vm->registers[adder::vm::register_names::pc].ptr;
+
       vm->registers[adder::vm::register_names::pc].ptr = handle;
 
 #ifdef AD_PRINT_VM_STATE
@@ -515,7 +540,7 @@ namespace adder {
 
       std::cout << "Finished call\n";
 #else
-      instruction const* pInstruction = nullptr;
+      instruction const * pInstruction = nullptr;
       do
       {
         pInstruction = (instruction const *)vm->registers[register_names::pc].ptr;
@@ -524,7 +549,8 @@ namespace adder {
       } while (pInstruction->code != op_code::exit);
 #endif
 
-      vm->registers[adder::vm::register_names::pc].ptr = rp;
+      vm->registers[adder::vm::register_names::pc].ptr = pc;
+      vm->registers[adder::vm::register_names::rp].ptr = rp;
     }
   }
 
