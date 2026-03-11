@@ -25,6 +25,7 @@ namespace adder {
         false_,
         integer,
         decimal,
+        fractional,
 
         // Keywords
         fn,

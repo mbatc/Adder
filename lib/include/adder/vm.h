@@ -38,8 +38,10 @@ namespace adder {
       store_value_addr,   ///< Store a constant value to a constant address
       store_value_offset, ///< Store a constant value to an address (stored in a register) with some offset
       set,                ///< Set the value of a register
-      itof,               ///< Convert the value in src from an integer to a float. Store the result in dst.
-      ftoi,               ///< Convert the value in src from a float to an integer. Store the result in dst.
+      itof32,             ///< Convert the value in src from an integer to a float. Store the result in dst.
+      itof64,             ///< Convert the value in src from an integer to a float. Store the result in dst.
+      f32toi,             ///< Convert the value in src from a float to an integer. Store the result in dst.
+      f64toi,             ///< Convert the value in src from a float to an integer. Store the result in dst.
       add_i64,            ///< Add two registers as integers
       add_i64_constant,   ///< Add two integers lhs is a register, rhs is a constant
       add_f64,            ///< Add two registers as floats
@@ -147,12 +149,7 @@ namespace adder {
       register_index dst;
     };
 
-    template<> struct op_code_args<op_code::itof> {
-      register_index dst;
-      register_index src;
-    };
-
-    template<> struct op_code_args<op_code::ftoi> {
+    struct op_code_xtox_args {
       register_index dst;
       register_index src;
     };
@@ -285,8 +282,7 @@ namespace adder {
         op_code_args<op_code::store_value_offset> store_value_offset;
         op_code_args<op_code::store_value_addr> store_value_addr;
         op_code_args<op_code::set> set;
-        op_code_args<op_code::itof> itof;
-        op_code_args<op_code::ftoi> ftoi;
+        op_code_xtox_args xtox;
         op_code_binary_op_args add;
         op_code_args<op_code::add_i64_constant> add_constant;
         op_code_binary_op_args sub;

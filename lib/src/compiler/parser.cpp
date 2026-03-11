@@ -187,8 +187,23 @@ namespace adder {
         switch (value.id) {
         case lexer::token_id::true_:          return tree->add(literal{ true });
         case lexer::token_id::false_:         return tree->add(literal{ false });
-        case lexer::token_id::integer:        return tree->add(literal{ std::atoll(std::string(value.name).c_str()) });
-        case lexer::token_id::decimal:        return tree->add(literal{ std::atof(std::string(value.name).c_str()) });
+        case lexer::token_id::integer: {
+          if (tokenizer->current().id == lexer::token_id::decimal) {
+            // Parse as decimal literal
+            int64_t whole = std::atoi(std::string(value.name).c_str());
+            int64_t frac = 0;
+            int64_t fracLen = 0;
+            if (tokenizer->next() && tokenizer->current().id == lexer::token_id::fractional) {
+              frac = std::atoi(std::string(tokenizer->current().name).c_str());
+              fracLen = tokenizer->current().name.length();
+              tokenizer->next();
+            }
+            const double dbl = (double)whole + (double)frac / std::pow(10, fracLen);
+            return tree->add(literal{ dbl });
+          }
+
+          return tree->add(literal{ std::atoll(std::string(value.name).c_str()) }); 
+        }
         case lexer::token_id::string_literal: return tree->add(literal{ value.name });
         default: break;
         }

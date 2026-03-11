@@ -215,12 +215,20 @@ namespace adder {
         vm->registers[args.dst].value = args.val;
       }
 
-      inline void itof(machine * vm, op_code_args<op_code::itof> const & args) {
-        vm->registers[args.dst].value = vm->registers[args.dst].i64;
+      inline void itof32(machine * vm, op_code_xtox_args const & args) {
+        vm->registers[args.dst].f32 = (float)vm->registers[args.dst].i64;
       }
 
-      inline void ftoi(machine * vm, op_code_args<op_code::ftoi> const & args) {
-        vm->registers[args.dst].value = args.val;
+      inline void f32toi(machine * vm, op_code_xtox_args const & args) {
+        vm->registers[args.dst].i64 = (int64_t)vm->registers[args.dst].f32;
+      }
+
+      inline void itof64(machine * vm, op_code_xtox_args const & args) {
+        vm->registers[args.dst].f64 = (double)vm->registers[args.dst].i64;
+      }
+
+      inline void f64toi(machine * vm, op_code_xtox_args const & args) {
+        vm->registers[args.dst].i64 = (int64_t)vm->registers[args.dst].f64;
       }
 
       inline void add_i64(machine * vm, op_code_binary_op_args const & args) {
@@ -420,6 +428,10 @@ namespace adder {
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store_value_addr); op::store_value_addr(vm, inst->store_value_addr); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store_value_offset); op::store_value_offset(vm, inst->store_value_offset); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::set); op::set(vm, inst->set); },
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::itof32); op::itof32(vm, inst->xtox); },
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::itof64); op::itof64(vm, inst->xtox); },
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::f32toi); op::f32toi(vm, inst->xtox); },
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::f64toi); op::f64toi(vm, inst->xtox); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::add_i64); op::add_i64(vm, inst->add); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::add_i64_constant); op::add_i64_constant(vm, inst->add_constant); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::add_f64); op::add_f64(vm, inst->add); },

@@ -83,20 +83,14 @@ namespace adder {
         return chars;
         }();
 
-      inline static constexpr std::string_view decimal_chars = "1234567890.";
       inline static constexpr std::string_view number_chars  = "1234567890";
 
       static token_view evaluateNumberLiteral(token_view const& token) {
         token_view ret = token;
-        if (token.name.find_first_not_of(decimal_chars) == std::string::npos) {
-          if (token.name.find_first_not_of(number_chars) == std::string::npos) {
-            ret.id = token_id::integer;
-          }
-          else {
-            ret.id = token_id::decimal;
-          }
-          ret.cls = token_class::literal_;
+        if (token.name.find_first_not_of(number_chars) == std::string::npos) {
+          ret.id = token_id::integer;
         }
+        ret.cls = token_class::literal_;
         return ret;
       }
 
@@ -162,8 +156,7 @@ namespace adder {
         return m_errors;
       }
 
-      bool token_parser::_next()
-      {
+      bool token_parser::_next() {
         m_previous = m_current;
 
         if (m_remaining.length() == 0) {
@@ -188,14 +181,23 @@ namespace adder {
           end = m_remaining.find_first_of(token_terminators, end);
 
         m_current.name = m_remaining.substr(0, end);
+
         if (!candidate.has_value() || end != candidate->name.length()) {
-          m_current.id    = token_id::identifier;
-          m_current.cls   = token_class::identifier;
+          m_current.id = token_id::identifier;
+          m_current.cls = token_class::identifier;
           m_current = evaluateNumberLiteral(m_current);
+
+          if (m_current.id == token_id::integer && m_previous.id == token_id::decimal) {
+            m_current.id = token_id::fractional;
+          }
         }
         else {
           m_current.id   = candidate->id;
           m_current.cls  = candidate->cls;
+        }
+
+        if (m_current.id == token_id::dot && m_previous.id == token_id::integer) {
+          m_current.id = token_id::decimal;
         }
 
         // TODO: Need more expressive rules for token parsing.

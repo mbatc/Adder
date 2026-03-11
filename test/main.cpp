@@ -142,6 +142,7 @@ int main(int argc, char ** argv) {
   // singleFileTest = "call-native.ad";
   // singleFileTest = "call-native-reentrant.ad";
   // singleFileTest = "call-native-reentrant-with-args.ad";
+  singleFileTest = "floats.ad";
 
   if (singleFileTest.has_value()) {
     tests.clear();

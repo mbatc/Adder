@@ -26,6 +26,11 @@ namespace adder {
     std::optional<std::string> get_symbol_name(ast const & ast, size_t statement, std::string_view const & identifier);
     std::string get_symbol_name(std::string_view const & typeName, std::string_view const & identifier);
 
+    struct parameter_list_score {
+      size_t value = 0;
+      std::optional<size_t> first_conversion_index;
+    };
+
     struct program_metadata {
       size_t static_storage_size = 0;
 
@@ -151,8 +156,8 @@ namespace adder {
       std::optional<size_t> search_for_callable_symbol_index(size_t scopeId, std::string_view const & identifier, ast const& ast, std::optional<size_t> const & paramList) const;
       std::optional<size_t> search_for_operator_symbol_index(size_t scopeId, expr::operator_type op, size_t lhsType, size_t rhsType) const;
 
-      std::optional<size_t> get_parameter_list_score(size_t scopeId, size_t funcType, ast const & ast, std::optional<size_t> const & paramList) const;
-      std::optional<size_t> get_parameter_list_score(size_t scopeId, size_t funcType, size_t const * paramList, size_t numParams) const;
+      std::optional<parameter_list_score> get_parameter_list_score(size_t scopeId, size_t funcType, ast const & ast, std::optional<size_t> const & paramList) const;
+      std::optional<parameter_list_score> get_parameter_list_score(size_t scopeId, size_t funcType, size_t const * paramList, size_t numParams) const;
 
       std::optional<size_t> find_symbol(std::string_view const & fullName) const;
       std::optional<size_t> find_unnamed_initializer(size_t scopeId, size_t receiverTypeIndex, size_t initializerTypeIndex) const;

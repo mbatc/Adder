@@ -340,17 +340,17 @@ namespace adder {
         if (sym.name != identifier) {
           return false;
         }
-        auto score = get_parameter_list_score(scopeId, sym.type, ast, paramList);
-        if (!score.has_value())
+        auto value = get_parameter_list_score(scopeId, sym.type, ast, paramList);
+        if (!value.has_value())
           return false;
-        if (bestMatchScore.has_value() && score.value() > bestMatchScore.value())
+        if (bestMatchScore.has_value() && value.value() > bestMatchScore.value())
           return false;
-        if (score == bestMatchScore) {
+        if (value == bestMatchScore) {
           ambigious = true;
           bestFunction.reset();
           return false;
         }
-        bestMatchScore = score;
+        bestMatchScore = value;
         bestFunction = idx;
         return false;
       });
@@ -373,21 +373,21 @@ namespace adder {
           return false;
 
         size_t const types[2] = { lhsType, rhsType };
-        auto score = get_parameter_list_score(scopeId, sym.type, types, 2);
+        auto value = get_parameter_list_score(scopeId, sym.type, types, 2);
 
-        if (!score.has_value())
+        if (!value.has_value())
           return false;
 
-        if (bestMatchScore.has_value() && score.value() > bestMatchScore.value())
+        if (bestMatchScore.has_value() && value.value() > bestMatchScore.value())
           return false;
 
-        if (score == bestMatchScore) {
+        if (value == bestMatchScore) {
           ambigious = true;
           bestFunction.reset();
           return false;
         }
 
-        bestMatchScore = score;
+        bestMatchScore = value;
         bestFunction = idx;
         ambigious = false;
         return false;
@@ -403,9 +403,9 @@ namespace adder {
       // Implements the parameter list scoring algorithm
       struct parameter_list_score_calculator {
         type_function const * signature = nullptr;
+        parameter_list_score value; // Lower is better
         size_t scope_id = 0;
 
-        size_t score = 0; // Lower is better
         size_t i     = 0;
 
         bool next(program_metadata const * meta, size_t param) {
@@ -420,7 +420,7 @@ namespace adder {
             auto initializer = meta->find_unnamed_initializer(scope_id, arg, param);
             if (!initializer.has_value())
               return false; // No conversion available
-            ++score;
+            ++value.value;
           }
 
           return true;
@@ -432,7 +432,7 @@ namespace adder {
       };
     }
 
-    std::optional<size_t> program_metadata::get_parameter_list_score(size_t scopeId, size_t funcType, ast const & ast, std::optional<size_t> const & paramList) const {
+    std::optional<size_t> program_metadata::get_parameter_list_score(size_t scopeId, size_t funcType, ast const & ast, std::optional<size_t> const & paramList, size_t *firstConversionIndex) const {
       if (!is_function(funcType)) {
         return std::nullopt;
       }
@@ -458,10 +458,10 @@ namespace adder {
         return std::nullopt; // Not enough arguments
       }
 
-      return scoreCalculator.score;
+      return scoreCalculator.value;
     }
 
-    std::optional<size_t> program_metadata::get_parameter_list_score(size_t scopeId, size_t funcType, size_t const * paramList, size_t numParams) const {
+    std::optional<parameter_list_score> program_metadata::get_parameter_list_score(size_t scopeId, size_t funcType, size_t const * paramList, size_t numParams) const {
       if (!is_function(funcType)) {
         return std::nullopt;
       }
@@ -476,12 +476,15 @@ namespace adder {
 
       for (size_t i = 0; i < numParams; ++i)
         if (!scoreCalculator.next(this, paramList[i]))
-          return std::nullopt; // TOo many arguments
+          return std::nullopt; // Too many arguments
 
       if (!scoreCalculator.complete())
         return std::nullopt; // Not enough arguments
 
-      return scoreCalculator.score;
+
+      parameter_list_score ret;
+      ret.value = scoreCalculator.value;
+      ret.first_conversion_index = scoreCalculator.first_conversion_index;
     }
 
     std::optional<size_t> program_metadata::find_symbol(std::string_view const & fullName) const {
@@ -1306,26 +1309,45 @@ namespace adder {
     }
 
     void program_builder::itof(vm::register_index dst, vm::register_index src, uint8_t fltSize) {
-      assert((fltSize == 8 || fltSize == 4) && "Float size not supported");
       vm::instruction i;
-      i.code = vm::op_code::itof;
-      i.itof.dst = dst;
-      i.itof.src = src;
+      switch (fltSize)
+      {
+      case 8:
+        i.code = vm::op_code::itof64;
+        break;
+      case 4:
+        i.code = vm::op_code::itof32;
+        break;
+      default:
+        assert(false && "size not supported");
+        break;
+      }
+      i.xtox.dst = dst;
+      i.xtox.src = src;
       add_instruction(i);
     }
 
     void program_builder::ftoi(vm::register_index dst, vm::register_index src, uint8_t fltSize) {
-      assert((fltSize == 8 || fltSize == 4) && "Float size not supported");
       vm::instruction i;
-      i.code = vm::op_code::ftoi;
-      i.ftoi.dst = dst;
-      i.ftoi.src = src;
+      switch (fltSize)
+      {
+      case 8:
+        i.code = vm::op_code::f64toi;
+        break;
+      case 4:
+        i.code = vm::op_code::f32toi;
+        break;
+      default:
+        assert(false && "size not supported");
+        break;
+      }
+      i.xtox.dst = dst;
+      i.xtox.src = src;
       add_instruction(i);
     }
 
     bool program_builder::store(vm::register_index src, vm::register_index address, uint8_t sz) {
-      if (sz > sizeof(vm::address_t))
-        return false; // Too large.
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code       = vm::op_code::store;
       str.store.src  = src;
@@ -1336,8 +1358,7 @@ namespace adder {
     }
 
     bool program_builder::store(vm::register_index src, vm::register_index address, uint8_t sz, int64_t offset) {
-      if (sz > sizeof(vm::address_t))
-        return false; // Too large.
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code                = vm::op_code::store_offset;
       str.store_offset.src    = src;
@@ -1349,8 +1370,7 @@ namespace adder {
     }
 
     bool program_builder::store_to_constant_address(vm::register_index src, vm::register_value dst, uint8_t sz) {
-      if (sz > sizeof(vm::address_t))
-        return false; // Too large.
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code             = vm::op_code::store_addr;
       str.store_addr.src   = src;
@@ -1361,6 +1381,7 @@ namespace adder {
     }
 
     bool program_builder::store_constant_to_constant_address(vm::register_value src, vm::register_value dst, uint8_t sz) {
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code                  = vm::op_code::store_value_addr;
       str.store_value_addr.src  = src;
@@ -1371,6 +1392,7 @@ namespace adder {
     }
 
     bool program_builder::store_constant(vm::register_value src, vm::register_index dst, uint8_t sz) {
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code             = vm::op_code::store_value;
       str.store_value.src  = src;
@@ -1381,6 +1403,7 @@ namespace adder {
     }
 
     bool program_builder::store_constant(vm::register_value src, vm::register_index dst, uint8_t sz, int64_t offset) {
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code                      = vm::op_code::store_value_offset;
       str.store_value_offset.src    = src;
