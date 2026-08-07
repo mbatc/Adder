@@ -365,12 +365,14 @@ namespace adder {
 
       allocator * heap_allocator = nullptr;
 
-      address_t (*lookup_extern_symbol)(char const* symbol) = nullptr;
+      void * user_data = nullptr;
+
+      address_t (*lookup_extern_symbol)(machine * vm, char const * symbol) = nullptr;
     };
 
     void relocate_program(machine * vm, program_view const & program);
 
-    const_program_view load_program(machine * vm, program_view const& program, bool relocated = true);
+    const_program_view load_program(machine * vm, program_view const & program, bool relocated = true);
 
     void* compile_call_handle(machine* vm, program_symbol_table_entry const & symbol);
     void* compile_call_handle(machine* vm, address_t const & routineAddress);

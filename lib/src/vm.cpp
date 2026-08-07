@@ -126,7 +126,7 @@ namespace adder {
           addr = symbols[relocation->symbol].data_address;
           break;
         case relocation_linkage::extern_:
-          addr = vm->lookup_extern_symbol((char const *)symbols[relocation->symbol].name_address);
+          addr = vm->lookup_extern_symbol(vm, (char const *)symbols[relocation->symbol].name_address);
           break;
         default:
           assert(false && "relocation linkage not supported (or implemented)");

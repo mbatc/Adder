@@ -28,7 +28,7 @@ function add_variant(name, projKind, srcFiles, libs)
   staticruntime "on"
   cppdialect "C++17"
 
-  includedirs { "lib/include" }
+  includedirs { "lib/include/adder" }
 
   files     { "adder.natvis" }
   files     (srcFiles)
@@ -57,9 +57,9 @@ function add_variant(name, projKind, srcFiles, libs)
 end
 
 add_variant("adder",  "StaticLib", {
-    "lib/include/**.h",
-    "lib/include/**.inl",
-    "lib/include/**.hpp",
+    "lib/include/adder/**.h",
+    "lib/include/adder/**.inl",
+    "lib/include/adder/**.hpp",
     "lib/src/**.h",
     "lib/src/**.inl",
     "lib/src/**.hpp",
