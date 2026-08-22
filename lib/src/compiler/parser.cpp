@@ -721,12 +721,62 @@ namespace adder {
 
         return tokenizer->next();
       }
+
+      std::optional<size_t> consume_from(ast * tree, lexer::token_parser * tokenizer) {
+        lexer::token_view module_name;
+        if (!tokenizer->
+          parse(lexer::token_id::from).
+          parse(lexer::token_id::string_literal, &module_name).
+          parse(lexer::token_id::import_).ok())
+          return std::nullopt;
+
+        std::optional<size_t> head;
+        while (tokenizer->current().id != lexer::token_id::semi_colon) {
+          lexer::token_view identifier;
+          lexer::token_view alias;
+          if (!tokenizer->parse(lexer::token_id::identifier, &identifier).ok())
+            return std::nullopt;
+          if (tokenizer->current().id == lexer::token_id::as) {
+            if (!tokenizer->parse(lexer::token_id::identifier, &alias).ok()) {
+              // TODO: Error expected an identifier.
+              return std::nullopt;
+            }
+          } else {
+            alias = identifier;
+          }
+
+          expr::import_symbol import_expr;
+          import_expr.module_name  = module_name.name.substr(1, module_name.name.length() - 2);
+          import_expr.symbol_name  = identifier.name;
+          import_expr.symbol_alias = alias.name;
+
+          expr::list item;
+          item.expr = tree->add(import_expr);
+          item.next = head;
+          head = tree->add(item);
+
+          if (tokenizer->current().id == lexer::token_id::semi_colon)
+            break;
+          if (tokenizer->current().id != lexer::token_id::comma)
+            return std::nullopt;
+
+          tokenizer->next();
+        }
+        tokenizer->next();
+
+        if (!head.has_value()) {
+          // TODO: Error no symbols specified in import statement
+          return std::nullopt;
+        }
+
+        return head.value();
+      }
     }
 
     ast parse(lexer::token_parser * tokenizer) {
       ast ast;
       block topScope;
-      compiler::define_builtins(&ast, &topScope);
+      compiler::import_builtins(&ast, &topScope);
 
       while (!tokenizer->eof()) {
         std::optional<size_t> nextStatement;
@@ -736,6 +786,7 @@ namespace adder {
         case lexer::token_id::let:      nextStatement = parser::consume_let(&ast, tokenizer); break;
         case lexer::token_id::class_:   nextStatement = parser::consume_class(&ast, tokenizer); break;
         case lexer::token_id::extern_:  nextStatement = parser::consume_extern(&ast, tokenizer); break;
+        case lexer::token_id::from:     nextStatement = parser::consume_from(&ast, tokenizer); break;
         default:
           break;
         }

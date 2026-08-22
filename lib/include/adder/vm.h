@@ -20,10 +20,16 @@ namespace adder {
     struct call_context;
     struct machine;
 
-    uint8_t* call_context_read_arg(call_context * ctx, size_t sz);
-    machine* call_context_get_machine(call_context * ctx);
-
+    uint8_t * call_context_read_arg(call_context * ctx, size_t sz);
+    machine * call_context_get_machine(call_context * ctx);
+    void    * call_context_get_user_data(call_context * ctx);
+    
     using native_method_t = void (*)(call_context *);
+
+    struct native_method_binding {
+      native_method_t callback;
+      void *          user_data;
+    };
 
     enum class op_code : uint8_t {
       exit,               ///< Load a value from a memory address
@@ -258,7 +264,7 @@ namespace adder {
     };
 
     template<> struct op_code_args<op_code::call_native> {
-      native_method_t callback;
+      address_t native_method_index; ///< Callback bound via the extern_method_lookup.
     };
 
     template<> struct op_code_args<op_code::ret> {};
@@ -344,7 +350,7 @@ namespace adder {
     inline static constexpr size_t register_count = (size_t)register_names::count;
 
     struct machine {
-      machine(allocator *allocator)
+      machine(allocator * allocator)
         : heap_allocator(allocator) {
         const size_t initialStackSize = 4 * 1024 * 1024; // 4mb
         stack.base = (uint8_t*)heap_allocator->allocate(initialStackSize);
@@ -378,7 +384,27 @@ namespace adder {
 
       void * user_data = nullptr;
 
-      address_t (*lookup_extern_symbol)(machine * vm, char const * symbol) = nullptr;
+      native_method_binding (*lookup_extern_symbol)(machine * vm, char const * symbol) = nullptr;
+
+      std::string (*load_module_source)(machine * vm, char const * module_name);
+
+      address_t load_extern_symbol(char const * symbol) {
+        auto it = std::find_if(
+          registered_extern_method_names.begin(),
+          registered_extern_method_names.end(),
+          [symbol](const std::string & o) { return o == symbol; }
+        );
+        if (it != registered_extern_method_names.end())
+          return it - registered_extern_method_names.begin();
+
+        native_method_binding binding = lookup_extern_symbol(this, symbol);
+        registered_extern_method_names.push_back(symbol);
+        registered_extern_methods.push_back(binding);
+        return registered_extern_methods.size() - 1;
+      }
+
+      std::vector<std::string>           registered_extern_method_names;
+      std::vector<native_method_binding> registered_extern_methods;
     };
 
     void relocate_program(machine * vm, program_view const & program);

@@ -45,6 +45,9 @@ namespace adder {
 
         return_,
 
+        from,
+        import_,
+
         // Grammar
         colon,
         arrow,

@@ -82,6 +82,7 @@ namespace adder {
       uint8_t * stack_start = nullptr;
       uint8_t * stack       = nullptr;
       machine * vm          = nullptr;
+      void    * user_data   = nullptr;
     };
 
     uint8_t* call_context_read_arg(call_context * ctx, size_t sz){
@@ -91,6 +92,10 @@ namespace adder {
 
     machine* call_context_get_machine(call_context* ctx) {
       return ctx->vm;
+    }
+
+    void * call_context_get_user_data(call_context * ctx) {
+      return ctx->user_data;
     }
 
     size_t instruction_size(op_code /*code*/) {
@@ -124,16 +129,15 @@ namespace adder {
         switch (relocation->linkage) {
         case relocation_linkage::internal:
           addr = symbols[relocation->symbol].data_address;
+          assert(addr != 0 && "Failed to find symbol address. TODO: Fail more gracefully.");
           break;
         case relocation_linkage::extern_:
-          addr = vm->lookup_extern_symbol(vm, (char const *)symbols[relocation->symbol].name_address);
+          addr = vm->load_extern_symbol((char const *)symbols[relocation->symbol].name_address);
           break;
         default:
           assert(false && "relocation linkage not supported (or implemented)");
           break;
         }
-
-        assert(addr != 0 && "Failed to find symbol address. TODO: Fail more gracefully.");
 
         uint64_t const* offsets = (uint64_t const*)(relocation + 1);
         for (size_t i = 0; i < relocation->count; ++i) {
@@ -403,10 +407,12 @@ namespace adder {
       }
 
       inline void call_native(machine * vm, op_code_args<op_code::call_native> const & args) {
+        auto const & binding = vm->registered_extern_methods[args.native_method_index];
         call_context ctx;
-        ctx.stack = ctx.stack_start = vm->registers[vm::register_names::sp].data;
-        ctx.vm    = vm;
-        args.callback(&ctx);
+        ctx.stack     = ctx.stack_start = vm->registers[vm::register_names::sp].data;
+        ctx.vm        = vm;
+        ctx.user_data = binding.user_data;
+        binding.callback(&ctx);
       }
 
       inline void ret(machine * vm, op_code_args<op_code::ret> const &) {

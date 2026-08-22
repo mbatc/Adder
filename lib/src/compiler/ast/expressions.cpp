@@ -24,7 +24,6 @@ namespace adder {
         }
         return token_id_to_string(tok);
       }
-
     }
   }
 }

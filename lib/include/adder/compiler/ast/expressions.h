@@ -10,8 +10,13 @@ namespace adder {
     struct program_builder;
 
     namespace expr {
+      struct type_declaration {
+        std::string_view identifier;
+        type::descriptor desc;
+      };
+
       struct list {
-        size_t expr;
+        size_t expr = -1;
         std::optional<size_t> next;
       };
 
@@ -148,7 +153,19 @@ namespace adder {
         std::vector<size_t> constructors;
       };
 
+      struct import_symbol {
+        std::string_view module_name;
+        std::string_view symbol_name;
+        std::string_view symbol_alias;
+      };
+
+      struct import_module {
+        std::string_view module_name;
+        std::optional<std::string_view> scope_name;
+      };
+
       using statement = std::variant<
+        type_declaration,
         literal,
         identifier,
         list,
@@ -166,8 +183,10 @@ namespace adder {
         function_declaration,
         call_parameter,
         // call,
-        class_decl
+        class_decl,
         // conversion
+        import_symbol,
+        import_module
       >;
 
       constexpr size_t sz = sizeof(statement);
