@@ -3,6 +3,18 @@
 
 namespace adder {
   namespace compiler {
+    symbol const & symbol_reference::get() const {
+      return meta->get(index);
+    }
+
+    size_t symbol_reference::get_size() const {
+      return get_type().get_size();
+    }
+
+    type_reference symbol_reference::get_type() const {
+      return get().type;
+    }
+
     std::optional<type_reference> program_metadata::get_type_reference(type_primitive const & primitive) const {
       return get_type_reference(get_primitive_type_name(primitive));
     }
@@ -26,12 +38,12 @@ namespace adder {
       return &it->get_type();
     }
 
-    std::optional<type_reference> program_metadata::get_type_reference(ast const & tree, size_t type) const {
+    std::optional<type_reference> program_metadata::get_type_reference(size_t type) const {
       const auto name = get_type_name(tree, type);
       return name.has_value() ? get_type_reference(name.value()) : std::nullopt;
     }
 
-    type const * program_metadata::get_type(ast const & tree, size_t type) const {
+    type const * program_metadata::get_type(size_t type) const {
       const auto name = get_type_name(tree, type);
       return name.has_value() ? get_type(name.value()) : nullptr;
     }
@@ -130,12 +142,12 @@ namespace adder {
       return type_references.back();
     }
 
-    type_reference program_metadata::add_function_type(ast const & tree, expr::function_declaration const & decl,
+    type_reference program_metadata::add_function_type(expr::function_declaration const & decl,
                                                std::optional<size_t> id) {
       type_function_decl fn;
       fn.allowInline;
       fn.function_id = id.value();
-      fn.type        = get_type_reference(tree, decl.type.value()).value_or(type_reference::undefined());
+      fn.type        = get_type_reference(decl.type.value()).value_or(type_reference::undefined());
 
       if (is_undefined(fn.type)) {
         // TODO: Log error. Invalid function type.
@@ -150,55 +162,61 @@ namespace adder {
       return add_type(t);
     }
 
-    std::optional<size_t> program_metadata::add_symbol(symbol const & s) {
+    
+    std::optional<symbol_reference> program_metadata::add_symbol(symbol_reference const & s) {
+
+    }
+
+    std::optional<symbol_reference> program_metadata::add_symbol(symbol const & s) {
       if (s.scope_id >= scopes.size())
         return std::nullopt;
 
-      for (const size_t existingId : scopes[s.scope_id].symbols) {
-        const auto & existing = symbols[existingId];
-        if (existing.name != s.name) {
+      for (const symbol_reference &existing : scopes[s.scope_id].symbols) {
+        if (existing.get().name != s.name) {
           continue;
         }
 
-        if (existing.type == s.type) {
+        if (existing.get_type() == s.type) {
           return std::nullopt; // Duplicate symbol
         }
 
         // TODO: Test if s.type can overload the existing symbol
-        if (!is_valid_function_overload(existing.type, s.type)) {
+        if (!is_valid_function_overload(existing.get_type(), s.type)) {
           return std::nullopt;
         }
       }
 
       const size_t symbolIndex = symbols.size();
       symbols.push_back(s);
-      scopes[s.scope_id].symbols.push_back(symbolIndex);
+      scopes[s.scope_id].symbols.push_back({ this, symbol_id{symbolIndex} });
 
-      return symbolIndex;
+      return scopes[s.scope_id].symbols.back();
     }
 
-    size_t program_metadata::get_symbol_size(size_t const & symbolIndex) const {
-      return get_symbol_type(symbolIndex).get_size();
+    std::optional<symbol_reference> program_metadata::get_statement_symbol(size_t statementId, size_t idx) const {
+      std::optional<size_t> base = statement_info[statementId].symbol_index;
+      if (!base.has_value())
+        return std::nullopt;
+      return symbol_references[base.value() + idx];
     }
 
-    type_reference program_metadata::get_symbol_type(size_t const & symbolIndex) const {
-      return symbols[symbolIndex].type;
+    size_t program_metadata::get_statement_symbol_count(size_t statementId) const {
+      if (!statement_info[statementId].symbol_index.has_value()) {
+        return 0;
+      }
+      return statement_info[statementId].symbol_count;
     }
 
-    std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::string_view const & name) const {
-      return search_for_symbol_index(scopeId, [&name](symbol const & s) { return s.name == name; });
+    std::optional<symbol_reference> program_metadata::search_for_symbol(size_t                   scopeId,
+                                                                        std::string_view const & name) const {
+      return search_for_symbol(scopeId, [&name](symbol_reference const & s) { return s.get().name == name; });
     }
 
-    std::optional<size_t> program_metadata::search_for_symbol_index(size_t                                      scopeId,
-                                                                    std::function<bool(symbol const &)> const & pred) const {
-      return search_for_symbol_index(scopeId, [&pred](symbol const & sym, size_t) { return pred(sym); });
-    }
-
-    std::optional<size_t>
-    program_metadata::search_for_symbol_index(size_t                                              scopeId,
-                                              std::function<bool(symbol const &, size_t)> const & pred) const {
+    std::optional<symbol_reference>
+    program_metadata::search_for_symbol(size_t                                              scopeId,
+                                              std::function<bool(symbol_reference const &)> const & pred) const {
       auto found = std::find_if(scopes[scopeId].symbols.rbegin(), scopes[scopeId].symbols.rend(),
-                                [&](int64_t idx) { return pred(symbols[idx], idx); });
+                                [&](symbol_reference const & ref) { return pred(ref); });
       if (found != scopes[scopeId].symbols.rend()) {
         return *found;
       }
@@ -206,22 +224,21 @@ namespace adder {
       if (!scopes[scopeId].parent.has_value())
         return std::nullopt;
 
-      return search_for_symbol_index(scopes[scopeId].parent.value(), pred);
+      return search_for_symbol(scopes[scopeId].parent.value(), pred);
     }
 
-    std::optional<size_t> program_metadata::search_for_callable_symbol_index(size_t                        scopeId,
+    std::optional<symbol_reference> program_metadata::search_for_callable_symbol(size_t                        scopeId,
                                                                              std::string_view const &      identifier,
-                                                                             ast const &                   ast,
                                                                              std::optional<size_t> const & paramList) const {
-      std::optional<size_t> bestFunction;
+      std::optional<symbol_reference> bestFunction;
       std::optional<size_t> bestMatchScore;
       bool                  ambigious = false;
 
-      search_for_symbol_index(scopeId, [&](symbol const & sym, size_t idx) {
-        if (sym.name != identifier) {
+      search_for_symbol(scopeId, [&](symbol_reference const & sym) {
+        if (sym.get().name != identifier) {
           return false;
         }
-        auto value = get_parameter_list_score(scopeId, sym.type, ast, paramList);
+        auto value = get_parameter_list_score(scopeId, sym.get_type(), paramList);
         if (!value.has_value())
           return false;
         if (bestMatchScore.has_value() && value->value > bestMatchScore.value())
@@ -232,7 +249,47 @@ namespace adder {
           return false;
         }
         bestMatchScore = value->value;
-        bestFunction   = idx;
+        bestFunction   = sym;
+        return false;
+      });
+
+      if (ambigious)
+        printf("Error: Ambigous call to '%.*s'\n", (int)identifier.length(), identifier.data());
+
+      return bestFunction;
+    }
+
+    std::optional<symbol_reference> program_metadata::search_for_operator_symbol(size_t scopeId, expr::operator_type op,
+                                                                             type_reference lhsType,
+                                                                             type_reference rhsType) const {
+      std::string_view      identifier = expr::get_operator_identifer(op);
+      std::optional<symbol_reference> bestFunction;
+      std::optional<size_t> bestMatchScore;
+      bool                  ambigious = false;
+      search_for_symbol(scopeId, [&](symbol_reference const & sym) {
+        if (sym.get().name != identifier)
+          return false;
+        if (get_functor_type(sym.get_type()) != functor_type::operator_)
+          return false;
+
+        type_reference const types[2] = {lhsType, rhsType};
+        auto                 value    = get_parameter_list_score(scopeId, sym.get_type(), types, 2);
+
+        if (!value.has_value())
+          return false;
+
+        if (bestMatchScore.has_value() && value->value > bestMatchScore.value())
+          return false;
+
+        if (value->value == bestMatchScore) {
+          ambigious = true;
+          bestFunction.reset();
+          return false;
+        }
+
+        bestMatchScore = value->value;
+        bestFunction   = sym;
+        ambigious      = false;
         return false;
       });
 
@@ -245,41 +302,7 @@ namespace adder {
     std::optional<size_t> program_metadata::search_for_operator_symbol_index(size_t scopeId, expr::operator_type op,
                                                                              type_reference lhsType,
                                                                              type_reference rhsType) const {
-      std::string_view      identifier = expr::get_operator_identifer(op);
-      std::optional<size_t> bestFunction;
-      std::optional<size_t> bestMatchScore;
-      bool                  ambigious = false;
-      search_for_symbol_index(scopeId, [&](symbol const & sym, size_t idx) {
-        if (sym.name != identifier)
-          return false;
-        if (get_functor_type(sym.type) != functor_type::operator_)
-          return false;
-
-        type_reference const types[2] = {lhsType, rhsType};
-        auto         value    = get_parameter_list_score(scopeId, sym.type, types, 2);
-
-        if (!value.has_value())
-          return false;
-
-        if (bestMatchScore.has_value() && value->value > bestMatchScore.value())
-          return false;
-
-        if (value->value == bestMatchScore) {
-          ambigious = true;
-          bestFunction.reset();
-          return false;
-        }
-
-        bestMatchScore = value->value;
-        bestFunction   = idx;
-        ambigious      = false;
-        return false;
-      });
-
-      if (ambigious)
-        printf("Error: Ambigous call to '%.*s'\n", (int)identifier.length(), identifier.data());
-
-      return bestFunction;
+      return std::optional<size_t>();
     }
 
     namespace {
@@ -316,7 +339,7 @@ namespace adder {
     } // namespace
 
     std::optional<parameter_list_score>
-    program_metadata::get_parameter_list_score(size_t scopeId, type_reference funcType, ast const & ast,
+    program_metadata::get_parameter_list_score(size_t scopeId, type_reference funcType,
                                                std::optional<size_t> const & paramList) const {
       if (!is_function(funcType)) {
         return std::nullopt;
@@ -332,7 +355,7 @@ namespace adder {
 
       std::optional<size_t> current = paramList;
       while (current.has_value()) {
-        auto & param = ast.get<expr::call_parameter>(current.value());
+        auto & param = tree.get<expr::call_parameter>(current.value());
         if (!scoreCalculator.next(this, statement_info[param.expression].type_ref.value())) {
           return std::nullopt; // Too many arguments
         }
@@ -371,22 +394,23 @@ namespace adder {
       return scoreCalculator.value;
     }
 
-    std::optional<size_t> program_metadata::find_symbol(std::string_view const & fullName) const {
+    std::optional<symbol_reference> program_metadata::find_symbol(std::string_view const & fullName) const {
       auto found =
         std::find_if(symbols.begin(), symbols.end(), [&](symbol const & s) { return s.full_identifier == fullName; });
       if (found == symbols.end())
         return std::nullopt;
-      return found - symbols.begin();
+
+      return symbol_reference{ this, symbol_id{found - symbols.begin()} };
     }
 
-    std::optional<size_t> program_metadata::find_unnamed_initializer(size_t scopeId, type_reference receiverTypeIndex,
+    std::optional<symbol_reference> program_metadata::find_unnamed_initializer(size_t scopeId, type_reference receiverTypeIndex,
                                                                      type_reference initializerTypeIndex) const {
       std::string_view fullName = adder::format("init ([ref]%.*s,%.*s)=>void:", receiverTypeIndex.get_identifier().length(),
                                                 receiverTypeIndex.get_identifier().data(),
                                                 initializerTypeIndex.get_identifier().length(),
                                                 initializerTypeIndex.get_identifier().data());
 
-      return search_for_symbol_index(scopeId, [fullName](symbol const & sym) { return sym.full_identifier == fullName; });
+      return search_for_symbol(scopeId, [fullName](symbol_reference const & sym) { return sym.get().full_identifier == fullName; });
     }
 
     std::optional<size_t> program_metadata::get_parent_scope(size_t const & scopeId) const {

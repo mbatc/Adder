@@ -168,7 +168,7 @@ namespace adder {
       }
 
       if (val.symbol_index.has_value()) {
-        return meta->get_symbol_type(val.symbol_index.value());
+        return val.symbol_index->get_type();
       }
 
       return { meta.get(), type_id::undefined };
@@ -188,7 +188,7 @@ namespace adder {
       return find_value([=](program_builder::value const & candidate) {
         if (!candidate.symbol_index.has_value())
           return false;
-        const auto & symbol = meta->symbols[candidate.symbol_index.value()];
+        const auto & symbol = candidate.symbol_index->get();
         return symbol.full_identifier == symbolName;
       });
     }
@@ -204,7 +204,7 @@ namespace adder {
       return find_value([=](program_builder::value const & candidate) {
         if (!candidate.symbol_index.has_value())
           return false;
-        const auto & symbol = meta->symbols[candidate.symbol_index.value()];
+        const auto & symbol = candidate.symbol_index->get();
         return symbol.full_identifier == symbolName;
       });
     }
@@ -346,8 +346,11 @@ namespace adder {
       return ret;
     }
 
-    bool program_builder::begin_function(size_t symbolId) {
-      program_metadata::symbol & symbol = meta->symbols[symbolId];
+    bool program_builder::begin_function(symbol_reference symbolId) {
+      if (meta.get() != symbolId.meta)
+        return false; // TODO: Error can't define method from another module
+
+      symbol & symbol = meta->get(symbolId.index);
 
       function func;
       auto const & funcDesc = symbol.type.as<type_function>();
@@ -456,7 +459,7 @@ namespace adder {
         return;
 
       if (func.symbol_index.has_value()) {
-        auto& symbol = meta->symbols[func.symbol_index.value()];
+        auto& symbol = func.symbol_index->get();
 
         if (symbol.function_index.has_value()) {
           call(0);
@@ -489,12 +492,12 @@ namespace adder {
       add_instruction(op);
     }
 
-    void program_builder::call_native(size_t const & symbol) {
+    void program_builder::call_native(symbol_reference const & symbol) {
       vm::instruction op;
       op.code = vm::op_code::call_native;
       op.call_native.native_method_index = 0;
       add_instruction(op);
-      add_relocation(relocation_linkage::extern_, meta->symbols[symbol].full_identifier,
+      add_relocation(relocation_linkage::extern_, symbol.get().full_identifier,
                      AD_IOFFSET(call_native.native_method_index));
     }
 
@@ -510,7 +513,7 @@ namespace adder {
       }
       
       if (location.symbol_index.has_value()) {
-        auto& symbol = meta->symbols[location.symbol_index.value()];
+        auto& symbol = location.symbol_index->get();
 
         // TODO: load address and jump indirect.
 
@@ -685,7 +688,7 @@ namespace adder {
       }
 
       if (value.symbol_index.has_value()) {
-        auto & symbol = meta->symbols[value.symbol_index.value()];
+        auto & symbol = value.symbol_index->get();
         assert(!symbol.has_local_storage() && "load_value_of is unable to locate local symbols");
 
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
@@ -723,7 +726,7 @@ namespace adder {
       }
 
       if (value.symbol_index.has_value()) {
-        auto & symbol = meta->symbols[value.symbol_index.value()];
+        auto & symbol = value.symbol_index->get();
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
 
@@ -924,7 +927,7 @@ namespace adder {
       }
 
       if (dst.symbol_index.has_value()) {
-        auto & symbol = meta->symbols[dst.symbol_index.value()];
+        auto & symbol = dst.symbol_index->get();
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
         store_constant_to_constant_address(src, dst.address_offset, (uint8_t)sz);
@@ -958,7 +961,7 @@ namespace adder {
       }
 
       if (dst.symbol_index.has_value()) {
-        auto & symbol = meta->symbols[dst.symbol_index.value()];
+        auto & symbol = dst.symbol_index->get();
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
         store_to_constant_address(src, dst.address_offset, (uint8_t)sz);
@@ -1221,7 +1224,7 @@ namespace adder {
       static const auto write_relocations = [&]() { // 
         std::map<relocation_linkage, std::map<std::string_view, std::vector<size_t>>> reloc_table;
         for (auto& reloc : relocations) {
-          const auto& func = meta->symbols[functions[reloc.function_id].symbol];
+          const auto& func = functions[reloc.function_id].symbol.get();
           reloc_table[reloc.linkage][reloc.symbol].push_back(symbolAddress[func.full_identifier] + reloc.offset);
         }
 
