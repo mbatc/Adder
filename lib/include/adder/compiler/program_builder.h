@@ -42,7 +42,7 @@ namespace adder {
         /// Address stored in a register + address_offset
         std::optional<vm::register_index> indirect_register_index;
         /// Index of the symbol
-        std::optional<size_t> symbol_index;
+        std::optional<symbol_reference> symbol_index;
         /// Type of the value
         std::optional<type_reference> type_info;
         /// Base address offset to the value (if applicable)
@@ -90,7 +90,7 @@ namespace adder {
       struct function {
         inline static constexpr int64_t CallLinkStorageSize = sizeof(vm::register_value) * 2;
 
-        size_t                symbol = 0;
+        symbol_reference      symbol;
         std::optional<size_t> scope_id; ///< Extern functions don't have a scope id
         type_reference        return_type = type_reference::undefined();
 
@@ -148,7 +148,7 @@ namespace adder {
       void push_value(value r);
       std::optional<value> pop_value();
 
-      bool begin_function(size_t symbol);
+      bool begin_function(symbol_reference symbol);
       void end_function();
       void end_function(function *func);
       function & current_function();
@@ -206,7 +206,7 @@ namespace adder {
       void call(value const & func);
       void call(uint64_t address);
       void call_indirect(vm::register_index const & symbol);
-      void call_native(size_t const& symbol);
+      void call_native(symbol_reference const & symbol);
       void ret();
 
       void jump_to(value const & location);

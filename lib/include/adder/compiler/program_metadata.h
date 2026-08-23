@@ -19,7 +19,72 @@ namespace adder {
       std::optional<size_t> first_conversion_index;
     };
 
+    enum class symbol_id : size_t {
+      none = -1,
+    };
+    
+    struct symbol {
+      std::string name;
+      std::string full_identifier;
+      type_reference type = type_reference::undefined();
+
+      /// Flags for the symbol
+      symbol_flags flags = symbol_flags::none;
+      /// Stack frame offset for local variables
+      // std::optional<uint64_t> stack_offset;
+      /// Static address for static/global.
+      /// Cannot be resolved until program data area has been compiled.
+      std::optional<uint64_t> global_address;
+      /// Statement that produced this symbol.
+      /// size_t statement_id = 0;
+      /// Scope that declared this symbol.
+      size_t scope_id = 0;
+      /// ID if the statement that declared this symbol
+      std::optional<size_t> declaration_id;
+      /// Function declaration root scope id.
+      std::optional<size_t> function_root_scope_id;
+      /// Function declaration associated with this symbol.
+      std::optional<size_t> function_index;
+
+      bool is_parameter() const {
+        return (flags & symbol_flags::fn_parameter) != symbol_flags::none;
+      }
+      bool is_static() const {
+        return (flags & symbol_flags::static_) != symbol_flags::none;
+      }
+      bool is_function() const {
+        return (flags & symbol_flags::function) != symbol_flags::none;
+      }
+      bool is_global() const {
+        return scope_id == 0;
+      };
+      bool has_local_storage() const {
+        return !is_global() && !is_static();
+      }
+    };
+
+    struct symbol_reference {
+      program_metadata const * meta;
+      symbol_id                index;
+
+      bool operator==(symbol_reference const & rhs) const
+      {
+        return meta == rhs.meta && index == rhs.index;
+      }
+      
+      bool operator!=(symbol_reference const & rhs) const
+      {
+        return !operator==(rhs);
+      }
+
+      symbol const & get() const;
+      size_t         get_size() const;
+      type_reference get_type() const;
+    };
+
     struct program_metadata {
+      ast tree;
+
       size_t static_storage_size = 0;
 
       std::vector<type> types; ///< Types defined by this program
@@ -32,16 +97,9 @@ namespace adder {
       type & get(type_id id) {
         return types[(size_t)id];
       }
+
       type const & get(type_id id) const {
         return types[(size_t)id];
-      }
-
-      // Convenient as there are lots of places getting types with optionals
-      type & get(std::optional<type_id> id) {
-        return get(*id);
-      }
-      type const & get(std::optional<type_id> id) const {
-        return get(*id);
       }
 
       /// Additional metadata for each statement.
@@ -58,52 +116,14 @@ namespace adder {
       };
       std::vector<statement_meta> statement_info;
 
-      struct symbol {
-        std::string name;
-        std::string full_identifier;
-        type_reference type = type_reference::undefined();
-
-        /// Flags for the symbol
-        symbol_flags flags = symbol_flags::none;
-        /// Stack frame offset for local variables
-        // std::optional<uint64_t> stack_offset;
-        /// Static address for static/global.
-        /// Cannot be resolved until program data area has been compiled.
-        std::optional<uint64_t> global_address;
-        /// Statement that produced this symbol.
-        /// size_t statement_id = 0;
-        /// Scope that declared this symbol.
-        size_t scope_id = 0;
-        /// ID if the statement that declared this symbol
-        std::optional<size_t> declaration_id;
-        /// Function declaration root scope id.
-        std::optional<size_t> function_root_scope_id;
-        /// Function declaration associated with this symbol.
-        std::optional<size_t> function_index;
-
-        bool is_parameter() const {
-          return (flags & symbol_flags::fn_parameter) != symbol_flags::none;
-        }
-        bool is_static() const {
-          return (flags & symbol_flags::static_) != symbol_flags::none;
-        }
-        bool is_function() const {
-          return (flags & symbol_flags::function) != symbol_flags::none;
-        }
-        bool is_global() const {
-          return scope_id == 0;
-        };
-        bool has_local_storage() const {
-          return !is_global() && !is_static();
-        }
-      };
       std::vector<symbol> symbols;
+      std::vector<symbol_reference> symbol_references;
 
       struct scope {
         /// Unique symbol prefix for this scope.
         std::string prefix;
         /// Symbols declared in this scope
-        std::vector<size_t> symbols;
+        std::vector<symbol_reference> symbols;
         /// The direct parent of this scope.
         std::optional<size_t> parent;
         /// Next sibling of this scope.
@@ -121,14 +141,14 @@ namespace adder {
 
       type_reference add_type(type_reference const & ref);
       type_reference add_type(type const & desc);
-      type_reference add_function_type(ast const & tree, expr::function_declaration const & decl, std::optional<size_t> id);
+      type_reference add_function_type(expr::function_declaration const & decl, std::optional<size_t> id);
 
       std::optional<type_reference> get_type_reference(type_primitive const & primitive) const;
       std::optional<type_reference> get_type_reference(std::string_view const & name) const;
       type const *           get_type(std::string_view const & name) const;
 
-      std::optional<type_reference> get_type_reference(ast const & tree, size_t statement) const;
-      type const *           get_type(ast const & tree, size_t statement) const;
+      std::optional<type_reference> get_type_reference(size_t statement) const;
+      type const *           get_type(size_t statement) const;
 
       size_t get_type_size(type_modifier const & desc) const;
       size_t get_type_size(type_primitive const & desc) const;
@@ -138,28 +158,40 @@ namespace adder {
       size_t get_type_size(type const & type) const;
       size_t get_type_size(type_id const & typeIndex) const;
 
-      std::optional<size_t> add_symbol(symbol const & s);
-      size_t                get_symbol_size(size_t const & symbolIndex) const;
-      type_reference        get_symbol_type(size_t const & symbolIndex) const;
+      std::optional<symbol_reference> add_symbol(symbol_reference const & s);
+      std::optional<symbol_reference> add_symbol(symbol const & s);
+      
+      bool has(std::optional<symbol_id> const & id) const {
+        return id.has_value() && (size_t)id.value() < symbols.size();
+      }
 
-      std::optional<size_t> search_for_symbol_index(size_t scopeId, std::string_view const & identifier) const;
-      std::optional<size_t> search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const;
-      std::optional<size_t> search_for_symbol_index(size_t                                                    scopeId,
-                                                    std::function<bool(symbol const &, size_t index)> const & pred) const;
+      symbol & get(symbol_id id) {
+        return symbols[(size_t)id];
+      }
 
-      std::optional<size_t> search_for_callable_symbol_index(size_t scopeId, std::string_view const & identifier,
-                                                             ast const & ast, std::optional<size_t> const & paramList) const;
-      std::optional<size_t> search_for_operator_symbol_index(size_t scopeId, expr::operator_type op, type_reference lhsType,
+      symbol const & get(symbol_id id) const {
+        return symbols[(size_t)id];
+      }
+
+      std::optional<symbol_reference> get_statement_symbol(size_t statementId, size_t idx = 0) const;
+      size_t get_statement_symbol_count(size_t statementId) const;
+
+      std::optional<symbol_reference> search_for_symbol(size_t scopeId, std::string_view const & identifier) const;
+      std::optional<symbol_reference> search_for_symbol(size_t scopeId, std::function<bool(symbol_reference const &)> const & pred) const;
+      
+      std::optional<symbol_reference> search_for_callable_symbol(size_t scopeId, std::string_view const & identifier,
+                                                             std::optional<size_t> const & paramList) const;
+      std::optional<symbol_reference> search_for_operator_symbol(size_t scopeId, expr::operator_type op, type_reference lhsType,
                                                              type_reference rhsType) const;
-
-      std::optional<parameter_list_score> get_parameter_list_score(size_t scopeId, type_reference funcType, ast const & ast,
+      
+      std::optional<parameter_list_score> get_parameter_list_score(size_t scopeId, type_reference funcType,
                                                                    std::optional<size_t> const & paramList) const;
       std::optional<parameter_list_score> get_parameter_list_score(size_t scopeId, type_reference funcType,
                                                                    type_reference const * paramList,
                                                                    size_t numParams) const;
 
-      std::optional<size_t> find_symbol(std::string_view const & fullName) const;
-      std::optional<size_t> find_unnamed_initializer(size_t scopeId, type_reference receiverTypeIndex,
+      std::optional<symbol_reference> find_symbol(std::string_view const & fullName) const;
+      std::optional<symbol_reference> find_unnamed_initializer(size_t scopeId, type_reference receiverTypeIndex,
                                                      type_reference initializerTypeIndex) const;
       std::optional<size_t> get_parent_scope(size_t const & scopeId) const;
     };

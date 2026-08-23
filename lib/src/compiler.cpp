@@ -27,8 +27,8 @@ namespace adder {
       std::optional<size_t> call_parameter_list;
     };
 
-    bool evaluate_symbols(context * compiler, ast const & ast, program_metadata * meta);
-    bool evaluate_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_symbols(context * compiler, program_metadata * meta);
+    bool evaluate_symbols(context * compiler, program_metadata * meta, size_t id,
                           symbol_eval_context const & ctx);
 
     struct context {
@@ -52,21 +52,30 @@ namespace adder {
                                                                    std::string const & source) {
         compiler::lexer::token_parser tokenizer(source);
         compiler::ast                 ast = compiler::parse(&tokenizer);
+        
+        if (!tokenizer.ok()) {
+          for (auto & error : tokenizer.errors()) {
+            printf("Error: %s\n", error.c_str());
+          }
+          return nullptr;
+        }
 
-        return compile_metadata(module_name, ast);
+        return compile_metadata(module_name, std::move(ast));
       }
 
-      std::shared_ptr<compiler::program_metadata> compile_metadata(std::string const &   module_name,
-                                                                   compiler::ast const & ast) {
+      std::shared_ptr<compiler::program_metadata> compile_metadata(std::string const & module_name,
+                                                                   compiler::ast &&ast) {
         auto meta = std::make_shared<compiler::program_metadata>();
-        if (!evaluate_symbols(this, ast, meta.get())) {
+        meta->tree = std::move(ast);
+
+        if (!evaluate_symbols(this, meta.get())) {
           return nullptr;
         }
 
         auto moduleInit = meta->find_symbol("()=>void:$module_init");
-        if (moduleInit.has_value()) {
+        if (moduleInit.has_value() && meta.get() == moduleInit->meta) {
           // assert(moduleInit.has_value() && "$module_init was not declared");
-          meta->symbols[moduleInit.value()].function_root_scope_id = 0;
+          meta->symbols[(size_t)moduleInit->index].function_root_scope_id = 0;
         }
 
         imports[module_name] = meta;
@@ -75,19 +84,19 @@ namespace adder {
       }
     };
 
-    type_reference eval_decltype(ast const & ast, program_metadata * meta, size_t statementId);
+    type_reference eval_decltype(program_metadata * meta, size_t statementId);
 
     template<typename T>
-    type_reference eval_decltype_impl(ast const & ast, program_metadata * meta, size_t statementId, T const & o) {
-      unused(ast, o);
+    type_reference eval_decltype_impl(program_metadata * meta, size_t statementId, T const & o) {
+      unused(o);
 
       auto metaTypeId = meta->statement_info[statementId].type_ref;
       return metaTypeId.value_or(meta->get_type_reference(get_primitive_type_name(type_primitive::void_)).value());
     }
 
-    type_reference eval_decltype_impl(ast const & ast, program_metadata * meta, size_t statementId,
+    type_reference eval_decltype_impl(program_metadata * meta, size_t statementId,
                                       expr::identifier const & identifier) {
-      unused(ast, identifier);
+      unused(identifier);
 
       auto symbolIndex = meta->statement_info[statementId].symbol_index;
       if (!symbolIndex.has_value()) {
@@ -96,12 +105,12 @@ namespace adder {
       return meta->symbols[symbolIndex.value()].type;
     }
 
-    type_reference eval_decltype_impl(ast const & ast, program_metadata * meta, size_t statementId,
+    type_reference eval_decltype_impl(program_metadata * meta, size_t statementId,
                                       expr::binary_operator const & op) {
       unused(statementId);
       // meta->is_valid_function_overload();
       if (op.type_name == expr::operator_type::call) {
-        type_reference funcType = eval_decltype(ast, meta, op.left.value());
+        type_reference funcType = eval_decltype(meta, op.left.value());
         assert(funcType.is_function());
         auto returnType = funcType.return_type();
         return returnType.value_or(type_reference::undefined());
@@ -111,24 +120,22 @@ namespace adder {
       return type_reference::undefined();
     }
 
-    type_reference eval_decltype(ast const & ast, program_metadata * meta, size_t statementId) {
-      return std::visit([&](auto && o) { return eval_decltype_impl(ast, meta, statementId, o); },
-                        ast.statements[statementId]);
+    type_reference eval_decltype(program_metadata * meta, size_t statementId) {
+      return std::visit([&](auto && o) { return eval_decltype_impl(meta, statementId, o); },
+                        meta->tree.statements[statementId]);
     }
 
-    bool prepare_call(ast const & ast, program_builder * program, std::optional<size_t> const & parameters);
-    bool generate_call(ast const & ast, program_builder * program);
+    bool prepare_call(program_builder * program, std::optional<size_t> const & parameters);
+    bool generate_call(program_builder * program);
 
-    bool generate_copy(ast const & ast, program_builder * program, size_t statementId) {
-      unused(ast, program, statementId);
+    bool generate_copy(program_builder * program, size_t statementId) {
+      unused(program, statementId);
       return false;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, size_t statementId);
+    bool generate_code(program_builder * program, size_t statementId);
 
-    bool generate_literal_code(ast const & ast, program_builder * program, bool value) {
-      unused(ast);
-
+    bool generate_literal_code(program_builder * program, bool value) {
       program_builder::value result;
       result.constant.emplace(0);
       std::memcpy(&result.constant.value(), &value, sizeof(value));
@@ -137,9 +144,7 @@ namespace adder {
       return true;
     }
 
-    bool generate_literal_code(ast const & ast, program_builder * program, int64_t value) {
-      unused(ast);
-
+    bool generate_literal_code(program_builder * program, int64_t value) {
       program_builder::value result;
       result.constant.emplace(0);
       std::memcpy(&result.constant.value(), &value, sizeof(value));
@@ -148,9 +153,7 @@ namespace adder {
       return true;
     }
 
-    bool generate_literal_code(ast const & ast, program_builder * program, double value) {
-      unused(ast);
-
+    bool generate_literal_code(program_builder * program, double value) {
       program_builder::value result;
       result.constant.emplace(0);
       std::memcpy(&result.constant.value(), &value, sizeof(value));
@@ -159,8 +162,8 @@ namespace adder {
       return true;
     }
 
-    bool generate_literal_code(ast const & ast, program_builder * program, std::string_view const & value) {
-      unused(ast, value);
+    bool generate_literal_code(program_builder * program, std::string_view const & value) {
+      unused(value);
 
       program_builder::value result;
       // result.constant.emplace(0);
@@ -172,15 +175,13 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::literal const & statement, size_t statementId) {
+    bool generate_code(program_builder * program, expr::literal const & statement, size_t statementId) {
       unused(statementId);
 
-      return std::visit([&](auto && value) { return generate_literal_code(ast, program, value); }, statement.value);
+      return std::visit([&](auto && value) { return generate_literal_code(program, value); }, statement.value);
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::identifier const & statement, size_t statementId) {
-      unused(ast);
-
+    bool generate_code(program_builder * program, expr::identifier const & statement, size_t statementId) {
       std::optional<program_builder::value> variable = program->find_value_by_identifier(statement.name);
       if (variable.has_value()) {
         program->push_value(variable.value());
@@ -190,11 +191,11 @@ namespace adder {
       // Allow referencing functions defined anywhere in an outer scope
       const auto symbolIndex = program->meta->statement_info[statementId].symbol_index;
       if (symbolIndex.has_value()) {
-        const auto & symbol = program->meta->symbols[symbolIndex.value()];
-        if (!symbol.has_local_storage() && symbol.is_function()) {
+        const auto & symbol = program->meta->symbol_references[symbolIndex.value()];
+        if (!symbol.get().has_local_storage() && symbol.get().is_function()) {
           program_builder::value fn;
-          fn.symbol_index = symbolIndex.value();
-          fn.type_info    = symbol.type;
+          fn.symbol_index = symbol;
+          fn.type_info    = symbol.get_type();
           program->push_value(fn);
           return true;
         }
@@ -205,35 +206,35 @@ namespace adder {
       return false;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::list const & statement, size_t statementId) {
+    bool generate_code(program_builder * program, expr::list const & statement, size_t statementId) {
       unused(statementId);
-      if (!generate_code(ast, program, statement.expr))
+      if (!generate_code(program, statement.expr))
         return false;
       if (statement.next.has_value())
-        generate_code(ast, program, statement.next.value());
+        generate_code(program, statement.next.value());
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::type_name const & statement, size_t statementId) {
-      unused(ast, program, statement, statementId);
+    bool generate_code(program_builder * program, expr::type_name const & statement, size_t statementId) {
+      unused(program, statement, statementId);
       printf("info: No code generated for type_name expression\n");
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::type_fn const & statement, size_t statementId) {
-      unused(ast, program, statement, statementId);
+    bool generate_code(program_builder * program, expr::type_fn const & statement, size_t statementId) {
+      unused(program, statement, statementId);
       printf("info: No code generated for type_fn expression\n");
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::type_modifier const & statement,
+    bool generate_code(program_builder * program, expr::type_modifier const & statement,
                        size_t statementId) {
-      unused(ast, program, statement, statementId);
+      unused(program, statement, statementId);
       printf("info: No code generated for type_modifier expression\n");
       return true;
     }
 
-    bool initialize_variable(ast const & ast, program_builder * program, program_builder::value const & receiver,
+    bool initialize_variable(program_builder * program, program_builder::value const & receiver,
                              program_builder::value const & initializer) {
       assert(receiver.type_info.has_value());
       assert(!receiver.constant.has_value());
@@ -265,7 +266,7 @@ namespace adder {
       program->push_value(initializer);
       program->push_value(receiver);
       program->push_value(unnamedInit.value());
-      if (!generate_call(ast, program)) {
+      if (!generate_call(program)) {
         return false;
       }
 
@@ -274,20 +275,19 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::variable_declaration const & statement,
+    bool generate_code(program_builder * program, expr::variable_declaration const & statement,
                        size_t statementId) {
       const size_t temporaries = program->scopes.back().temporaries.size(); // TODO: Scoped helper for this?
 
-      const type_reference variableType = program->meta->get_type_reference(ast, statement.type.value()).value();
-      const size_t         symbolIndex  = program->meta->statement_info[statementId].symbol_index.value();
-      const auto &         symbol       = program->meta->symbols[symbolIndex];
+      const type_reference variableType = program->meta->get_type_reference(statement.type.value()).value();
+      const auto           symbol       = program->meta->get_statement_symbol(statementId);
 
       program_builder::value receiver;
-      if (symbol.has_local_storage()) {
+      if (symbol->get().has_local_storage()) {
         receiver = program->allocate_stack_variable(variableType);
       } else {
         receiver.type_info    = variableType;
-        receiver.symbol_index = symbolIndex;
+        receiver.symbol_index = symbol;
       }
       receiver.identifier = statement.name;
 
@@ -295,9 +295,9 @@ namespace adder {
 
       if (statement.initializer.has_value()) {
         const size_t count = program->value_stack.size();
-        if (!generate_code(ast, program, statement.initializer.value())) {
+        if (!generate_code(program, statement.initializer.value())) {
           printf("Error: failed to generate code for initializer statement of symbol '%s'\n",
-                 symbol.full_identifier.c_str());
+                 symbol->get().full_identifier.c_str());
           return false;
         }
 
@@ -306,9 +306,9 @@ namespace adder {
 
         auto initializer = program->pop_value();
         assert(initializer.has_value());
-        if (!initialize_variable(ast, program, receiver, initializer.value())) {
+        if (!initialize_variable(program, receiver, initializer.value())) {
           printf("Error: failed initialize symbol '%s' from result of the initializer statement\n",
-                 symbol.full_identifier.c_str());
+                 symbol->get().full_identifier.c_str());
           return false;
         }
       }
@@ -319,13 +319,13 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::init const & statement, size_t statementId) {
-      unused(ast, program, statement, statementId);
+    bool generate_code(program_builder * program, expr::init const & statement, size_t statementId) {
+      unused(program, statement, statementId);
       return true;
-      // generate_code(ast, program, statement.expression);
+      // generate_code(program, statement.expression);
       // auto value = program->pop_expression_result();
       //
-      // generate_code(ast, program, statement.target);
+      // generate_code(program, statement.target);
       // auto target = program->pop_expression_result();
       //
       // if (!target.type_index.has_value() || value.type_index.has_value())
@@ -336,32 +336,32 @@ namespace adder {
       //
       // return std::visit([&](const auto & a) {
       //   return std::visit([&](const auto & b) {
-      //     return generate_init_code(ast, program, target, a, value, b);
+      //     return generate_init_code(program, target, a, value, b);
       //     }, valueType.desc);
       // }, targetType.desc);
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::function_return const & statement,
+    bool generate_code(program_builder * program, expr::function_return const & statement,
                        size_t statementId) {
       unused(statementId);
 
       auto receiver = program->get_return_value();
       if (is_undefined(receiver.type_info)) {
-        auto symbol = program->meta->symbols[program->current_function().symbol];
+        auto symbol = program->current_function().symbol.get();
         printf("Error: fn %.*s return type is undefined.\n", (int)symbol.name.length(), symbol.name.data());
         return false;
       }
 
       if (is_void(receiver.type_info)) {
         if (statement.expression.has_value()) {
-          auto symbol = program->meta->symbols[program->current_function().symbol];
+          auto symbol = program->current_function().symbol.get();
           printf("Error: fn %.*s returns void, not a value\n", (int)symbol.name.length(), symbol.name.data());
           return false;
         }
         return true;
       }
 
-      if (!generate_code(ast, program, statement.expression.value())) {
+      if (!generate_code(program, statement.expression.value())) {
         printf("Error: failed to evaluate return expression\n");
         return false;
       }
@@ -372,7 +372,7 @@ namespace adder {
         return false;
       }
 
-      if (!initialize_variable(ast, program, receiver, expressionResult.value())) {
+      if (!initialize_variable(program, receiver, expressionResult.value())) {
         printf("Error: failed to initialize return value\n");
         return false;
       }
@@ -381,38 +381,37 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::binary_operator const & statement,
+    bool generate_code(program_builder * program, expr::binary_operator const & statement,
                        size_t statementId) {
       switch (statement.type_name) {
       case expr::operator_type::call: {
-        if (!generate_code(ast, program, statement.left.value())) {
+        if (!generate_code(program, statement.left.value())) {
           printf("Error: failed to evaluate lhs of operator\n");
           return false;
         }
 
         // TODO: When generating code,
         //      [optimize] If a temporary can be forwarded as a parameter, it should be allocated in the correct place.
-        if (!(prepare_call(ast, program, statement.right) && generate_call(ast, program)))
+        if (!(prepare_call(program, statement.right) && generate_call(program)))
           return false;
 
         break;
       }
       default: {
-        auto callableSymbolIndex = program->meta->statement_info[statementId].symbol_index;
-        if (!callableSymbolIndex.has_value()) {
+        auto callableSymbol = program->meta->get_statement_symbol(statementId);
+        if (!callableSymbol.has_value()) {
           printf("Error: no suitable binary operator\n");
           return false;
         }
 
-        if (!(generate_code(ast, program, statement.right.value()) && generate_code(ast, program, statement.left.value())))
+        if (!(generate_code(program, statement.right.value()) && generate_code(program, statement.left.value())))
           return false;
         auto lhs = program->pop_value();
         auto rhs = program->pop_value();
 
-        auto                   callableSymbol = program->meta->symbols[callableSymbolIndex.value()];
         program_builder::value function;
-        function.type_info    = program->meta->get_symbol_type(callableSymbolIndex.value());
-        function.symbol_index = callableSymbolIndex.value();
+        function.type_info    = callableSymbol->get_type();
+        function.symbol_index = callableSymbol.value();
         function.identifier   = expr::get_operator_identifer(statement.type_name);
 
         auto ret = program->allocate_temporary_value(return_type_of(function.type_info).value());
@@ -421,7 +420,7 @@ namespace adder {
         program->push_value(lhs.value());
         program->push_value(function);
 
-        if (!generate_call(ast, program))
+        if (!generate_call(program))
           return false;
 
         break;
@@ -430,10 +429,9 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::function_declaration const & statement,
+    bool generate_code(program_builder * program, expr::function_declaration const & statement,
                        size_t statementId) {
-      const auto & statementMeta = program->meta->statement_info[statementId];
-      const auto   symbolIndex   = statementMeta.symbol_index;
+      const auto symbolIndex = program->meta->get_statement_symbol(statementId);
       if (!symbolIndex.has_value()) {
         // TODO: Report error. Declaration does not have a valid symbol
         printf("Error: No symbol associated with function declaration\n");
@@ -469,8 +467,8 @@ namespace adder {
           -(int64_t)func.args_size - program_builder::function::CallLinkStorageSize; // Frame pointer + return pointer
 
         for (auto argId : statement.arguments) {
-          const auto & decl      = ast.get<expr::variable_declaration>(argId);
-          const auto & argSymbol = program->meta->statement_info[argId].symbol_index;
+          const auto & decl      = program->meta->tree.get<expr::variable_declaration>(argId);
+          const auto & argSymbol = program->meta->get_statement_symbol(argId);
           if (!argSymbol.has_value()) {
             printf("Error: Unknown argument type\n");
             return false;
@@ -478,7 +476,7 @@ namespace adder {
 
           program_builder::value val;
           val.symbol_index            = argSymbol;
-          val.type_info               = program->meta->get_symbol_type(argSymbol.value());
+          val.type_info               = argSymbol->get_type();
           val.indirect_register_index = (vm::register_index)vm::register_names::fp;
           val.address_offset          = nextArgOffset;
           val.identifier              = decl.name;
@@ -487,7 +485,7 @@ namespace adder {
           program->add_variable(val);
         }
 
-        if (!generate_code(ast, program, statement.body.value())) {
+        if (!generate_code(program, statement.body.value())) {
           printf("Error: Failed to generate code for function\n");
           return false;
         }
@@ -503,29 +501,29 @@ namespace adder {
 
       program_builder::value val;
       val.symbol_index = symbolIndex;
-      val.type_info    = program->meta->get_symbol_type(symbolIndex.value());
+      val.type_info    = symbolIndex->get_type();
       val.identifier   = statement.identifier;
       program->add_variable(val);
 
-      unused(ast, program, statement);
+      unused(program, statement);
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::call_parameter const & statement,
+    bool generate_code(program_builder * program, expr::call_parameter const & statement,
                        size_t statementId) {
       unused(statementId);
 
-      generate_code(ast, program, statement.expression);
+      generate_code(program, statement.expression);
 
       if (statement.next.has_value())
-        generate_code(ast, program, statement.next.value());
+        generate_code(program, statement.next.value());
 
       return true;
     }
 
-    bool push_argument(ast const & ast, program_builder * program, std::string_view const & name, program_builder::value src,
+    bool push_argument(program_builder * program, std::string_view const & name, program_builder::value src,
                        type_reference argType, bool isInline) {
-      unused(ast, program, src, argType);
+      unused(program, src, argType);
 
       if (isInline) {
         if (src.type_info == argType) {
@@ -546,7 +544,7 @@ namespace adder {
           auto receiver       = program->allocate_temporary_value(argType);
           receiver.identifier = name;
           program->add_variable(receiver);
-          return initialize_variable(ast, program, receiver, src);
+          return initialize_variable(program, receiver, src);
         }
       }
 
@@ -570,29 +568,29 @@ namespace adder {
         program->push_value(src);
         program->push_value(receiver);
         program->push_value(unnamedInit.value());
-        if (!generate_call(ast, program)) {
+        if (!generate_call(program)) {
           return false;
         }
         program->pop_value();
         return true;
       } else {
-        return initialize_variable(ast, program, receiver, src);
+        return initialize_variable(program, receiver, src);
       }
     }
 
-    bool prepare_call_parameters_reversed(ast const & tree, program_builder * program, std::optional<size_t> const & id) {
+    bool prepare_call_parameters_reversed(program_builder * program, std::optional<size_t> const & id) {
       if (!id.has_value())
         return true;
 
-      auto param = tree.get<expr::call_parameter>(id.value());
-      if (!prepare_call_parameters_reversed(tree, program, param.next)) {
+      auto param = program->meta->tree.get<expr::call_parameter>(id.value());
+      if (!prepare_call_parameters_reversed(program, param.next)) {
         return false;
       }
 
       size_t prevSz = program->value_stack.size();
       unused(prevSz);
 
-      if (!generate_code(tree, program, param.expression)) {
+      if (!generate_code(program, param.expression)) {
         return false;
       }
 
@@ -601,7 +599,7 @@ namespace adder {
       return true;
     }
 
-    bool prepare_call(ast const & tree, program_builder * program, std::optional<size_t> const & parameters) {
+    bool prepare_call(program_builder * program, std::optional<size_t> const & parameters) {
       auto function = program->pop_value();
       if (!function.has_value()) {
         printf("Error: lhs of operator did not evaluate to a value\n");
@@ -624,7 +622,7 @@ namespace adder {
       auto ret = program->allocate_temporary_value(function->type_info->return_type().value());
       program->push_value(ret);
 
-      if (!prepare_call_parameters_reversed(tree, program, parameters)) {
+      if (!prepare_call_parameters_reversed(program, parameters)) {
         printf("Error: Failed to prepare call parameters\n");
         return false;
       }
@@ -634,7 +632,7 @@ namespace adder {
     }
 
     /// Generate a call using expressions pushed to the builders result stack.
-    bool generate_call(ast const & ast, program_builder * program) {
+    bool generate_call(program_builder * program) {
       std::optional<program_builder::value> function = program->pop_value();
 
       if (!function.has_value() || !is_function(function->type_info)) {
@@ -642,23 +640,22 @@ namespace adder {
         return false;
       }
 
-      std::optional<program_metadata::symbol> callable;
+      std::optional<symbol> callable;
       if (function->symbol_index.has_value())
-        callable = program->meta->symbols[function->symbol_index.value()];
+        callable = function->symbol_index->get();
 
       auto decayedSymbolType = remove_reference(decay_type(function->type_info));
 
       // Pointer to the actual function definition.
       // Allows us to inline the call if possible.
-
-      assert(false, 
-        "To inline across module imports we need the ast of the imported module"
-        "Consider moving AST into program_metadata and having a 'symbol_reference' type similar to 'type_reference'"
-        "Alternative to 'symbol_reference' would be 'expr_reference', but that may be excessive."
-      );
+      // assert(false &&
+      //   "To inline across module imports we need the ast of the imported module"
+      //   "Consider moving AST into program_metadata and having a 'symbol_reference' type similar to 'type_reference'"
+      //   "Alternative to 'symbol_reference' would be 'expr_reference', but that may be excessive."
+      // );
       expr::function_declaration const * func = callable.has_value() && callable->declaration_id.has_value() &&
-                                                    ast.is<expr::function_declaration>(callable->declaration_id.value())
-                                                  ? &ast.get<expr::function_declaration>(callable->declaration_id.value())
+                                                    function->symbol_index->meta->tree.is<expr::function_declaration>(callable->declaration_id.value())
+                                                  ? &function->symbol_index->meta->tree.get<expr::function_declaration>(callable->declaration_id.value())
                                                   : nullptr;
 
       type_function const * signature = decayedSymbolType->try_get_as<type_function>();
@@ -686,12 +683,12 @@ namespace adder {
         });
 
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
-          auto & var = ast.get<expr::variable_declaration>(func->arguments[i]);
+          auto & var = function->symbol_index->meta->tree.get<expr::variable_declaration>(func->arguments[i]);
           auto   arg = program->pop_value();
           if (!arg.has_value()) {
             return false;
           }
-          push_argument(ast, program, var.name, arg.value(), signature->arguments[i], inlineCall);
+          push_argument(program, var.name, arg.value(), signature->arguments[i], inlineCall);
         }
 
         program->push_return_value_receiver(program->value_stack.back());
@@ -699,7 +696,7 @@ namespace adder {
         const size_t startInstruction = program->current_function().instructions.size();
 
         if (func->body.has_value()) {
-          if (!generate_code(ast, program, func->body.value())) {
+          if (!generate_code(program, func->body.value())) {
             return false;
           }
         }
@@ -737,12 +734,12 @@ namespace adder {
           if (!arg.has_value()) {
             return false;
           }
-          push_argument(ast, program, "", arg.value(), signature->arguments[i], inlineCall);
+          push_argument(program, "", arg.value(), signature->arguments[i], inlineCall);
         }
 
         program->call(function.value());
 
-        initialize_variable(ast, program, program->value_stack.back(), program->get_temporary(rv));
+        initialize_variable(program, program->value_stack.back(), program->get_temporary(rv));
 
         // Free args space
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
@@ -760,16 +757,16 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::class_decl const & statement, size_t statementId) {
-      unused(ast, program, statement, statementId);
+    bool generate_code(program_builder * program, expr::class_decl const & statement, size_t statementId) {
+      unused(program, statement, statementId);
       return true;
     }
 
-    void destroy_symbol(ast const & ast, program_builder * program, size_t symbolId) {
-      unused(ast, program, symbolId);
+    void destroy_symbol(program_builder * program, size_t symbolId) {
+      unused(program, symbolId);
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::block const & scope, size_t blockId) {
+    bool generate_code(program_builder * program, expr::block const & scope, size_t blockId) {
       unused(blockId);
 
       auto scopeId = program->meta->statement_info[blockId].scope_index;
@@ -793,7 +790,7 @@ namespace adder {
       for (size_t statementId : scope.statements) {
         size_t temporaries = program->scopes.back().temporaries.size();
 
-        if (!generate_code(ast, program, statementId)) {
+        if (!generate_code(program, statementId)) {
           printf("Failed to generate code for statement: %lld\n", statementId);
           return false;
         }
@@ -805,7 +802,7 @@ namespace adder {
 
       // If the last statement was a return, scope variables will have already been cleaned up.
       // skip cleanup instructions.
-      if (scope.statements.empty() || !ast.is<expr::function_return>(scope.statements.back()))
+      if (scope.statements.empty() || !program->meta->tree.is<expr::function_return>(scope.statements.back()))
         program->emit_scope_cleanup();
 
       if (isStackFrame && !isInlining) {
@@ -822,10 +819,10 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::branch const & branch, size_t statementId) {
+    bool generate_code(program_builder * program, expr::branch const & branch, size_t statementId) {
       unused(statementId);
 
-      if (!generate_code(ast, program, branch.condition)) {
+      if (!generate_code(program, branch.condition)) {
         printf("Error: failed to generate code for if condition\n");
         return false;
       }
@@ -838,7 +835,7 @@ namespace adder {
       auto booleanCond = condition.value();
       if (!is_bool(condition->type_info)) {
         booleanCond = program->allocate_temporary_value(program->meta->get_type_reference(type_primitive::bool_).value());
-        initialize_variable(ast, program, booleanCond, condition.value());
+        initialize_variable(program, booleanCond, condition.value());
       }
 
       vm::register_index val                       = program->load_value_of(booleanCond);
@@ -846,7 +843,7 @@ namespace adder {
       program->jump_if_zero_rel(0, val);
       program->release_register(val);
 
-      if (!generate_code(ast, program, branch.true_branch)) {
+      if (!generate_code(program, branch.true_branch)) {
         printf("Error: failed to generate code for if body\n");
         return false;
       }
@@ -856,7 +853,7 @@ namespace adder {
         program->jump_relative(0);
         trueBranchSize = program->current_function().instructions.size() - skipTrueBranchInstruction;
 
-        if (!generate_code(ast, program, branch.false_branch.value())) {
+        if (!generate_code(program, branch.false_branch.value())) {
           printf("Error: failed to generate code for else/elseif body\n");
           return false;
         }
@@ -872,7 +869,7 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::loop const & loop, size_t statementId) {
+    bool generate_code(program_builder * program, expr::loop const & loop, size_t statementId) {
       unused(statementId);
 
       program->begin_scope();
@@ -880,7 +877,7 @@ namespace adder {
       if (loop.pre.has_value()) {
         // Generate pre-condition code
         program_builder::scoped_temporary_cleaner tempCleanup(program, program->scopes.size() - 1);
-        if (!generate_code(ast, program, loop.pre.value())) {
+        if (!generate_code(program, loop.pre.value())) {
           printf("Error: loop pre-statement is not valid\n");
           return false;
         }
@@ -894,7 +891,7 @@ namespace adder {
 
         std::optional<program_builder::value> condition;
         if (loop.condition.has_value()) {
-          if (!generate_code(ast, program, loop.condition.value())) {
+          if (!generate_code(program, loop.condition.value())) {
             printf("Error: failed to generate code for if condition\n");
             return false;
           }
@@ -908,7 +905,7 @@ namespace adder {
           condition = result;
           if (!is_bool(condition->type_info)) {
             condition = program->allocate_temporary_value(program->meta->get_type_reference(type_primitive::bool_).value());
-            initialize_variable(ast, program, condition.value(), result.value());
+            initialize_variable(program, condition.value(), result.value());
           }
         } else {
           condition.emplace();
@@ -925,7 +922,7 @@ namespace adder {
       if (loop.body.has_value()) {
         program_builder::scoped_temporary_cleaner tempCleanup(program, program->scopes.size() - 1);
 
-        if (!generate_code(ast, program, loop.body.value())) {
+        if (!generate_code(program, loop.body.value())) {
           printf("Error: failed to generate code for loop body\n");
           return false;
         }
@@ -933,7 +930,7 @@ namespace adder {
 
       if (loop.post.has_value()) {
         program_builder::scoped_temporary_cleaner tempCleanup(program, program->scopes.size() - 1);
-        if (!generate_code(ast, program, loop.post.value())) {
+        if (!generate_code(program, loop.post.value())) {
           printf("Error: loop post-statement is not valid\n");
           return false;
         }
@@ -954,75 +951,62 @@ namespace adder {
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::byte_code const & code, size_t statementId) {
-      unused(ast, statementId);
+    bool generate_code(program_builder * program, expr::byte_code const & code, size_t statementId) {
+      unused(statementId);
 
       return code.callback != nullptr && code.callback(program);
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::import_symbol const & code, size_t statementId) {
-      unused(ast);
+    bool generate_code(program_builder * program, expr::import_symbol const & code, size_t statementId) {
+      for (size_t i = 0; i < program->meta->get_statement_symbol_count(statementId); ++i) {
+        auto   symbol      = program->meta->get_statement_symbol(statementId, i);
 
-      auto & statementMeta = program->meta->statement_info[statementId];
-      if (statementMeta.symbol_index.has_value()) {
-        for (size_t i = 0; i < statementMeta.symbol_count; ++i) {
-          size_t symbolIndex = statementMeta.symbol_index.value() + i;
-          auto & symbol      = program->meta->symbols[symbolIndex];
+        program_builder::value receiver;
+        receiver.type_info    = symbol->get_type();
+        receiver.symbol_index = symbol;
+        receiver.identifier   = code.symbol_alias;
+        program->add_variable(receiver);
+      }      
+      return true;
+    }
 
-          program_builder::value receiver;
-          receiver.type_info    = symbol.type;
-          receiver.symbol_index = symbolIndex;
-          receiver.identifier   = code.symbol_alias;
-          program->add_variable(receiver);
-        }
+    bool generate_code(program_builder * program, expr::import_module const & code, size_t statementId) {
+      for (size_t i = 0; i < program->meta->get_statement_symbol_count(statementId); ++i) {
+        auto   symbol      = program->meta->get_statement_symbol(statementId, i);
+        program_builder::value receiver;
+        receiver.type_info    = symbol->get_type();
+        receiver.identifier   = symbol->get().name;
+        receiver.symbol_index = symbol;
+        program->add_variable(receiver);
       }
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, expr::import_module const & code, size_t statementId) {
-      unused(ast);
-
-      auto & statementMeta = program->meta->statement_info[statementId];
-      if (statementMeta.symbol_index.has_value()) {
-        for (size_t i = 0; i < statementMeta.symbol_count; ++i) {
-          size_t symbolIndex = statementMeta.symbol_index.value() + i;
-          auto & symbol      = program->meta->symbols[symbolIndex];
-
-          program_builder::value receiver;
-          receiver.type_info    = symbol.type;
-          receiver.identifier   = symbol.name;
-          receiver.symbol_index = symbolIndex;
-          program->add_variable(receiver);
-        }
-      }
-      return true;
-    }
-
-    bool generate_code(ast const & ast, program_builder * program, expr::type_declaration const & decl, size_t statementId) {
-      unused(ast, program, decl, statementId);
+    bool generate_code(program_builder * program, expr::type_declaration const & decl, size_t statementId) {
+      unused(program, decl, statementId);
       // No-op
       return true;
     }
 
-    bool generate_code(ast const & ast, program_builder * program, size_t statementId) {
+    bool generate_code(program_builder * program, size_t statementId) {
       bool result = false;
       std::visit([&](auto const & statement) {
-        result = generate_code(ast, program, statement, statementId);
-      }, ast.statements[statementId]);
+        result = generate_code(program, statement, statementId);
+      }, program->meta->tree.statements[statementId]);
       return result;
     }
 
     /// Evaluate the type index of a ast statement that refers to a type
-    std::optional<type_reference> evaluate_type_index(ast const & ast, program_metadata * meta, size_t statementId) {
+    std::optional<type_reference> evaluate_type_index(program_metadata * meta, size_t statementId) {
       std::optional<size_t> ret;
       auto& typeId = meta->statement_info[statementId].type_ref;
       if (typeId.has_value()) {
         return typeId;
       }
 
-      if (ast.is<expr::type_modifier>(statementId)) {
-        expr::type_modifier const & modifier = ast.get<expr::type_modifier>(statementId);
-        auto modified = evaluate_type_index(ast, meta, modifier.modified);
+      if (meta->tree.is<expr::type_modifier>(statementId)) {
+        expr::type_modifier const & modifier = meta->tree.get<expr::type_modifier>(statementId);
+        auto modified = evaluate_type_index(meta, modifier.modified);
         if (!modified.has_value()) {
           printf("Error: class decl not implemented");
           return std::nullopt;
@@ -1034,14 +1018,14 @@ namespace adder {
 
         type t;
         t.desc = mod;
-        t.identifier = get_type_name(ast, statementId).value();
+        t.identifier = get_type_name(meta->tree, statementId).value();
         typeId = meta->add_type(t);
       }
 
-      if (ast.is<expr::type_fn>(statementId)) {
-        expr::type_fn const & fn = ast.get<expr::type_fn>(statementId);
+      if (meta->tree.is<expr::type_fn>(statementId)) {
+        expr::type_fn const & fn = meta->tree.get<expr::type_fn>(statementId);
 
-        auto returnType = evaluate_type_index(ast, meta, fn.return_type);
+        auto returnType = evaluate_type_index(meta, fn.return_type);
         if (!returnType.has_value()) {
           return std::nullopt;
         }
@@ -1049,7 +1033,7 @@ namespace adder {
         type_function desc;
         desc.return_type = returnType.value();
         for (auto const & arg : fn.argument_list) {
-          auto argType = evaluate_type_index(ast, meta, arg);
+          auto argType = evaluate_type_index(meta, arg);
           if (!argType.has_value()) {
             printf("Error: unknown type argument type");
             // TODO: Push error. Unable to evaluate argument type at index
@@ -1061,127 +1045,132 @@ namespace adder {
 
         type t;
         t.desc = desc;
-        t.identifier = get_type_name(ast, statementId).value();
+        t.identifier = get_type_name(meta->tree, statementId).value();
 
         typeId = meta->add_type(t);
       }
 
-      if (ast.is<expr::class_decl>(statementId)) {
+      if (meta->tree.is<expr::class_decl>(statementId)) {
         // Parse class definition
         printf("Error: class decl not implemented");
         return std::nullopt;
       }
 
       if (!typeId.has_value()) {
-        typeId = meta->get_type_reference(ast, statementId);
+        typeId = meta->get_type_reference(statementId);
       }
 
       return typeId;
     }
 
-    bool evaluate_type_names(ast const & ast, program_metadata * meta) {
-      for (size_t i = 0; i < ast.statements.size(); ++i) {
-        evaluate_type_index(ast, meta, i);
+    bool evaluate_type_names(program_metadata * meta) {
+      for (size_t i = 0; i < meta->tree.statements.size(); ++i) {
+        evaluate_type_index(meta, i);
       }
       return true;
     }
 
-    bool evaluate_types(ast const & ast, program_metadata * meta) {
-      return evaluate_type_names(ast, meta);
+    bool evaluate_types(program_metadata * meta) {
+      return evaluate_type_names(meta);
     }
 
     template<typename T>
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id, T const & other,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id, T const & other,
                                     symbol_eval_context const & ctx) {
       unused(other);
 
       bool result = true;
-      visit_sub_expressions(ast, id, [&](size_t childId) { result = evaluate_symbols(compiler, ast, meta, childId, ctx);
+      visit_sub_expressions(meta->tree, id,
+        [&](size_t childId) { result = evaluate_symbols(compiler, meta, childId, ctx);
       });
       return result;
     }
 
-    bool evaluate_statement_symbols(context* compiler, ast const& ast, program_metadata* meta, size_t id,
+    bool evaluate_statement_symbols(context* compiler, program_metadata* meta, size_t id,
       expr::type_declaration const& decl, symbol_eval_context const& ctx) {
-      unused(compiler, ast, id, decl);
+      unused(compiler, id, decl);
 
       auto & statementMeta = meta->statement_info[id];
       statementMeta.type_ref = meta->add_type(type{std::string(decl.identifier), decl.desc});
       return !is_undefined(statementMeta.type_ref);
     }
 
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::identifier const & identifier, symbol_eval_context const & ctx) {
-      auto& statementMeta = meta->statement_info[id];
+      std::optional<symbol_reference> symbol;
       if (ctx.is_call) {
-        statementMeta.symbol_index = meta->search_for_callable_symbol_index(ctx.scope_id, identifier.name, ast, ctx.call_parameter_list);
+        symbol = meta->search_for_callable_symbol(ctx.scope_id, identifier.name, ctx.call_parameter_list);
       }
       else {
-        statementMeta.symbol_index = meta->search_for_symbol_index(ctx.scope_id, identifier.name);
+        symbol = meta->search_for_symbol(ctx.scope_id, identifier.name);
       }
 
-      if (!statementMeta.symbol_index.has_value()) {
+      if (!symbol.has_value()) {
         printf("Error: Unable to resolve identifier '%.*s'\n", (int)identifier.name.length(), identifier.name.data());
         return false;
       }
-
-      statementMeta.type_ref = meta->get_symbol_type(statementMeta.symbol_index.value());
+      
+      auto& statementMeta = meta->statement_info[id];
+      auto it = std::find(meta->symbol_references.begin(), meta->symbol_references.end(), symbol.value());
+      // TODO: More elegant way of mapping symbols to statements.
+      statementMeta.symbol_index = it - meta->symbol_references.begin();
+      statementMeta.type_ref = symbol->get_type();
       return statementMeta.symbol_index.has_value();
     }
 
-    bool evaluate_literal_symbols(ast const& ast, program_metadata* meta, size_t id, bool value, symbol_eval_context const & ctx) {
-      unused(ast, value, ctx);
+    bool evaluate_literal_symbols(program_metadata* meta, size_t id, bool value, symbol_eval_context const & ctx) {
+      unused(value, ctx);
       meta->statement_info[id].type_ref = meta->get_type_reference(type_primitive::bool_);
       return true;
     }
 
-    bool evaluate_literal_symbols(ast const& ast, program_metadata* meta, size_t id, int64_t value, symbol_eval_context const & ctx) {
-      unused(ast, value, ctx);
+    bool evaluate_literal_symbols(program_metadata* meta, size_t id, int64_t value, symbol_eval_context const & ctx) {
+      unused(value, ctx);
       meta->statement_info[id].type_ref = meta->get_type_reference(type_primitive::int64);
       return true;
     }
 
-    bool evaluate_literal_symbols(ast const& ast, program_metadata* meta, size_t id, double value, symbol_eval_context const & ctx) {
-      unused(ast, value, ctx);
+    bool evaluate_literal_symbols(program_metadata* meta, size_t id, double value, symbol_eval_context const & ctx) {
+      unused(value, ctx);
       meta->statement_info[id].type_ref = meta->get_type_reference(type_primitive::float64);
       return true;
     }
 
-    bool evaluate_literal_symbols(ast const& ast, program_metadata* meta, size_t id, std::string_view const & value, symbol_eval_context const& ctx) {
-      unused(ast, meta, id, value, ctx);
+    bool evaluate_literal_symbols(program_metadata* meta, size_t id, std::string_view const & value, symbol_eval_context const& ctx) {
+      unused(meta, id, value, ctx);
       assert(false && "Not implemented");
       // TODO: Implement strings
       // meta->statement_info[id].type_id = meta->get_type_index(get_primitive_type_name(type_primitive::));
       return true;
     }
 
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::literal const & decl, symbol_eval_context const & ctx) {
       return std::visit([&](auto&& o) {
-        return evaluate_literal_symbols(ast, meta, id, o, ctx);
+        return evaluate_literal_symbols(meta, id, o, ctx);
       }, decl.value);
     }
 
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::call_parameter const & param, symbol_eval_context const & ctx) {
       unused(id);
-      return evaluate_symbols(compiler, ast, meta, param.expression, ctx) &&
-             (!param.next.has_value() || evaluate_symbols(compiler, ast, meta, param.next.value(), ctx));
+      return evaluate_symbols(compiler, meta, param.expression, ctx) &&
+             (!param.next.has_value() || evaluate_symbols(compiler, meta, param.next.value(), ctx));
     }
 
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::binary_operator const & op, symbol_eval_context const & ctx) {
       unused(id);
       switch (op.type_name) {
       case expr::operator_type::call: {
         assert(op.left.has_value());
-        if (op.right.has_value() && !evaluate_symbols(compiler, ast, meta, op.right.value(), ctx))
+        if (op.right.has_value() && !evaluate_symbols(compiler, meta, op.right.value(), ctx))
           return false;
 
         symbol_eval_context callCtx = ctx;
         callCtx.is_call = true;
         callCtx.call_parameter_list = op.right;
-        if (!evaluate_symbols(compiler, ast, meta, op.left.value(), callCtx)) {
+        if (!evaluate_symbols(compiler, meta, op.left.value(), callCtx)) {
           return false;
         }
 
@@ -1191,8 +1180,8 @@ namespace adder {
       default: {
         assert(op.left.has_value());
         assert(op.right.has_value());
-        if (!(evaluate_symbols(compiler, ast, meta, op.left.value(), ctx) &&
-              evaluate_symbols(compiler, ast, meta, op.right.value(), ctx))) {
+        if (!(evaluate_symbols(compiler, meta, op.left.value(), ctx) &&
+              evaluate_symbols(compiler, meta, op.right.value(), ctx))) {
           printf("Error: failed to evaluate symbols for binary operator operands\n");
           return false;
         }
@@ -1203,7 +1192,7 @@ namespace adder {
           printf("Error: type of binary operator operands could not be determined\n");
           return false;
         }
-        const auto symbol = meta->search_for_operator_symbol_index(ctx.scope_id, op.type_name, lhsType.value(), rhsType.value());
+        const auto symbol = meta->search_for_operator_symbol(ctx.scope_id, op.type_name, lhsType.value(), rhsType.value());
         if (!symbol.has_value()) {
           const auto opName = expr::get_operator_identifer(op.type_name);
           const auto lhsName = lhsType->get_identifier();
@@ -1218,15 +1207,16 @@ namespace adder {
           return false;
         }
 
-        meta->statement_info[id].symbol_index = symbol;
-        meta->statement_info[id].type_ref       = return_type_of(meta->symbols[symbol.value()].type);
+        auto it = std::find(meta->symbol_references.begin(), meta->symbol_references.end(), symbol.value());
+        meta->statement_info[id].symbol_index = it - meta->symbol_references.begin();
+        meta->statement_info[id].type_ref     = symbol->get_type().return_type();
         break;
       }
       }
       return true;
     }
 
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::block const & block, symbol_eval_context const & ctx) {
       auto & statementInfo = meta->statement_info[id];
       // size_t thisBlockScopeId = 0;
@@ -1246,7 +1236,7 @@ namespace adder {
       }
 
       for (auto & statement : block.statements) {
-        if (!evaluate_symbols(compiler, ast, meta, statement, thisBlockCtx)) {
+        if (!evaluate_symbols(compiler, meta, statement, thisBlockCtx)) {
           return false;
         }
       }
@@ -1254,15 +1244,15 @@ namespace adder {
       return true;
     }
 
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::function_declaration const & decl, symbol_eval_context const & ctx) {
-      program_metadata::symbol symbol;
+      symbol symbol;
       symbol.name           = decl.identifier;
       symbol.scope_id       = ctx.scope_id;
       symbol.flags          = decl.flags | symbol_flags::function;
       symbol.declaration_id = id;
       if (decl.type.has_value()) {
-        const auto typeIndex = evaluate_type_index(ast, meta, decl.type.value());
+        const auto typeIndex = evaluate_type_index(meta, decl.type.value());
         if (!typeIndex.has_value()) {
           // TODO: Error. Expected a type name
           return false;
@@ -1281,13 +1271,13 @@ namespace adder {
         meta->scopes[ctx.scope_id].prefix.c_str(),
                                              get_symbol_name(symbol.type.get_identifier(), name).c_str());
 
-      const auto symbol_index = meta->add_symbol(symbol);
-      if (!symbol_index.has_value()) {
+      const auto symbolRef = meta->add_symbol(symbol);
+      if (!symbolRef.has_value()) {
         // TODO: Throw error. Probably need to get the failure reason from add_symbol.
         return false;
       }
 
-      meta->statement_info[id].symbol_index = symbol_index;
+      meta->statement_info[id].symbol_index = meta->symbol_references.size() - 1;
 
       if (decl.body.has_value()) {
         symbol_eval_context thisBlockCtx = ctx;
@@ -1305,31 +1295,31 @@ namespace adder {
             symbol.full_identifier.data()
           );
         }
-        meta->symbols[symbol_index.value()].function_root_scope_id = thisBlockCtx.scope_id;
+        meta->get(symbolRef->index).function_root_scope_id = thisBlockCtx.scope_id;
 
         for (const size_t statement : decl.arguments) {
           // TODO: Should arguments be part of the "block" statement?
-          if (!evaluate_symbols(compiler, ast, meta, statement, thisBlockCtx)) {
+          if (!evaluate_symbols(compiler, meta, statement, thisBlockCtx)) {
             return false;
           }
         }
 
-        evaluate_symbols(compiler, ast, meta, decl.body.value(), thisBlockCtx);
+        evaluate_symbols(compiler, meta, decl.body.value(), thisBlockCtx);
       }
 
       return true;
     }
 
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::variable_declaration const & decl, symbol_eval_context const & ctx) {
-      program_metadata::symbol symbol;
+      symbol symbol;
       symbol.name           = decl.name;
       symbol.scope_id       = ctx.scope_id;
       symbol.declaration_id = id;
       symbol.flags          = decl.flags;
 
       if (decl.type.has_value()) {
-        const auto typeIndex = evaluate_type_index(ast, meta, decl.type.value());
+        const auto typeIndex = evaluate_type_index(meta, decl.type.value());
         if (!typeIndex.has_value()) {
           // TODO: Error. Expected a type name
           return false;
@@ -1337,7 +1327,7 @@ namespace adder {
         symbol.type = typeIndex.value();
       }
       else if (decl.initializer.has_value()) {
-        symbol.type = eval_decltype(ast, meta, decl.initializer.value());
+        symbol.type = eval_decltype(meta, decl.initializer.value());
       }
       else {
         // TODO: Error. Unable to infer type. No initializer statement.
@@ -1352,44 +1342,40 @@ namespace adder {
       symbol.full_identifier = adder::format("%s%s", meta->scopes[ctx.scope_id].prefix.c_str(),
                                              get_symbol_name(symbol.type.get_identifier(), symbol.name).c_str());
 
-      auto symbol_index = meta->add_symbol(symbol);
-      if (!symbol_index.has_value()) {
+      auto symbolRef = meta->add_symbol(symbol);
+      if (!symbolRef.has_value()) {
         // TODO: Throw error. Probably need to get the failure reason from add_symbol.
         return false;
       }
+      auto symbolIndex = meta->symbol_references.size() - 1;
 
       if (decl.initializer.has_value()) {
-        evaluate_symbols(compiler, ast, meta, decl.initializer.value(), ctx);
+        evaluate_symbols(compiler, meta, decl.initializer.value(), ctx);
       }
 
-      meta->statement_info[id].symbol_index = symbol_index;
+      meta->statement_info[id].symbol_index = symbolIndex;
       meta->statement_info[id].type_ref     = symbol.type;
       return true;
     }
 
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::import_symbol const & import_stmt, symbol_eval_context const & ctx) {
       std::string                       name                 = (std::string)import_stmt.module_name;
       std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(name);
 
-      imported_module_meta->search_for_symbol_index(0, [&](const program_metadata::symbol & s) {
-        if (s.name != import_stmt.symbol_name) {
+      imported_module_meta->search_for_symbol(0, [&](const symbol_reference & ref) {
+        if (ref.get().name != import_stmt.symbol_name) {
           return false;
         }
 
-        program_metadata::symbol imported_symbol = s;
-        imported_symbol.declaration_id           = id;
-        imported_symbol.name                     = import_stmt.symbol_alias;
-        imported_symbol.flags |= symbol_flags::import_;
-
-        auto symbolIndex = meta->add_symbol(imported_symbol);
-        if (!symbolIndex.has_value())
+        auto symbol = meta->add_symbol(ref);
+        if (!symbol.has_value())
           return false;
-
+        auto symbolIndex = meta->symbol_references.size() - 1;
         if (!meta->statement_info[id].symbol_index.has_value())
-          meta->statement_info[id].symbol_index = symbolIndex;
+          meta->statement_info[id].symbol_index = meta->symbol_references.size() - 1;
         else
-          meta->statement_info[id].symbol_count = 1 + symbolIndex.value() - meta->statement_info[id].symbol_index.value();
+          meta->statement_info[id].symbol_count = 1 + symbolIndex - meta->statement_info[id].symbol_index.value();
 
         return false;
       });
@@ -1397,29 +1383,27 @@ namespace adder {
       return true;
     }
 
-    bool evaluate_statement_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::import_module const & import_stmt, symbol_eval_context const & ctx) {
       std::string                       name                 = (std::string)import_stmt.module_name;
       std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(name);
 
-      imported_module_meta->search_for_symbol_index(0, [&](const program_metadata::symbol & s) {
+      imported_module_meta->search_for_symbol(0, [&](const symbol_reference & ref) {
         // TODO: Explicit exports
         // if (/* is private, or is not exported */) {
         //   return false;
         // }
 
-        program_metadata::symbol imported_symbol = s;
-        imported_symbol.declaration_id           = id;
-        imported_symbol.flags |= symbol_flags::import_;
-
-        auto symbolIndex = meta->add_symbol(imported_symbol);
-        if (!symbolIndex.has_value())
+        auto symbol = meta->add_symbol(ref);
+        if (!symbol.has_value())
           return false;
+
+        auto symbolIndex = meta->symbol_references.size() - 1;
 
         if (!meta->statement_info[id].symbol_index.has_value())
           meta->statement_info[id].symbol_index = symbolIndex;
         else
-          meta->statement_info[id].symbol_count = 1 + symbolIndex.value() - meta->statement_info[id].symbol_index.value();
+          meta->statement_info[id].symbol_count = 1 + symbolIndex - meta->statement_info[id].symbol_index.value();
 
         return false;
       });
@@ -1431,35 +1415,35 @@ namespace adder {
       return true;
     }
 
-    bool evaluate_symbols(context * compiler, ast const & ast, program_metadata * meta, size_t id,
+    bool evaluate_symbols(context * compiler, program_metadata * meta, size_t id,
                           symbol_eval_context const & ctx) {
       return std::visit(
-        [&](auto&& s) { return evaluate_statement_symbols(compiler, ast, meta, id, s, ctx);
+        [&](auto&& s) { return evaluate_statement_symbols(compiler, meta, id, s, ctx);
         },
-        ast.statements[id]
+        meta->tree.statements[id]
       );
     }
 
-    bool evaluate_symbols(context * compiler, ast const & ast, program_metadata * meta) {
+    bool evaluate_symbols(context * compiler, program_metadata * meta) {
       meta->symbols.clear();
       meta->scopes.clear();
       meta->scopes.emplace_back(); // Global scope.
 
       meta->statement_info.clear();
-      meta->statement_info.resize(ast.statements.size());
+      meta->statement_info.resize(meta->tree.statements.size());
 
-      expr::block const & top = ast.get<expr::block>(ast.statements.size() - 1);
+      expr::block const & top = meta->tree.get<expr::block>(meta->tree.statements.size() - 1);
       symbol_eval_context ctx;
       ctx.scope_id = 0;
       for (size_t statementId : top.statements) {
-        if (!evaluate_symbols(compiler, ast, meta, statementId, ctx)) {
+        if (!evaluate_symbols(compiler, meta, statementId, ctx)) {
           return false;
         }
       }
       return true;
     }
 
-    std::optional<program> generate_code(std::shared_ptr<program_metadata> meta, ast const & ast) {
+    std::optional<program> generate_code(std::shared_ptr<program_metadata> const & meta) {
       program_builder ret;
       ret.meta = meta;
 
@@ -1472,9 +1456,9 @@ namespace adder {
       ret.push_frame_pointer();
       ret.move(vm::register_names::fp, vm::register_names::sp);
 
-      expr::block const & top = ast.get<expr::block>(ast.statements.size() - 1);
+      expr::block const & top = meta->tree.get<expr::block>(meta->tree.statements.size() - 1);
       for (size_t statementId : top.statements) {
-        if (!generate_code(ast, &ret, statementId)) {
+        if (!generate_code(&ret, statementId)) {
           return std::nullopt;
         }
       }
@@ -1493,17 +1477,6 @@ namespace adder {
   std::optional<program> compile(vm::machine * vm, std::string const & module_name, std::string const & source) {
     compiler::context compiler;
     compiler.vm = vm;
-
-    compiler::lexer::token_parser tokenizer(source);
-    compiler::ast                 ast = compiler::parse(&tokenizer);
-
-    if (!tokenizer.ok()) {
-      for (auto & error : tokenizer.errors()) {
-        printf("Error: %s\n", error.c_str());
-      }
-      return std::nullopt;
-    }
-
-    return generate_code(compiler.compile_metadata(module_name, source), ast);
+    return generate_code(compiler.compile_metadata(module_name, source));
   }
 } // namespace adder

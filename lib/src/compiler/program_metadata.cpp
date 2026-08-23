@@ -163,8 +163,30 @@ namespace adder {
     }
 
     
-    std::optional<symbol_reference> program_metadata::add_symbol(symbol_reference const & s) {
+    std::optional<symbol_reference> program_metadata::add_symbol(symbol_reference const & ref) {
+      auto & s = ref.get();
+      if (s.scope_id >= scopes.size() || s.scope_id != 0)
+        return std::nullopt;
 
+      for (const symbol_reference &existing : scopes[s.scope_id].symbols) {
+        if (existing.get().name != s.name) {
+          continue;
+        }
+
+        if (existing.get_type() == s.type) {
+          return std::nullopt; // Duplicate symbol
+        }
+
+        // TODO: Test if s.type can overload the existing symbol
+        if (!is_valid_function_overload(existing.get_type(), s.type)) {
+          return std::nullopt;
+        }
+      }
+
+      symbol_references.push_back(ref);
+      scopes[s.scope_id].symbols.push_back(ref);
+
+      return ref;
     }
 
     std::optional<symbol_reference> program_metadata::add_symbol(symbol const & s) {
@@ -188,6 +210,7 @@ namespace adder {
 
       const size_t symbolIndex = symbols.size();
       symbols.push_back(s);
+      symbol_references.push_back({this, symbol_id{symbolIndex}});
       scopes[s.scope_id].symbols.push_back({ this, symbol_id{symbolIndex} });
 
       return scopes[s.scope_id].symbols.back();
@@ -299,12 +322,6 @@ namespace adder {
       return bestFunction;
     }
 
-    std::optional<size_t> program_metadata::search_for_operator_symbol_index(size_t scopeId, expr::operator_type op,
-                                                                             type_reference lhsType,
-                                                                             type_reference rhsType) const {
-      return std::optional<size_t>();
-    }
-
     namespace {
       // Implements the parameter list scoring algorithm
       struct parameter_list_score_calculator {
@@ -400,7 +417,7 @@ namespace adder {
       if (found == symbols.end())
         return std::nullopt;
 
-      return symbol_reference{ this, symbol_id{found - symbols.begin()} };
+      return symbol_reference{ this, symbol_id{size_t(found - symbols.begin())} };
     }
 
     std::optional<symbol_reference> program_metadata::find_unnamed_initializer(size_t scopeId, type_reference receiverTypeIndex,
