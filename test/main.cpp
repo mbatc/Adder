@@ -64,7 +64,9 @@ namespace native_methods {
 
   /// Basic static lookup for testing.
   /// A real implementation would probably want some way to register methods dynamically
-  static adder::vm::address_t symbol_lookup(char const * symbol) {
+  static adder::vm::address_t symbol_lookup(machine * vm, char const * symbol) {
+    vm;
+    
     if (strcmp(symbol, "(int64,int64)=>int64:sum_sequence") == 0)
       return (adder::vm::address_t)native_methods::sum_sequence_cb;
     if (strcmp(symbol, "([ref]()=>void)=>int64:reentrant") == 0)
