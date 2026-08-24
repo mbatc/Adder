@@ -136,6 +136,7 @@ namespace adder {
 
       struct relocation {
         relocation_linkage linkage;
+        std::string_view   module_name;
         std::string_view   symbol;
         uint64_t           offset;
         size_t             function_id;
@@ -201,7 +202,9 @@ namespace adder {
 
       size_t current_scope_id() const;
 
-      void add_relocation(relocation_linkage const & linkage, std::string_view const& symbol, uint64_t offset);
+      void add_relocation(program_metadata const * meta, std::string_view const & symbol, uint64_t offset);
+      void add_relocation(relocation_linkage const & linkage, std::string_view const & module_name,
+                          std::string_view const & symbol, uint64_t offset);
 
       void call(value const & func);
       void call(uint64_t address);

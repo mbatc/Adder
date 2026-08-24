@@ -84,6 +84,8 @@ namespace adder {
 
     struct program_metadata {
       ast tree;
+      std::string module_name;
+      std::string source; ///< Source code
 
       size_t static_storage_size = 0;
 

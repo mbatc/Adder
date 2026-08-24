@@ -128,6 +128,10 @@ namespace adder {
 
         std::vector<std::string> const& errors() const;
 
+        std::string && take_source() {
+          return std::move(m_source);
+        }
+
       private:
         bool _next();
 

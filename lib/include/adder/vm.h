@@ -3,6 +3,10 @@
 #include <vector>
 #include <list>
 #include <string>
+#include <unordered_map>
+#include <memory>
+
+#include "program.h"
 
 namespace adder {
   template<bool Const>
@@ -11,6 +15,10 @@ namespace adder {
   struct program_symbol_table_entry;
   using program_view       = program_view_impl<false>;
   using const_program_view = program_view_impl<true>;
+
+  namespace compiler {
+    struct context;
+  }
 
   namespace vm {
     using register_value = uint64_t;
@@ -403,13 +411,18 @@ namespace adder {
         return registered_extern_methods.size() - 1;
       }
 
+      std::shared_ptr<compiler::context> compiler;
+
+      std::unordered_map<std::string, const_program_view> loaded_modules;
+
       std::vector<std::string>           registered_extern_method_names;
       std::vector<native_method_binding> registered_extern_methods;
     };
 
     void relocate_program(machine * vm, program_view const & program);
 
-    const_program_view load_program(machine * vm, program_view const & program, bool relocated = true);
+    const_program_view load_module(machine * vm, std::string const & module_name);
+    const_program_view load_program(machine * vm, std::string const & module_name, program_view const & program, bool relocated = true);
 
     void* compile_call_handle(machine* vm, program_symbol_table_entry const & symbol);
     void* compile_call_handle(machine* vm, address_t const & routineAddress);
@@ -424,6 +437,7 @@ namespace adder {
     /// Pop a call parameter.
     /// It is up to the caller to pop the correct number of bytes and to destruct the parameters.
     void* call_pop_parameter(machine* vm, size_t bytes);
+
     void call(machine* vm, void * handle);
   }
 

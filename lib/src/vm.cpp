@@ -125,12 +125,23 @@ namespace adder {
       }
 
       for (program_relocation_table_entry * relocation = program.first_relocation_entry(); relocation != nullptr; relocation = program.next_relocation_entry(relocation)) {
+        std::string_view symbol_name = (char const *)symbols[relocation->symbol].name_address;
+        std::string_view module_name = symbol_name.data() + symbol_name.length() + 1;
+
         address_t addr = 0;
         switch (relocation->linkage) {
         case relocation_linkage::internal:
           addr = symbols[relocation->symbol].data_address;
           assert(addr != 0 && "Failed to find symbol address. TODO: Fail more gracefully.");
           break;
+        case relocation_linkage::import_: {
+          std::optional<const_program_view> imported_module = load_module(vm, std::string(module_name));
+          assert(imported_module.has_value() && "Failed to load imported module. TODO: Fail more gracefully.");
+          auto imported_symbol = imported_module->find_public_symbol(symbol_name);
+          assert(imported_symbol != nullptr && "Failed to find imported symbol. TODO: Fail more gracefully.");
+          addr = imported_symbol->data_address;
+          break;
+        }
         case relocation_linkage::extern_:
           addr = vm->load_extern_symbol((char const *)symbols[relocation->symbol].name_address);
           break;
@@ -146,11 +157,30 @@ namespace adder {
       }
     }
 
-    const_program_view load_program(vm::machine* vm, program_view const& program, bool relocated) {
+    const_program_view load_module(machine * vm, std::string const & module_name) {
+      auto found = vm->loaded_modules.find(module_name);
+
+      if (found != vm->loaded_modules.end())
+        return found->second;
+
+      std::optional<program> module = compile(vm, module_name);
+      assert(module.has_value() && "Failed to compile module. TODO: Fail more gracefully");
+
+      return load_program(vm, module_name, module->view(), true);
+    }
+
+    const_program_view load_program(vm::machine * vm, std::string const & module_name,
+                                                  program_view const & program,
+                                    bool relocated) {
       // Reserve space for the program
       program_view loaded = { (uint8_t*)vm->heap_allocator->allocate(program.size()), program.size() };
+
       // Write to memory
       memcpy(loaded.data(), program.data(), program.size());
+
+      // Register loaded module
+      vm->loaded_modules[(std::string)module_name] = { loaded.data(), loaded.size() };
+
       // Relocate the program to the loaded base address
       if (relocated) {
         relocate_program(vm, loaded);
@@ -160,7 +190,7 @@ namespace adder {
       adder::vm::call(vm, initializer);
       adder::vm::free(vm, initializer);
 
-      return { loaded.data(), loaded.size() };
+      return const_program_view{loaded.data(), loaded.size()};
     }
 
     namespace op {

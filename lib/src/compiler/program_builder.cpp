@@ -324,13 +324,20 @@ namespace adder {
       return functions[function_stack.back()].scope_id.value();
     }
 
-    void program_builder::add_relocation(relocation_linkage const & linkage, std::string_view const & symbol, uint64_t offset) {
+    void program_builder::add_relocation(program_metadata const * meta, std::string_view const & symbol, uint64_t offset) {
+      relocation_linkage linkage = meta == this->meta.get() ? relocation_linkage::internal
+                                                            : relocation_linkage::import_;
+
+      return add_relocation(linkage, meta->module_name, symbol, offset);
+    }
+
+    void program_builder::add_relocation(relocation_linkage const & linkage, std::string_view const & module_name, std::string_view const & symbol, uint64_t offset) {
       const size_t funcId = function_stack.back();
       const uint64_t base = sizeof(vm::instruction) * (functions[funcId].instructions.size() - 1);
       const uint64_t addr = base + offset;
       // TODO: Could be stored as a list of addresses per symbol.
       //       Might be more efficient when evaluating the relocations.
-      relocations.push_back({ linkage, symbol, addr, function_stack.back() });
+      relocations.push_back({ linkage, module_name, symbol, addr, function_stack.back() });
     }
 
     void program_builder::push_value(value r) {
@@ -459,15 +466,14 @@ namespace adder {
         return;
 
       if (func.symbol_index.has_value()) {
-        auto& symbol = func.symbol_index->get();
-
-        if (symbol.function_index.has_value()) {
-          call(0);
-          add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(call.addr));
-        } else if (is_reference(func.type_info)) {
+        auto & symbol = func.symbol_index->get();
+        if (is_reference(func.type_info)) {
           const auto addr = load_value_of(func);
           call_indirect(addr);
           registers.release(addr);
+        } else {
+          call(0);
+          add_relocation(func.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(call.addr));
         }
       }
     }
@@ -497,7 +503,7 @@ namespace adder {
       op.code = vm::op_code::call_native;
       op.call_native.native_method_index = 0;
       add_instruction(op);
-      add_relocation(relocation_linkage::extern_, symbol.get().full_identifier,
+      add_relocation(relocation_linkage::extern_, symbol.meta->module_name, symbol.get().full_identifier,
                      AD_IOFFSET(call_native.native_method_index));
     }
 
@@ -518,7 +524,8 @@ namespace adder {
         // TODO: load address and jump indirect.
 
         jump_to(location.address_offset);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(jump.addr));
+        add_relocation(relocation_linkage::internal, location.symbol_index->meta->module_name, symbol.full_identifier,
+                       AD_IOFFSET(jump.addr));
         return;
       }
 
@@ -695,7 +702,7 @@ namespace adder {
 
         vm::register_index ret = pin_register();
         load_from_constant_address(ret, value.address_offset, sz);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(load_addr.addr));
+        add_relocation(value.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(load_addr.addr));
         return ret;
       }
 
@@ -732,7 +739,7 @@ namespace adder {
 
         vm::register_index ret = pin_register();
         set(ret, value.address_offset);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(set.val));
+        add_relocation(value.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(set.val));
         return ret;
       }
 
@@ -931,7 +938,7 @@ namespace adder {
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
         store_constant_to_constant_address(src, dst.address_offset, (uint8_t)sz);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(store_value_addr.addr));
+        add_relocation(dst.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(store_value_addr.addr));
         return true;
       }
 
@@ -965,7 +972,7 @@ namespace adder {
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
         store_to_constant_address(src, dst.address_offset, (uint8_t)sz);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(store_addr.addr));
+        add_relocation(dst.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(store_addr.addr));
         return true;
       }
 
@@ -1181,16 +1188,21 @@ namespace adder {
       std::vector<uint64_t> functionOffset;
       functionOffset.resize(functions.size());
 
-      for (auto& symbol : meta->symbols) {
+      for (auto& ref : meta->symbol_references) {
+        auto &     symbol   = ref.get();
         const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
         const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
-        if (symbol.has_local_storage() || symbol.is_parameter() || isInline) {
+        const bool isImport = (symbol.flags & symbol_flags::import_) == symbol_flags::import_;
+        if (symbol.has_local_storage() || symbol.is_parameter() || isInline || isImport) {
           continue;
         }
 
         program_symbol_table_entry item;
         item.name_address = symbolData.size();
         for (char c : symbol.full_identifier)
+          symbolData.push_back(c);
+        symbolData.push_back('\0');
+        for (char c : ref.meta->module_name)
           symbolData.push_back(c);
         symbolData.push_back('\0');
 
@@ -1221,7 +1233,7 @@ namespace adder {
         symbolTable.push_back(item);
       }
 
-      static const auto write_relocations = [&]() { // 
+      const auto write_relocations = [&]() { // 
         std::map<relocation_linkage, std::map<std::string_view, std::vector<size_t>>> reloc_table;
         for (auto& reloc : relocations) {
           const auto& func = functions[reloc.function_id].symbol.get();
