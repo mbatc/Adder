@@ -964,6 +964,7 @@ namespace adder {
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::import_symbol const & code, size_t statementId) {
+      unused(ast, code);
       for (size_t i = 0; i < program->meta->get_statement_symbol_count(statementId); ++i) {
         auto   symbol      = program->meta->get_statement_symbol(statementId, i);
 
@@ -977,6 +978,7 @@ namespace adder {
     }
 
     bool generate_code(ast const & ast, program_builder * program, expr::import_module const & code, size_t statementId) {
+      unused(ast, code);
       for (size_t i = 0; i < program->meta->get_statement_symbol_count(statementId); ++i) {
         auto   symbol      = program->meta->get_statement_symbol(statementId, i);
         program_builder::value receiver;
@@ -1094,7 +1096,7 @@ namespace adder {
 
     bool evaluate_statement_symbols(context* compiler, program_metadata* meta, size_t id,
       expr::type_declaration const& decl, symbol_eval_context const& ctx) {
-      unused(compiler, id, decl);
+      unused(compiler, id, decl, ctx);
 
       auto & statementMeta = meta->statement_info[id];
       statementMeta.type_ref = meta->add_type(type{std::string(decl.identifier), decl.desc});
@@ -1103,6 +1105,7 @@ namespace adder {
 
     bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::identifier const & identifier, symbol_eval_context const & ctx) {
+      unused(compiler);
       std::optional<symbol_reference> symbol;
       if (ctx.is_call) {
         symbol = meta->search_for_callable_symbol(ctx.scope_id, identifier.name, ctx.call_parameter_list);
@@ -1152,6 +1155,7 @@ namespace adder {
 
     bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::literal const & decl, symbol_eval_context const & ctx) {
+      unused(compiler);
       return std::visit([&](auto&& o) {
         return evaluate_literal_symbols(meta, id, o, ctx);
       }, decl.value);
@@ -1366,6 +1370,7 @@ namespace adder {
 
     bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::import_symbol const & import_stmt, symbol_eval_context const & ctx) {
+      unused(ctx);
       std::string                       name                 = (std::string)import_stmt.module_name;
       std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(name);
 
@@ -1391,6 +1396,8 @@ namespace adder {
 
     bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
                                     expr::import_module const & import_stmt, symbol_eval_context const & ctx) {
+      unused(ctx);
+
       std::string                       name                 = (std::string)import_stmt.module_name;
       std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(name);
 

@@ -324,11 +324,11 @@ namespace adder {
       return functions[function_stack.back()].scope_id.value();
     }
 
-    void program_builder::add_relocation(program_metadata const * meta, std::string_view const & symbol, uint64_t offset) {
-      relocation_linkage linkage = meta == this->meta.get() ? relocation_linkage::internal
-                                                            : relocation_linkage::import_;
+    void program_builder::add_relocation(program_metadata const * symbol_meta, std::string_view const & symbol, uint64_t offset) {
+      relocation_linkage linkage = symbol_meta == meta.get() ? relocation_linkage::internal
+                                                             : relocation_linkage::import_;
 
-      return add_relocation(linkage, meta->module_name, symbol, offset);
+      return add_relocation(linkage, symbol_meta->module_name, symbol, offset);
     }
 
     void program_builder::add_relocation(relocation_linkage const & linkage, std::string_view const & module_name, std::string_view const & symbol, uint64_t offset) {

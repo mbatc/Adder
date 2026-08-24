@@ -16,7 +16,7 @@ namespace adder {
       };
 
       struct list {
-        size_t expr = -1;
+        size_t                expr = (size_t)-1;
         std::optional<size_t> next;
       };
 

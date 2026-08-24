@@ -9,6 +9,25 @@
 #include <chrono>
 #include <filesystem>
 
+std::string read_file(std::string const & path) {
+  std::string content;
+  FILE *      file = 0;
+
+#ifdef _WIN32
+  if (fopen_s(&file, path.c_str(), "r") != 0)
+    return "";
+#else
+  file = fopen();
+#endif
+  while (!feof(file)) {
+    char   buffer[1024];
+    size_t numRead = fread(buffer, 1, sizeof(buffer), file);
+    content += std::string_view(buffer, numRead);
+  }
+  fclose(file);
+  return content;
+}
+
 namespace native_methods {
   int64_t sum_sequence(int64_t start, int64_t end) {
     int64_t sum = 0;
@@ -65,34 +84,21 @@ namespace native_methods {
 
   /// Basic static lookup for testing.
   /// A real implementation would probably want some way to register methods dynamically
-  static adder::vm::address_t symbol_lookup(char const * symbol) {
+  static adder::vm::native_method_binding symbol_lookup(adder::vm::machine *, char const * symbol) {
     if (strcmp(symbol, "(int64,int64)=>int64:sum_sequence") == 0)
-      return (adder::vm::address_t)native_methods::sum_sequence_cb;
+      return { native_methods::sum_sequence_cb, nullptr };
     if (strcmp(symbol, "([ref]()=>void)=>int64:reentrant") == 0)
-      return (adder::vm::address_t)native_methods::reentrant_cb;
+      return {native_methods::reentrant_cb, nullptr};
     if (strcmp(symbol, "([ref](int64)=>int64,int64)=>int64:invoke_callback_with_arg") == 0)
-      return (adder::vm::address_t)native_methods::invoke_callback_with_arg_cb;
-    return 0;
+      return {native_methods::invoke_callback_with_arg_cb, nullptr };
+    return { nullptr, nullptr };
   }
-}
 
-std::string read_file(std::string const & path) {
-  std::string content;
-  FILE * file = 0;
+} // namespace native_methods
 
-#ifdef _WIN32
-  if (fopen_s(&file, path.c_str(), "r") != 0)
-    return "";
-#else
-  file = fopen();
-#endif
-  while (!feof(file)) {
-    char buffer[1024];
-    size_t numRead = fread(buffer, 1, sizeof(buffer), file);
-    content += std::string_view(buffer, numRead);
-  }
-  fclose(file);
-  return content;
+static std::string load_module_source(adder::vm::machine* vm, char const* module_name) {
+  adder::unused(vm);
+  return read_file(std::string(module_name) + ".ad");
 }
 
 int main(int argc, char ** argv) {
@@ -142,7 +148,7 @@ int main(int argc, char ** argv) {
   // singleFileTest = "call-native.ad";
   // singleFileTest = "call-native-reentrant.ad";
   // singleFileTest = "call-native-reentrant-with-args.ad";
-  singleFileTest = "floats.ad";
+  // singleFileTest = "floats.ad";
 
   if (singleFileTest.has_value()) {
     tests.clear();
@@ -151,23 +157,23 @@ int main(int argc, char ** argv) {
 
   std::vector<std::string> failed;
 
-  for (auto& [file, test] : tests) {
+  for (auto & [file, test] : tests) {
+    adder::vm::allocator allocator;
+    adder::vm::machine   vm(&allocator);
+    vm.lookup_extern_symbol = native_methods::symbol_lookup;
+    vm.load_module_source   = load_module_source;
+
     printf("Compile and run: %s\n", file.c_str());
 
-    auto result = adder::compile(test.source);
+    auto result = adder::compile(&vm, file, test.source);
     if (!result.has_value()) {
       printf("! Failed to compile: %s\n", file.c_str());
       continue;
     }
 
-    adder::vm::allocator allocator;
-    adder::vm::machine vm(&allocator);
-
-    vm.lookup_extern_symbol = native_methods::symbol_lookup;
-
     bool ok = true;
     if (test.expected_result.has_value()) {
-      auto loaded = adder::vm::load_program(&vm, result->view());
+      auto   loaded = adder::vm::load_program(&vm, file, result->view());
       void * entry = nullptr;
       if (test.expected_result->entry.has_value()) {
         auto entrySymbol = loaded.find_public_symbol(test.expected_result->entry.value());
