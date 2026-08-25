@@ -287,7 +287,7 @@ namespace adder {
                                                                              type_reference rhsType) const {
       std::string_view      identifier = expr::get_operator_identifer(op);
       std::optional<symbol_reference> bestFunction;
-      std::optional<size_t> bestMatchScore;
+      std::optional<parameter_list_score> bestMatchScore;
       bool                  ambigious = false;
       search_for_symbol(scopeId, [&](symbol_reference const & sym) {
         if (sym.get().name != identifier)
@@ -301,16 +301,16 @@ namespace adder {
         if (!value.has_value())
           return false;
 
-        if (bestMatchScore.has_value() && value->value > bestMatchScore.value())
+        if (bestMatchScore.has_value() && bestMatchScore.value() < value)
           return false;
 
-        if (value->value == bestMatchScore) {
+        if (value == bestMatchScore) {
           ambigious = true;
           bestFunction.reset();
           return false;
         }
 
-        bestMatchScore = value->value;
+        bestMatchScore = value;
         bestFunction   = sym;
         ambigious      = false;
         return false;
@@ -343,6 +343,8 @@ namespace adder {
             auto initializer = meta->find_unnamed_initializer(scope_id, arg, param);
             if (!initializer.has_value())
               return false; // No conversion available
+            if (!value.first_conversion_index.has_value())
+              value.first_conversion_index = i - 1;
             ++value.value;
           }
 

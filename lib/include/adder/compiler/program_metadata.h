@@ -17,6 +17,19 @@ namespace adder {
     struct parameter_list_score {
       size_t                value = 0;
       std::optional<size_t> first_conversion_index;
+
+      // Compare if this score is less than `rhs` (aka better)
+      bool operator<(parameter_list_score const & rhs) const {
+        const bool lessConversions                 = value < rhs.value;
+        const bool sameConversions                 = value == rhs.value;
+        const bool conversionIsLaterInArgumentList = first_conversion_index.value_or(~size_t(0)) >
+                                                     rhs.first_conversion_index.value_or(~size_t(0));
+        return lessConversions || (sameConversions && conversionIsLaterInArgumentList);
+      }
+
+      bool operator==(parameter_list_score const & rhs) const {
+        return value == rhs.value && first_conversion_index == rhs.first_conversion_index;
+      }
     };
 
     enum class symbol_id : size_t {
