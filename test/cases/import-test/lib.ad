@@ -1,0 +1,8 @@
+
+let mySharedValue: int64 = 1234;
+
+fn mySharedFunction() => int64 {
+  return 4321;
+}
+
+extern fn sum_sequence(i: int64, end: int64) => int64;

@@ -1279,9 +1279,11 @@ namespace adder {
       header.code_size    = compiledCode.size() * sizeof(vm::instruction);
 
       int64_t nextEntry = 0;
-      for (auto & symbol : meta->symbols) {
+      for (auto & ref : meta->symbol_references) {
+        auto &     symbol   = ref.get();
         const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
-        if (symbol.has_local_storage() || symbol.is_parameter() || isInline) {
+        const bool isImport = (symbol.flags & symbol_flags::import_) == symbol_flags::import_;
+        if (symbol.has_local_storage() || symbol.is_parameter() || isInline || isImport) {
           continue;
         }
 

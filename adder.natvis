@@ -70,4 +70,26 @@
   <Type Name="adder::compiler::symbol_reference">
     <DisplayString>{meta->symbols[index].full_identifier}</DisplayString>
   </Type>
+  <Type Name="adder::program_view_impl&lt;*&gt;">
+    <DisplayString>{*(header_t*)ptr}</DisplayString>
+    <Expand>
+      <Item Name="Header">*(header_t*)ptr</Item>
+      <Synthetic Name="[Symbols]">
+        <Expand>
+          <ArrayItems>
+            <Size>((header_t*)ptr)->symbol_count</Size>
+            <ValuePointer>(symbol_entry_t*)(ptr + ((header_t*)ptr)->symbol_table_offset)</ValuePointer>
+          </ArrayItems>
+        </Expand>
+      </Synthetic>
+      <Synthetic Name="[Instructions]">
+        <Expand>
+          <ArrayItems>
+            <Size>((header_t*)ptr)->code_size / sizeof(adder::vm::instruction)</Size>
+            <ValuePointer>(adder::vm::instruction*)(ptr + ((header_t*)ptr)->code_offset)</ValuePointer>
+          </ArrayItems>
+        </Expand>
+      </Synthetic>
+    </Expand>
+  </Type>
 </AutoVisualizer>

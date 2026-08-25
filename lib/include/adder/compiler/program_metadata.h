@@ -102,6 +102,11 @@ namespace adder {
 
       size_t static_storage_size = 0;
 
+      // TODO:
+      // I believe there is still an issue with imported symbols with matching types
+      // not being compatible (e.g. reference to function). I'll need a common type
+      // library (probably owned by the compiler) instead of a unique type list per
+      // program_metadata.
       std::vector<type> types; ///< Types defined by this program
       std::vector<type_reference> type_references; ///< All types referenced (local and imported)
 

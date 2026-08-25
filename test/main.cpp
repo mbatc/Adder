@@ -96,14 +96,15 @@ namespace native_methods {
 
 } // namespace native_methods
 
+std::string        testsRoot = "../../test/cases";
+
 static std::string load_module_source(adder::vm::machine* vm, char const* module_name) {
   adder::unused(vm);
-  return read_file(std::string(module_name) + ".ad");
+  return read_file(testsRoot + "/" + std::string(module_name) + ".ad");
 }
 
 int main(int argc, char ** argv) {
   adder::unused(argc, argv);
-  std::string testsRoot = "../../test/cases";
   bool testPerf = false;
 
   struct test_details {
@@ -148,7 +149,8 @@ int main(int argc, char ** argv) {
   // singleFileTest = "call-native.ad";
   // singleFileTest = "call-native-reentrant.ad";
   // singleFileTest = "call-native-reentrant-with-args.ad";
-  singleFileTest = "floats.ad";
+  // singleFileTest = "floats.ad";
+  // singleFileTest = "import-function-extern.ad";
 
   if (singleFileTest.has_value()) {
     tests.clear();
