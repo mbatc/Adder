@@ -95,31 +95,27 @@ namespace adder {
       type_reference get_type() const;
     };
 
+    using type_library = std::vector<type>;
+
     struct program_metadata {
+      type_library * types = nullptr;
+
       ast tree;
       std::string module_name;
       std::string source; ///< Source code
 
       size_t static_storage_size = 0;
 
-      // TODO:
-      // I believe there is still an issue with imported symbols with matching types
-      // not being compatible (e.g. reference to function). I'll need a common type
-      // library (probably owned by the compiler) instead of a unique type list per
-      // program_metadata.
-      std::vector<type> types; ///< Types defined by this program
-      std::vector<type_reference> type_references; ///< All types referenced (local and imported)
-
       bool has(std::optional<type_id> const & id) const {
-        return id.has_value() && (size_t)id.value() < types.size();
+        return id.has_value() && (size_t)id.value() < types->size();
       }
 
       type & get(type_id id) {
-        return types[(size_t)id];
+        return types->at((size_t)id);
       }
 
       type const & get(type_id id) const {
-        return types[(size_t)id];
+        return types->at((size_t)id);
       }
 
       /// Additional metadata for each statement.

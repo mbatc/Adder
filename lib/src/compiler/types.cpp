@@ -44,7 +44,9 @@ namespace adder {
     }
 
     bool type_reference::operator==(const type_reference & rhs) const {
-      return rhs.meta == meta && rhs.index == index;
+
+      return !(is_undefined() || rhs.is_undefined()) &&
+              (rhs.meta->types == meta->types) && rhs.index == index;
     }
 
     bool type_reference::operator!=(const type_reference & rhs) const {
@@ -67,7 +69,7 @@ namespace adder {
     }
 
     bool type_reference::is_undefined() const {
-      return meta == nullptr || !meta->has(index);
+      return meta == nullptr || meta->types == nullptr || !meta->has(index);
     }
 
     std::optional<type_reference> type_reference::unwrap_type() const {

@@ -96,11 +96,26 @@ namespace native_methods {
 
 } // namespace native_methods
 
-std::string        testsRoot = "../../test/cases";
+std::string testsRoot = "../../test/cases";
 
-static std::string load_module_source(adder::vm::machine* vm, char const* module_name) {
+std::string replaceAll(std::string str, const std::string & from, const std::string & to) {
+  size_t start_pos = 0;
+  while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
+    str.replace(start_pos, from.length(), to);
+    start_pos += to.length();
+  }
+  return str;
+}
+
+static std::string resolve_module_name(adder::vm::machine * vm, const char * source_module_name, char const * import_name) {
   adder::unused(vm);
-  return read_file(testsRoot + "/" + std::string(module_name) + ".ad");
+  return 
+    replaceAll((std::filesystem::path(source_module_name).parent_path() / import_name).string(), "\\", "/");
+}
+
+static std::string load_module_source(adder::vm::machine * vm, char const * module_name) {
+  adder::unused(vm);
+  return read_file(std::string(module_name) + ".ad");
 }
 
 int main(int argc, char ** argv) {
@@ -127,7 +142,7 @@ int main(int argc, char ** argv) {
       printf("! No expected results defined for %s\n", srcFile.string().c_str());
     }
 
-    (*tests)[srcFile.string()] = test;
+    (*tests)[std::filesystem::canonical(srcFile).string()] = test;
   };
 
   std::map<std::string, test_details> tests;
@@ -151,6 +166,8 @@ int main(int argc, char ** argv) {
   // singleFileTest = "call-native-reentrant-with-args.ad";
   // singleFileTest = "floats.ad";
   // singleFileTest = "import-function-extern.ad";
+  // singleFileTest = "import-variable-set-from-import.ad";
+  singleFileTest = "function-ptr-to-import.ad";
 
   if (singleFileTest.has_value()) {
     tests.clear();
@@ -163,11 +180,15 @@ int main(int argc, char ** argv) {
     adder::vm::allocator allocator;
     adder::vm::machine   vm(&allocator);
     vm.lookup_extern_symbol = native_methods::symbol_lookup;
+    vm.resolve_module_name  = resolve_module_name;
     vm.load_module_source   = load_module_source;
+
+    std::string rootModuleName =
+      replaceAll((std::filesystem::path(file).parent_path() / std::filesystem::path(file).stem()).string(), "\\", "/");
 
     printf("Compile and run: %s\n", file.c_str());
 
-    auto result = adder::compile(&vm, file, test.source);
+    auto result = adder::compile(&vm, rootModuleName.c_str(), test.source);
     if (!result.has_value()) {
       printf("! Failed to compile: %s\n", file.c_str());
       continue;
@@ -175,7 +196,7 @@ int main(int argc, char ** argv) {
 
     bool ok = true;
     if (test.expected_result.has_value()) {
-      auto   loaded = adder::vm::load_program(&vm, file, result->view());
+      auto loaded = adder::vm::load_program(&vm, rootModuleName.c_str(), result->view());
       void * entry = nullptr;
       if (test.expected_result->entry.has_value()) {
         auto entrySymbol = loaded.find_public_symbol(test.expected_result->entry.value());

@@ -33,7 +33,17 @@ namespace adder {
 
     struct context {
       vm::machine *                                                      vm = nullptr;
+
+      type_library                                                       types;
       std::map<std::string, std::shared_ptr<compiler::program_metadata>> imports;
+
+      std::shared_ptr<compiler::program_metadata> get_module_metadata(std::string const & source_module_name,
+                                                                      std::string const & import_name) {
+        if (import_name == "$builtins")
+          return get_module_metadata(import_name);
+
+        return get_module_metadata(vm->resolve_module_name(vm, source_module_name.c_str(), import_name.c_str()));
+      }
 
       std::shared_ptr<compiler::program_metadata> get_module_metadata(std::string const & module_name) {
         auto it = imports.find(module_name);
@@ -48,7 +58,7 @@ namespace adder {
         return meta;
       }
 
-      std::shared_ptr<compiler::program_metadata> compile_metadata(std::string const & module_name,
+      std::shared_ptr<compiler::program_metadata> compile_metadata(std::string const & module_uri,
                                                                    std::string const & source) {
         compiler::lexer::token_parser tokenizer(source);
         compiler::ast                 ast = compiler::parse(&tokenizer);
@@ -59,15 +69,16 @@ namespace adder {
           return nullptr;
         }
 
-        return compile_metadata(module_name, std::move(ast), tokenizer.take_source());
+        return compile_metadata(module_uri, std::move(ast), tokenizer.take_source());
       }
 
       std::shared_ptr<compiler::program_metadata> compile_metadata(std::string const & module_name,
                                                                    compiler::ast &&ast, std::string &&source = {}) {
         auto meta = std::make_shared<compiler::program_metadata>();
-        meta->tree = std::move(ast);
-        meta->source = std::move(source);
+        meta->tree        = std::move(ast);
+        meta->source      = std::move(source);
         meta->module_name = module_name;
+        meta->types       = &types;
 
         if (!evaluate_symbols(this, meta.get())) {
           return nullptr;
@@ -733,7 +744,8 @@ namespace adder {
       } else {
         program->begin_scope();
 
-        auto rv = program->allocate_temporary_call_parameter(function->type_info->return_type().value());
+        auto   returnType = function->type_info->return_type().value();
+        size_t rv         = program->allocate_temporary_call_parameter(returnType);
 
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
           auto arg = program->pop_value();
@@ -745,7 +757,9 @@ namespace adder {
 
         program->call(function.value());
 
-        initialize_variable(ast, program, program->value_stack.back(), program->get_temporary(rv));
+        auto returnedValue = program->value_stack.back();
+        if (!(returnType.is_void() && returnedValue.type_info->is_void()))
+          initialize_variable(ast, program, returnedValue, program->get_temporary(rv));
 
         // Free args space
         for (size_t i = 0; i < signature->arguments.size(); ++i) {
@@ -1372,7 +1386,7 @@ namespace adder {
                                     expr::import_symbol const & import_stmt, symbol_eval_context const & ctx) {
       unused(ctx);
       std::string                       name                 = (std::string)import_stmt.module_name;
-      std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(name);
+      std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(meta->module_name, name);
 
       imported_module_meta->search_for_symbol(0, [&](const symbol_reference & ref) {
         if (ref.get().name != import_stmt.symbol_name) {
@@ -1399,7 +1413,7 @@ namespace adder {
       unused(ctx);
 
       std::string                       name                 = (std::string)import_stmt.module_name;
-      std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(name);
+      std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(meta->module_name, name);
 
       imported_module_meta->search_for_symbol(0, [&](const symbol_reference & ref) {
         // TODO: Explicit exports
@@ -1421,7 +1435,7 @@ namespace adder {
         return false;
       });
 
-      for (size_t i = 0; i < imported_module_meta->types.size(); ++i) {
+      for (size_t i = 0; i < imported_module_meta->types->size(); ++i) {
         meta->add_type({imported_module_meta.get(), type_id{i}});
       }
 

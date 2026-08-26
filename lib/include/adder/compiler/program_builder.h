@@ -14,6 +14,8 @@ namespace adder {
 
   namespace compiler {
     struct program_builder {
+      static constexpr size_t invalid_value_handle = ~size_t(0);
+
       program_builder() {}
 
       std::shared_ptr<program_metadata> meta;

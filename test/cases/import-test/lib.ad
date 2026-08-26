@@ -5,4 +5,6 @@ fn mySharedFunction() => int64 {
   return 4321;
 }
 
+let mySharedFunctionPtr: [ref]()=>int64 = mySharedFunction;
+
 extern fn sum_sequence(i: int64, end: int64) => int64;

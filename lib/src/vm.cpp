@@ -7,7 +7,7 @@
 #include <iostream>
 #include <iomanip>
 
-// #define AD_PRINT_VM_STATE
+#define AD_PRINT_VM_STATE
 
 #define use_small_memcpy 1
 #define use_inline_small_memcpy 1
@@ -139,7 +139,7 @@ namespace adder {
           assert(imported_module.has_value() && "Failed to load imported module. TODO: Fail more gracefully.");
           auto imported_symbol = imported_module->find_public_symbol(symbol_name);
           assert(imported_symbol != nullptr && "Failed to find imported symbol. TODO: Fail more gracefully.");
-          addr = imported_symbol->data_address;
+          addr = symbols[relocation->symbol].data_address = imported_symbol->data_address;
           break;
         }
         case relocation_linkage::extern_:
@@ -572,7 +572,7 @@ namespace adder {
       {
         int i = 0;
         for (auto& reg : vm->registers)
-          std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.d64 << "]" << std::endl;
+          std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.f64 << "]" << std::endl;
 
         std::cout << "\nStack:\n";
         for (uint8_t* p = vm->stack.base; p < vm->registers[vm::register_names::sp].data; ++p)

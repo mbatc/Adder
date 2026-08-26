@@ -1,0 +1,11 @@
+
+from "import-test/lib" import mySharedValue;
+from "import-test/set-in-module" import setSharedValue;
+
+let test_result: int64 = 0;
+
+fn main() => void {
+  setSharedValue(200);
+
+  test_result = mySharedValue;
+}

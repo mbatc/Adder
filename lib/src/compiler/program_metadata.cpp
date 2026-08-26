@@ -20,22 +20,19 @@ namespace adder {
     }
 
     std::optional<type_reference> program_metadata::get_type_reference(std::string_view const & name) const {
-      const auto it = std::find_if(type_references.begin(), type_references.end(),
-                                   [&](type_reference const & t) { return t.get_identifier()  == name; });
-
-      if (it == type_references.end())
+      const auto it = std::find_if(types->begin(), types->end(), [&](type const & t) { return t.identifier == name; });
+      if (it == types->end())
         return std::nullopt;
-
-      return *it;
+      return type_reference{this, type_id{ size_t(it - types->begin()) }};
     }
 
     type const * program_metadata::get_type(std::string_view const & name) const {
-      const auto it = std::find_if(type_references.begin(), type_references.end(),
-                                   [&](type_reference const & t) { return t.get_identifier() == name; });
-      if (it == type_references.end())
+      const auto it = std::find_if(types->begin(), types->end(),
+                                   [&](type const & t) { return t.identifier == name; });
+      if (it == types->end())
         return nullptr;
 
-      return &it->get_type();
+      return &(*it);
     }
 
     std::optional<type_reference> program_metadata::get_type_reference(size_t type) const {
@@ -128,8 +125,7 @@ namespace adder {
       if (existing.has_value())
         return existing.value();
 
-      type_references.push_back(desc);
-      return {this, type_id{types.size() - 1}};
+      return {this, type_id{types->size() - 1}};
     }
 
     type_reference program_metadata::add_type(type const & desc) {
@@ -137,9 +133,8 @@ namespace adder {
       if (existing.has_value())
         return existing.value();
 
-      types.push_back(desc);
-      type_references.push_back(type_reference{this, type_id{types.size() - 1}});
-      return type_references.back();
+      types->push_back(desc);
+      return type_reference{this, type_id{types->size() - 1}};
     }
 
     type_reference program_metadata::add_function_type(expr::function_declaration const & decl,

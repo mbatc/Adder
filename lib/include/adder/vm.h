@@ -394,6 +394,7 @@ namespace adder {
 
       native_method_binding (*lookup_extern_symbol)(machine * vm, char const * symbol) = nullptr;
 
+      std::string (*resolve_module_name)(adder::vm::machine * vm, const char * source_module_name, char const * import_name);
       std::string (*load_module_source)(machine * vm, char const * module_name);
 
       address_t load_extern_symbol(char const * symbol) {
