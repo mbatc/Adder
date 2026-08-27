@@ -187,6 +187,7 @@ namespace adder {
       }
 
       void * initializer = adder::vm::compile_call_handle(vm, *loaded.find_public_symbol("()=>void:$module_init"));
+      assert(false && "This method sets the instruction in the main() method to a no-op for function-ptr-to-import.ad");
       adder::vm::call(vm, initializer);
       adder::vm::free(vm, initializer);
 
