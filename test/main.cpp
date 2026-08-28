@@ -169,7 +169,7 @@ int main(int argc, char ** argv) {
   // singleFileTest = "import-variable-set-from-import.ad";
   // singleFileTest = "function-ptr-to-import.ad";
   // singleFileTest = "import-function-extern.ad";
-  singleFileTest = "import-function-ptr.ad";
+  // singleFileTest = "import-function-ptr.ad";
 
   if (singleFileTest.has_value()) {
     tests.clear();
