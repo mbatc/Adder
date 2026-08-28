@@ -30,6 +30,7 @@ namespace adder {
         // Keywords
         fn,
         init,
+        destroy,
         class_,
         this_,
         extern_,

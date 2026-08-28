@@ -1,0 +1,27 @@
+
+class Foo {
+  init new() {
+    this.val = 10;
+  }
+
+  destroy {
+  
+  }
+
+  fn mul(v: int64) => void {
+    this.val = this.val * v;
+  }
+
+  val: int64;
+}
+
+let test_result: int64 = 0;
+
+fn main() => void {
+  let inst: Foo = Foo.new();
+
+  inst.mul(3);
+  inst.val = inst.val * 2;
+
+  test_result = inst.val; // 50
+}

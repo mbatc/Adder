@@ -659,6 +659,21 @@ namespace adder {
         return add_function_declaration(tree, name.name, returnType, std::move(arguments), body, flags, functor_type::initializer);
       }
 
+      std::optional<size_t> consume_destroy_fn(ast * tree, lexer::token_parser * tokenizer, symbol_flags flags) {lexer::token_view name;
+        if (!tokenizer->parse(lexer::token_id::destroy).ok())
+          return std::nullopt;
+        
+        std::optional<size_t> body;
+        if (!consume_function_body(tree, name.name, &body, tokenizer))
+          return std::nullopt;
+        
+        expr::type_name ret;
+        ret.name = "void";
+        size_t returnType = tree->add(ret);
+
+        return add_function_declaration(tree, name.name, returnType, {}, body, flags, functor_type::destructor);
+      }
+
       std::optional<size_t> consume_class(ast * tree, lexer::token_parser * tokenizer) {
         lexer::token_view identifier;
         if (!tokenizer->
@@ -700,6 +715,26 @@ namespace adder {
             if (!ctor.has_value())
               return std::nullopt;
             cls.constructors.push_back(ctor.value());
+            break;
+          }
+          case lexer::token_id::destroy: {
+            // Parse constructor
+            auto dtor = consume_destroy_fn(tree, tokenizer);
+            if (!dtor.has_value())
+              return std::nullopt;
+
+            if (cls.destroy.has_value())
+            {
+              printf("Cannot declare > 1 destroy method");
+              return std::nullopt;
+            }
+
+            cls.destroy = dtor.value();
+            break;
+          }
+          default: {
+            printf("unexpected token in class decl\n");
+            tokenizer->next();
             break;
           }
           }

@@ -151,6 +151,7 @@ namespace adder {
         std::vector<size_t> members;
         std::vector<size_t> methods;
         std::vector<size_t> constructors;
+        std::optional<size_t> destroy;
       };
 
       struct import_symbol {

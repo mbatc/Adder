@@ -108,6 +108,7 @@ namespace adder {
       free,
       member,
       initializer,
+      destructor,
       operator_,
     };
 
