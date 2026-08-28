@@ -167,7 +167,8 @@ int main(int argc, char ** argv) {
   // singleFileTest = "floats.ad";
   // singleFileTest = "import-function-extern.ad";
   // singleFileTest = "import-variable-set-from-import.ad";
-  singleFileTest = "function-ptr-to-import.ad";
+  // singleFileTest = "function-ptr-to-import.ad";
+  singleFileTest = "import-function-extern.ad";
 
   if (singleFileTest.has_value()) {
     tests.clear();
