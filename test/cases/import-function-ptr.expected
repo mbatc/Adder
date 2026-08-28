@@ -5,7 +5,7 @@ symbol:
   exists: true
   
 symbol:
-  name: ()=>int64:mySharedFunctionPtr
+  name: [ref]()=>int64:mySharedFunctionPtr
   exists: true
 
 symbol:

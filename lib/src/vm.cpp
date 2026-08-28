@@ -118,10 +118,9 @@ namespace adder {
       // auto externSymbols = program.get_extern_symbols();
 
       for (size_t i = 0; i < header.symbol_count; ++i) {
-        if (symbols[i].data_address == 0)
-          continue; // extern, skip (could do with a flag instead of infering this)
-        symbols[i].data_address += base;
         symbols[i].name_address += base;
+        if (symbols[i].data_address != 0) // skip extern (could do with a flag instead of infering this)
+          symbols[i].data_address += base;
       }
 
       for (program_relocation_table_entry * relocation = program.first_relocation_entry(); relocation != nullptr; relocation = program.next_relocation_entry(relocation)) {
