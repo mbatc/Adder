@@ -1190,10 +1190,9 @@ namespace adder {
 
       for (auto& ref : meta->symbol_references) {
         auto &     symbol   = ref.get();
+        const bool isImport = ref.meta != meta.get();
         const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
-        const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
-        const bool isImport = (symbol.flags & symbol_flags::import_) == symbol_flags::import_;
-        if (symbol.has_local_storage() || symbol.is_parameter() || isInline || isImport) {
+        if (symbol.has_local_storage() || symbol.is_parameter() || isInline) {
           continue;
         }
 
@@ -1217,8 +1216,8 @@ namespace adder {
             func.instructions.begin(),
             func.instructions.end()
           );
-        }
-        else {
+        } else {
+          const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
           if (isExtern) {
             item.data_address = 0;
           }
@@ -1281,20 +1280,21 @@ namespace adder {
       int64_t nextEntry = 0;
       for (auto & ref : meta->symbol_references) {
         auto &     symbol   = ref.get();
+        const bool isImport = ref.meta != meta.get();
         const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
-        const bool isImport = (symbol.flags & symbol_flags::import_) == symbol_flags::import_;
-        if (symbol.has_local_storage() || symbol.is_parameter() || isInline || isImport) {
+        if (symbol.has_local_storage() || symbol.is_parameter() || isInline) {
           continue;
         }
 
         symbolTable[nextEntry].name_address += header.symbol_data_offset;
-        if (symbol.type.is_function()) {
-          symbolTable[nextEntry].data_address += header.code_offset;
-        }
-        else {
-          const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
-          if (!isExtern) {
-            symbolTable[nextEntry].data_address += header.symbol_data_offset;
+        if (!isImport) {
+          if (symbol.type.is_function() && symbol.function_index.has_value()) {
+            symbolTable[nextEntry].data_address += header.code_offset;
+          } else {
+            const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
+            if (!isExtern) {
+              symbolTable[nextEntry].data_address += header.symbol_data_offset;
+            }
           }
         }
         symbolAddress[symbol.full_identifier] += symbolTable[nextEntry].data_address;

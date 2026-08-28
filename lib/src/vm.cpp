@@ -187,7 +187,7 @@ namespace adder {
       }
 
       void * initializer = adder::vm::compile_call_handle(vm, *loaded.find_public_symbol("()=>void:$module_init"));
-      assert(false && "This method sets the instruction in the main() method to a no-op for function-ptr-to-import.ad");
+      // assert(false && "This method sets the instruction in the main() method to a no-op for function-ptr-to-import.ad");
       adder::vm::call(vm, initializer);
       adder::vm::free(vm, initializer);
 
@@ -572,20 +572,20 @@ namespace adder {
       do
       {
         int i = 0;
-        for (auto& reg : vm->registers)
-          std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.f64 << "]" << std::endl;
+        // for (auto& reg : vm->registers)
+        //   std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.f64 << "]" << std::endl;
 
-        std::cout << "\nStack:\n";
-        for (uint8_t* p = vm->stack.base; p < vm->registers[vm::register_names::sp].data; ++p)
-        {
-          if ((int64_t)p % 8 == 0)
-          {
-            std::cout << std::endl;
-            printf("[%lld]: ", (int64_t)p);
-          }
-          printf("0x%.2x ", *p);
-        }
-        std::cout << "\n\n";
+        // std::cout << "\nStack:\n";
+        // for (uint8_t* p = vm->stack.base; p < vm->registers[vm::register_names::sp].data; ++p)
+        // {
+        //   if ((int64_t)p % 8 == 0)
+        //   {
+        //     std::cout << std::endl;
+        //     printf("[%lld]: ", (int64_t)p);
+        //   }
+        //   printf("0x%.2x ", *p);
+        // }
+        // std::cout << "\n\n";
 
         AD_VM_DECODE(vm, pInstruction);
 
