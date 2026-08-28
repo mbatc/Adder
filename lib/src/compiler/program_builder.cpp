@@ -4,512 +4,6 @@
 
 namespace adder {
   namespace compiler {
-    std::optional<size_t> program_metadata::get_type_index(std::string_view const& name) const {
-      const auto it = std::find_if(types.begin(), types.end(), [&](type const& t) { return t.identifier == name; });
-
-      if (it == types.end())
-        return std::nullopt;
-
-      return it - types.begin();
-    }
-
-    type const * program_metadata::get_type(std::string_view const& name) const {
-      const auto it = std::find_if(types.begin(), types.end(), [&](type const& t) { return t.identifier == name; });
-      if (it == types.end())
-        return nullptr;
-      return &(*it);
-    }
-
-    std::optional<size_t> program_metadata::get_type_index(ast const & tree, size_t type) const {
-      const auto name = get_type_name(tree, type);
-      return name.has_value() ? get_type_index(name.value()) : std::nullopt;
-    }
-
-    type const * program_metadata::get_type(ast const & tree, size_t type) const {
-      const auto name = get_type_name(tree, type);
-      return name.has_value() ? get_type(name.value()) : nullptr;
-    }
-
-    std::optional<size_t> program_metadata::unwrap_type(std::optional<size_t> const & type) const {
-      if (type.has_value() && std::holds_alternative<type_modifier>(types[type.value()].desc))
-        return std::get<type_modifier>(types[type.value()].desc).base;
-      else
-        return std::nullopt;
-    }
-
-    std::optional<size_t> program_metadata::decay_type(std::optional<size_t> const & type) const {
-      if (!type.has_value())
-        return std::nullopt;
-
-      const auto& desc = types[type.value()].desc;
-      if (std::holds_alternative<type_modifier>(desc)) {
-        const auto &modifier = std::get<type_modifier>(desc);
-        if (modifier.const_) {
-          return decay_type(modifier.base);
-        }
-      }
-      else if (std::holds_alternative<type_function_decl>(desc)) {
-        const auto &decl = std::get<type_function_decl>(desc);
-        return decl.type;
-      }
-
-      return type;
-    }
-
-    std::optional<size_t> program_metadata::remove_reference(std::optional<size_t> const & type) const {
-      if (!type.has_value())
-        return std::nullopt;
-
-      const auto& desc = types[type.value()].desc;
-      if (std::holds_alternative<type_modifier>(desc)) {
-        const auto &modifier = std::get<type_modifier>(desc);
-        if (modifier.reference) {
-          return decay_type(modifier.base);
-        }
-      }
-
-      return type;
-    }
-
-    std::optional<size_t> program_metadata::return_type_of(std::optional<size_t> const& func) const {
-      if (!func.has_value())
-        return std::nullopt;
-
-      if (std::holds_alternative<type_function>(types[func.value()].desc)) {
-        return std::get<type_function>(types[func.value()].desc).return_type;
-      }
-
-      if (std::holds_alternative<type_function_decl>(types[func.value()].desc)) {
-        return return_type_of(std::get<type_function_decl>(types[func.value()].desc).type);
-      }
-
-      return return_type_of(unwrap_type(func.value()));
-    }
-
-    bool program_metadata::is_reference_of(std::optional<size_t> const & reference, std::optional<size_t> const & baseType) const {
-      if (!(reference.has_value()
-        && baseType.has_value()
-        && std::holds_alternative<type_modifier>(types[*reference].desc)))
-        return false;
-
-      auto& modifiers = std::get<type_modifier>(types[*reference].desc);
-      return modifiers.reference && modifiers.base == baseType;
-    }
-
-    bool program_metadata::is_reference(std::optional<size_t> const & type) const
-    {
-      return type.has_value()
-        && std::holds_alternative<type_modifier>(types[*type].desc)
-        && std::get<type_modifier>(types[*type].desc).reference;
-    }
-
-    bool program_metadata::is_function_decl(std::optional<size_t> const& type) const {
-      return type.has_value() && std::holds_alternative<type_function_decl>(types[*type].desc);
-    }
-
-    bool program_metadata::is_function(std::optional<size_t> const& type) const {
-      return type.has_value()
-        && (std::holds_alternative<type_function_decl>(types[*type].desc)
-          || std::holds_alternative<type_function>(types[*type].desc)
-          || is_function(unwrap_type(*type)));
-    }
-
-    functor_type program_metadata::get_functor_type(std::optional<size_t> const& type) const {
-      auto decayed = decay_type(type);
-      if (!(decayed.has_value() && std::holds_alternative<type_function>(types[*decayed].desc)))
-        return functor_type::none;
-      auto &decl = std::get<type_function>(types[*decayed].desc);
-      return decl.func_type;
-    }
-
-    bool program_metadata::is_const(std::optional<size_t> const & type) const {
-      return type.has_value()
-        && std::holds_alternative<type_modifier>(types[*type].desc)
-        && std::get<type_modifier>(types[*type].desc).const_;
-    }
-
-    bool program_metadata::is_integer(std::optional<size_t> const & type) const {
-      return type.has_value()
-        && std::holds_alternative<type_primitive>(types[*type].desc)
-        && compiler::is_integer(std::get<type_primitive>(types[*type].desc));
-    }
-
-    bool program_metadata::is_float(std::optional<size_t> const & type) const {
-      return type.has_value()
-        && std::holds_alternative<type_primitive>(types[*type].desc)
-        && compiler::is_float(std::get<type_primitive>(types[*type].desc));
-    }
-
-    bool program_metadata::is_bool(std::optional<size_t> const & type) const {
-      return type.has_value()
-        && std::holds_alternative<type_primitive>(types[*type].desc)
-        && compiler::is_bool(std::get<type_primitive>(types[*type].desc));
-    }
-
-    bool program_metadata::is_void(std::optional<size_t> const& type) const {
-      return type.has_value()
-        && std::holds_alternative<type_primitive>(types[*type].desc)
-        && compiler::is_void(std::get<type_primitive>(types[*type].desc));
-    }
-
-    bool program_metadata::is_valid_function_overload(std::optional<size_t> const & a, std::optional<size_t> const & b) const {
-      if (!a.has_value() || !b.has_value()) {
-        return false;
-      }
-
-      if (!is_function(a) || !is_function(b)) {
-        return false;
-      }
-
-      auto decayedA = decay_type(a);
-      auto decayedB = decay_type(b);
-      if (!decayedA.has_value() || !decayedB.has_value()) {
-        return false;
-      }
-
-      return std::get<type_function>(types[decayedA.value()].desc).arguments != std::get<type_function>(types[decayedB.value()].desc).arguments;
-    }
-
-    size_t program_metadata::get_type_size(type_modifier const & desc) const {
-      return desc.reference ? sizeof(vm::address_t) : get_type_size(desc.base);
-    }
-
-    size_t program_metadata::get_type_size(type_primitive const& desc) const {
-      switch (desc) {
-      case type_primitive::void_: return 0;
-      case type_primitive::int8: return sizeof(int8_t);
-      case type_primitive::int16: return sizeof(int16_t);
-      case type_primitive::int32: return sizeof(int32_t);
-      case type_primitive::int64: return sizeof(int64_t);
-      case type_primitive::uint8: return sizeof(uint8_t);
-      case type_primitive::uint16: return sizeof(uint16_t);
-      case type_primitive::uint32: return sizeof(uint32_t);
-      case type_primitive::uint64: return sizeof(uint64_t);
-      case type_primitive::float32: return sizeof(float);
-      case type_primitive::float64: return sizeof(double);
-      case type_primitive::bool_: return sizeof(bool);
-      }
-      return 0;
-    }
-
-    size_t program_metadata::get_type_size(type_class const& desc) const {
-      return desc.size;
-    }
-
-    size_t program_metadata::get_type_size(type_function const& desc) const {
-      return desc.size;
-    }
-
-    size_t program_metadata::get_type_size(type_function_decl const& desc) const {
-      return desc.size;
-    }
-
-    size_t program_metadata::get_type_size(size_t const & typeIndex) const {
-      return get_type_size(types[typeIndex]);
-    }
-
-    size_t program_metadata::get_type_size(type const& type) const {
-      return std::visit([this](auto const& o) {
-        return get_type_size(o);
-        }, type.desc);
-    }
-
-    size_t program_metadata::new_scope(size_t parent) {
-      const size_t newScopeId = scopes.size();
-      scopes.emplace_back();
-
-      scope & newScope = scopes.back();
-      newScope.parent = parent;
-
-      scope & parentScope = scopes[parent];
-      if (!parentScope.first_child.has_value()) {
-        parentScope.first_child = newScopeId;
-        return newScopeId;
-      }
-
-      size_t lastSibling = parentScope.first_child.value();
-      for (; scopes[lastSibling].sibling.has_value(); lastSibling = scopes[lastSibling].sibling.value());
-      scopes[lastSibling].sibling = newScopeId;
-
-      return newScopeId;
-    }
-
-    void program_metadata::for_each_child_scope(size_t rootId, std::function<void(size_t)> const & cb) {
-      scope & root = scopes[rootId];
-      if (!root.first_child.has_value()) {
-        return;
-      }
-
-      size_t next = root.first_child.value();
-      cb(next);
-      for (; scopes[next].sibling.has_value(); next = scopes[next].sibling.value())
-        cb(scopes[next].sibling.value());
-    }
-
-    size_t program_metadata::add_type(type const & desc) {
-      const auto existing = get_type_index(desc.identifier);
-      if (existing.has_value())
-        return existing.value();
-
-      types.push_back(desc);
-      return types.size() - 1;
-    }
-
-    size_t program_metadata::add_function_type(ast const& tree, expr::function_declaration const& decl, std::optional<size_t> id) {
-      type_function_decl fn;
-      fn.allowInline;
-      fn.function_id = id.value();
-      fn.type = get_type_index(tree, decl.type.value()).value_or(0);
-
-      if (fn.type == 0) {
-        // TODO: Log error. Invalid funciton type.
-        return 0;
-      }
-
-      type t;
-      t.identifier = decl.identifier.empty() ? adder::format("__unnamed_fn_%lld", id.value()) : decl.identifier;
-      t.identifier = adder::format("%s%s", t.identifier.c_str(), types[fn.type].identifier.c_str());
-      t.desc = fn;
-
-      return add_type(t);
-    }
-
-    std::optional<size_t> program_metadata::add_symbol(symbol const & s) {
-      if (s.scope_id >= scopes.size())
-        return std::nullopt;
-
-      for (const size_t existingId : scopes[s.scope_id].symbols) {
-        const auto& existing = symbols[existingId];
-        if (existing.name != s.name) {
-          continue;
-        }
-
-        if (existing.type == s.type) {
-          return std::nullopt; // Duplicate symbol
-        }
-
-        // TODO: Test if s.type can overload the existing symbol
-        if (!is_valid_function_overload(existing.type, s.type)) {
-          return std::nullopt;
-        }
-      }
-
-      const size_t symbolIndex = symbols.size();
-      symbols.push_back(s);
-      scopes[s.scope_id].symbols.push_back(symbolIndex);
-
-      return symbolIndex;
-    }
-
-    size_t program_metadata::get_symbol_size(size_t const& symbolIndex) const {
-      return get_type_size(get_symbol_type(symbolIndex));
-    }
-
-    size_t program_metadata::get_symbol_type(size_t const& symbolIndex) const {
-      return symbols[symbolIndex].type;
-    }
-
-    std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::string_view const & name) const {
-      return search_for_symbol_index(scopeId, [&name](symbol const& s) {
-        return s.name == name;
-      });
-    }
-
-    std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::function<bool(symbol const &)> const & pred) const {
-      return search_for_symbol_index(scopeId, [&pred](symbol const& sym, size_t) { return pred(sym); });
-    }
-
-    std::optional<size_t> program_metadata::search_for_symbol_index(size_t scopeId, std::function<bool(symbol const&, size_t)> const& pred) const {
-      auto found = std::find_if(scopes[scopeId].symbols.rbegin(), scopes[scopeId].symbols.rend(), [&](int64_t idx) { return pred(symbols[idx], idx); });
-      if (found != scopes[scopeId].symbols.rend()) {
-        return *found;
-      }
-
-      if (!scopes[scopeId].parent.has_value())
-        return std::nullopt;
-
-      return search_for_symbol_index(scopes[scopeId].parent.value(), pred);
-    }
-
-    std::optional<size_t> program_metadata::search_for_callable_symbol_index(size_t scopeId, std::string_view const& identifier, ast const& ast, std::optional<size_t> const & paramList) const {
-      std::optional<size_t> bestFunction;
-      std::optional<size_t> bestMatchScore;
-      bool ambigious = false;
-
-      search_for_symbol_index(scopeId, [&](symbol const& sym, size_t idx) {
-        if (sym.name != identifier) {
-          return false;
-        }
-        auto score = get_parameter_list_score(scopeId, sym.type, ast, paramList);
-        if (!score.has_value())
-          return false;
-        if (bestMatchScore.has_value() && score.value() > bestMatchScore.value())
-          return false;
-        if (score == bestMatchScore) {
-          ambigious = true;
-          bestFunction.reset();
-          return false;
-        }
-        bestMatchScore = score;
-        bestFunction = idx;
-        return false;
-      });
-
-      if (ambigious)
-        printf("Error: Ambigous call to '%.*s'\n", (int)identifier.length(), identifier.data());
-
-      return bestFunction;
-    }
-
-    std::optional<size_t> program_metadata::search_for_operator_symbol_index(size_t scopeId, expr::operator_type op, size_t lhsType, size_t rhsType) const {
-      std::string_view identifier = expr::get_operator_identifer(op);
-      std::optional<size_t> bestFunction;
-      std::optional<size_t> bestMatchScore;
-      bool ambigious = false;
-      search_for_symbol_index(scopeId, [&](symbol const & sym, size_t idx) {
-        if (sym.name != identifier)
-          return false;
-        if (get_functor_type(sym.type) != functor_type::operator_)
-          return false;
-
-        size_t const types[2] = { lhsType, rhsType };
-        auto score = get_parameter_list_score(scopeId, sym.type, types, 2);
-
-        if (!score.has_value())
-          return false;
-
-        if (bestMatchScore.has_value() && score.value() > bestMatchScore.value())
-          return false;
-
-        if (score == bestMatchScore) {
-          ambigious = true;
-          bestFunction.reset();
-          return false;
-        }
-
-        bestMatchScore = score;
-        bestFunction = idx;
-        ambigious = false;
-        return false;
-      });
-
-      if (ambigious)
-        printf("Error: Ambigous call to '%.*s'\n", (int)identifier.length(), identifier.data());
-
-      return bestFunction;
-    }
-
-    namespace {
-      // Implements the parameter list scoring algorithm
-      struct parameter_list_score_calculator {
-        type_function const * signature = nullptr;
-        size_t scope_id = 0;
-
-        size_t score = 0; // Lower is better
-        size_t i     = 0;
-
-        bool next(program_metadata const * meta, size_t param) {
-          if (complete())
-            return false;
-
-          auto& arg = signature->arguments[i++];
-          if (param != arg) {
-            if (meta->is_reference_of(arg, param))
-              return true;
-
-            auto initializer = meta->find_unnamed_initializer(scope_id, arg, param);
-            if (!initializer.has_value())
-              return false; // No conversion available
-            ++score;
-          }
-
-          return true;
-        }
-
-        bool complete() const {
-          return i == signature->arguments.size();
-        }
-      };
-    }
-
-    std::optional<size_t> program_metadata::get_parameter_list_score(size_t scopeId, size_t funcType, ast const & ast, std::optional<size_t> const & paramList) const {
-      if (!is_function(funcType)) {
-        return std::nullopt;
-      }
-      auto decayed = remove_reference(decay_type(funcType));
-      if (!decayed.has_value()) {
-        return std::nullopt;
-      }
-
-      parameter_list_score_calculator scoreCalculator;
-      scoreCalculator.signature = &std::get<type_function>(types[decayed.value()].desc);
-      scoreCalculator.scope_id = scopeId;
-
-      std::optional<size_t> current = paramList;
-      while (current.has_value()) {
-        auto & param = ast.get<expr::call_parameter>(current.value());
-        if (!scoreCalculator.next(this, statement_info[param.expression].type_id.value())) {
-          return std::nullopt; // Too many arguments
-        }
-        current = param.next;
-      }
-
-      if (!scoreCalculator.complete()) {
-        return std::nullopt; // Not enough arguments
-      }
-
-      return scoreCalculator.score;
-    }
-
-    std::optional<size_t> program_metadata::get_parameter_list_score(size_t scopeId, size_t funcType, size_t const * paramList, size_t numParams) const {
-      if (!is_function(funcType)) {
-        return std::nullopt;
-      }
-      auto decayed = decay_type(funcType);
-      if (!decayed.has_value()) {
-        return std::nullopt;
-      }
-
-      parameter_list_score_calculator scoreCalculator;
-      scoreCalculator.signature = &std::get<type_function>(types[decayed.value()].desc);
-      scoreCalculator.scope_id = scopeId;
-
-      for (size_t i = 0; i < numParams; ++i)
-        if (!scoreCalculator.next(this, paramList[i]))
-          return std::nullopt; // TOo many arguments
-
-      if (!scoreCalculator.complete())
-        return std::nullopt; // Not enough arguments
-
-      return scoreCalculator.score;
-    }
-
-    std::optional<size_t> program_metadata::find_symbol(std::string_view const & fullName) const {
-      auto found = std::find_if(symbols.begin(), symbols.end(), [&](symbol const& s) { return s.full_identifier == fullName; });
-      if (found == symbols.end())
-        return std::nullopt;
-      return found - symbols.begin();
-    }
-
-    std::optional<size_t> program_metadata::find_unnamed_initializer(size_t scopeId, size_t receiverTypeIndex, size_t initializerTypeIndex) const {
-      std::string_view fullName = adder::format(
-        "init ([ref]%.*s,%.*s)=>void:",
-        types[receiverTypeIndex].identifier.length(), types[receiverTypeIndex].identifier.data(),
-        types[initializerTypeIndex].identifier.length(), types[initializerTypeIndex].identifier.data()
-      );
-
-      return search_for_symbol_index(scopeId, [fullName](symbol const & sym) {
-        return sym.full_identifier == fullName;
-      });
-    }
-
-    std::optional<size_t> program_metadata::get_parent_scope(size_t const & scopeId) const {
-      if (scopeId < scopes.size())
-        return scopes[scopeId].parent;
-      else
-        return std::nullopt;
-    }
-
     vm::register_index program_builder::Registers::pin() {
       vm::register_index staleAvailble = (vm::register_index)vm::register_names::gp_end;
       size_t             staleLastUsed = useRound + 1;
@@ -604,7 +98,7 @@ namespace adder {
           if ((it->flags & value_flags::alias) == value_flags::alias)
             continue;
           if ((it->flags & value_flags::stack_variable) == value_flags::stack_variable) {
-            func.stack_storage_used -= meta.get_type_size(it->type_index.value());
+            func.stack_storage_used -= it->type_info->get_size();
           }
         }
       }
@@ -668,16 +162,16 @@ namespace adder {
       return ret;
     }
     
-    size_t program_builder::get_value_type(value const & val) const {
-      if (val.type_index.has_value()) {
-        return val.type_index.value();
+    type_reference program_builder::get_value_type(value const & val) const {
+      if (val.type_info.has_value()) {
+        return val.type_info.value();
       }
 
       if (val.symbol_index.has_value()) {
-        return meta.symbols[val.symbol_index.value()].type;
+        return val.symbol_index->get_type();
       }
 
-      return 0;
+      return { meta.get(), type_id::undefined };
     }
 
     void program_builder::add_variable(program_builder::value const & val) {
@@ -685,34 +179,32 @@ namespace adder {
       scopes.back().variables.push_back(val);
     }
 
-    std::optional<program_builder::value> program_builder::find_unnamed_initializer(size_t receiver, size_t initializer) {
-      std::string_view symbolName = adder::format(
-        "init ([ref]%.*s,%.*s)=>void:",
-        meta.types[receiver].identifier.length(), meta.types[receiver].identifier.data(),
-        meta.types[initializer].identifier.length(), meta.types[initializer].identifier.data()
-      );
+    std::optional<program_builder::value> program_builder::find_unnamed_initializer(type_reference receiver,
+                                                                                    type_reference initializer) {
+      std::string_view symbolName = adder::format("init ([ref]%.*s,%.*s)=>void:", receiver.get_identifier().length(),
+                                                  receiver.get_identifier().data(), initializer.get_identifier().length(),
+                                                  initializer.get_identifier().data());
 
       return find_value([=](program_builder::value const & candidate) {
         if (!candidate.symbol_index.has_value())
           return false;
-        const auto & symbol = meta.symbols[candidate.symbol_index.value()];
+        const auto & symbol = candidate.symbol_index->get();
         return symbol.full_identifier == symbolName;
       });
     }
 
-    std::optional<program_builder::value> program_builder::find_operator(expr::operator_type op, size_t lhs, size_t rhs) {
+    std::optional<program_builder::value> program_builder::find_operator(expr::operator_type op, type_reference lhs,
+                                                                         type_reference rhs) {
       std::string_view opName = expr::get_operator_identifer(op);
-      std::string_view symbolName = adder::format(
-        "op (%.*s,%.*s)=>void:%.*s",
-        meta.types[lhs].identifier.length(), meta.types[lhs].identifier.data(),
-        meta.types[rhs].identifier.length(), meta.types[rhs].identifier.data(),
-        opName.length(), opName.data()
+      std::string_view symbolName = adder::format("op (%.*s,%.*s)=>void:%.*s", lhs.get_identifier().length(),
+                                                  lhs.get_identifier().data(), rhs.get_identifier().length(),
+                                                  rhs.get_identifier().data(), opName.length(), opName.data()
       );
 
       return find_value([=](program_builder::value const & candidate) {
         if (!candidate.symbol_index.has_value())
           return false;
-        const auto & symbol = meta.symbols[candidate.symbol_index.value()];
+        const auto & symbol = candidate.symbol_index->get();
         return symbol.full_identifier == symbolName;
       });
     }
@@ -741,44 +233,44 @@ namespace adder {
       return find_value(predicate, scopeIndex - 1);
     }
 
-    program_builder::value program_builder::allocate_stack_variable(size_t typeIndex) {
-      const size_t sz = meta.get_type_size(typeIndex);
+    program_builder::value program_builder::allocate_stack_variable(type_reference typeInfo) {
+      const size_t sz = typeInfo.get_size();
 
       auto & func = current_function();
 
       value result;
       result.indirect_register_index = (vm::register_index)vm::register_names::fp;
-      result.address_offset = func.stack_storage_used;
-      result.type_index = typeIndex;
+      result.address_offset          = func.stack_storage_used;
+      result.type_info               = typeInfo;
       result.flags |= value_flags::stack_variable;
 
       func.stack_storage_used += sz;
-      func.max_stack_storage   = std::max(func.max_stack_storage, func.stack_storage_used);
+      func.max_stack_storage = std::max(func.max_stack_storage, func.stack_storage_used);
 
       return result;
     }
 
-    program_builder::value program_builder::allocate_temporary_value(size_t typeIndex) {
-      const size_t sz = meta.get_type_size(typeIndex);
+    program_builder::value program_builder::allocate_temporary_value(type_reference typeInfo) {
+      const size_t sz = typeInfo.get_size();
 
       auto & func = current_function();
 
       value result;
       result.indirect_register_index = (vm::register_index)vm::register_names::fp;
-      result.address_offset = func.temp_storage_used;
-      result.type_index = typeIndex;
+      result.address_offset          = func.temp_storage_used;
+      result.type_info               = typeInfo;
       result.flags |= value_flags::temporary;
 
       func.temp_storage_used += sz;
-      func.max_temp_storage   = std::max(func.max_temp_storage, func.temp_storage_used);
+      func.max_temp_storage = std::max(func.max_temp_storage, func.temp_storage_used);
 
       scopes.back().temporaries.push_back(result);
 
       return result;
     }
 
-    size_t program_builder::allocate_temporary_call_parameter(size_t typeIndex) {
-      const size_t sz = meta.get_type_size(typeIndex);
+    size_t program_builder::allocate_temporary_call_parameter(type_reference typeInfo) {
+      const size_t sz = typeInfo.get_size();
       
       alloc_stack(sz);
 
@@ -790,7 +282,7 @@ namespace adder {
       }
 
       value result;
-      result.type_index              = typeIndex;
+      result.type_info               = typeInfo;
       result.address_offset          = -(int64_t)sz;
       result.indirect_register_index = (vm::register_index)vm::register_names::sp;
 
@@ -808,14 +300,13 @@ namespace adder {
       destroy_value(&val);
       scopes.back().temporaries.pop_back();
 
-      auto& func = current_function();
-      const size_t sz = meta.get_type_size(val.type_index.value());
+      auto &       func = current_function();
+      const size_t sz   = val.type_info->get_size();
       if (val.indirect_register_index == vm::register_names::fp) {
         func.temp_storage_used -= sz;
-      } 
-      else if (val.indirect_register_index == vm::register_names::sp) {
+      } else if (val.indirect_register_index == vm::register_names::sp) {
         // Ammend other temporaries with addresses relative to the stack pointer
-        for (auto& temporary : scopes.back().temporaries) {
+        for (auto & temporary : scopes.back().temporaries) {
           if (temporary.indirect_register_index == vm::register_names::sp) {
             temporary.address_offset += sz;
           }
@@ -833,13 +324,20 @@ namespace adder {
       return functions[function_stack.back()].scope_id.value();
     }
 
-    void program_builder::add_relocation(relocation_linkage const & linkage, std::string_view const & symbol, uint64_t offset) {
+    void program_builder::add_relocation(program_metadata const * symbol_meta, std::string_view const & symbol, uint64_t offset) {
+      relocation_linkage linkage = symbol_meta == meta.get() ? relocation_linkage::internal
+                                                             : relocation_linkage::import_;
+
+      return add_relocation(linkage, symbol_meta->module_name, symbol, offset);
+    }
+
+    void program_builder::add_relocation(relocation_linkage const & linkage, std::string_view const & module_name, std::string_view const & symbol, uint64_t offset) {
       const size_t funcId = function_stack.back();
       const uint64_t base = sizeof(vm::instruction) * (functions[funcId].instructions.size() - 1);
       const uint64_t addr = base + offset;
       // TODO: Could be stored as a list of addresses per symbol.
       //       Might be more efficient when evaluating the relocations.
-      relocations.push_back({ linkage, symbol, addr, function_stack.back() });
+      relocations.push_back({ linkage, module_name, symbol, addr, function_stack.back() });
     }
 
     void program_builder::push_value(value r) {
@@ -855,14 +353,16 @@ namespace adder {
       return ret;
     }
 
-    bool program_builder::begin_function(size_t symbolId) {
-      program_metadata::symbol & symbol = meta.symbols[symbolId];
+    bool program_builder::begin_function(symbol_reference symbolId) {
+      if (meta.get() != symbolId.meta)
+        return false; // TODO: Error can't define method from another module
+
+      symbol & symbol = meta->get(symbolId.index);
 
       function func;
-      auto const & type = meta.types[symbol.type];
-      auto const& funcDesc = std::get<type_function>(type.desc);
-      for (size_t const & argTypes : funcDesc.arguments) {
-        func.args_size += meta.get_type_size(argTypes);
+      auto const & funcDesc = symbol.type.as<type_function>();
+      for (type_reference const & argTypes : funcDesc.arguments) {
+        func.args_size += argTypes.get_size();
       }
       func.return_type = funcDesc.return_type;
       func.symbol      = symbolId;
@@ -870,8 +370,9 @@ namespace adder {
 
       value rv;
       rv.indirect_register_index = (vm::register_index)vm::register_names::fp;
-      rv.address_offset          = -(int64_t)meta.get_type_size(func.return_type) - func.args_size - function::CallLinkStorageSize;
-      rv.type_index              = func.return_type;
+      rv.address_offset          = -(int64_t)func.return_type.get_size() - func.args_size - function::CallLinkStorageSize;
+      rv.type_info               = func.return_type;
+
       push_return_value_receiver(rv);
 
       function_stack.push_back(functions.size());
@@ -961,20 +462,18 @@ namespace adder {
     }
 
     void program_builder::call(value const & func) {
-      if (!meta.is_function(func.type_index))
+      if (!is_function(func.type_info))
         return;
 
       if (func.symbol_index.has_value()) {
-        auto& symbol = meta.symbols[func.symbol_index.value()];
-
-        if (symbol.function_index.has_value()) {
-          call(0);
-          add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(call.addr));
-        }
-        else if (meta.is_reference(func.type_index)) {
+        auto & symbol = func.symbol_index->get();
+        if (is_reference(func.type_info)) {
           const auto addr = load_value_of(func);
           call_indirect(addr);
           registers.release(addr);
+        } else {
+          call(0);
+          add_relocation(func.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(call.addr));
         }
       }
     }
@@ -999,19 +498,20 @@ namespace adder {
       add_instruction(op);
     }
 
-    void program_builder::call_native(size_t const & symbol) {
+    void program_builder::call_native(symbol_reference const & symbol) {
       vm::instruction op;
       op.code = vm::op_code::call_native;
-      op.call_native.callback = nullptr;
+      op.call_native.native_method_index = 0;
       add_instruction(op);
-      add_relocation(relocation_linkage::extern_, meta.symbols[symbol].full_identifier, AD_IOFFSET(call_native.callback));
+      add_relocation(relocation_linkage::extern_, symbol.meta->module_name, symbol.get().full_identifier,
+                     AD_IOFFSET(call_native.native_method_index));
     }
 
     void program_builder::jump_to(value const & location) {
-      if (!meta.is_function(location.type_index))
+      if (!is_function(location.type_info))
         return;
 
-      if (meta.is_reference(location.type_index)) {
+      if (is_reference(location.type_info)) {
          vm::register_index addr = load_value_of(location);
          jump_indirect(addr);
          release_register(addr);
@@ -1019,12 +519,13 @@ namespace adder {
       }
       
       if (location.symbol_index.has_value()) {
-        auto& symbol = meta.symbols[location.symbol_index.value()];
+        auto& symbol = location.symbol_index->get();
 
         // TODO: load address and jump indirect.
 
         jump_to(location.address_offset);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(jump.addr));
+        add_relocation(relocation_linkage::internal, location.symbol_index->meta->module_name, symbol.full_identifier,
+                       AD_IOFFSET(jump.addr));
         return;
       }
 
@@ -1178,7 +679,7 @@ namespace adder {
         return load_constant(value.constant.value());
       }
 
-      const size_t sz = meta.get_type_size(value.type_index.value());
+      const size_t sz = get_size(value.type_info);
       assert(sz <= sizeof(vm::register_value));
 
       if (value.indirect_register_index.has_value()) {
@@ -1194,14 +695,14 @@ namespace adder {
       }
 
       if (value.symbol_index.has_value()) {
-        auto & symbol = meta.symbols[value.symbol_index.value()];
+        auto & symbol = value.symbol_index->get();
         assert(!symbol.has_local_storage() && "load_value_of is unable to locate local symbols");
 
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
 
         vm::register_index ret = pin_register();
         load_from_constant_address(ret, value.address_offset, sz);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(load_addr.addr));
+        add_relocation(value.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(load_addr.addr));
         return ret;
       }
 
@@ -1232,13 +733,13 @@ namespace adder {
       }
 
       if (value.symbol_index.has_value()) {
-        auto & symbol = meta.symbols[value.symbol_index.value()];
+        auto & symbol = value.symbol_index->get();
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
 
         vm::register_index ret = pin_register();
         set(ret, value.address_offset);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(set.val));
+        add_relocation(value.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(set.val));
         return ret;
       }
 
@@ -1305,9 +806,46 @@ namespace adder {
       add_instruction(i);
     }
 
+    void program_builder::itof(vm::register_index dst, vm::register_index src, uint8_t fltSize) {
+      vm::instruction i;
+      switch (fltSize)
+      {
+      case 8:
+        i.code = vm::op_code::itof64;
+        break;
+      case 4:
+        i.code = vm::op_code::itof32;
+        break;
+      default:
+        assert(false && "size not supported");
+        break;
+      }
+      i.xtox.dst = dst;
+      i.xtox.src = src;
+      add_instruction(i);
+    }
+
+    void program_builder::ftoi(vm::register_index dst, vm::register_index src, uint8_t fltSize) {
+      vm::instruction i;
+      switch (fltSize)
+      {
+      case 8:
+        i.code = vm::op_code::f64toi;
+        break;
+      case 4:
+        i.code = vm::op_code::f32toi;
+        break;
+      default:
+        assert(false && "size not supported");
+        break;
+      }
+      i.xtox.dst = dst;
+      i.xtox.src = src;
+      add_instruction(i);
+    }
+
     bool program_builder::store(vm::register_index src, vm::register_index address, uint8_t sz) {
-      if (sz > sizeof(vm::address_t))
-        return false; // Too large.
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code       = vm::op_code::store;
       str.store.src  = src;
@@ -1318,8 +856,7 @@ namespace adder {
     }
 
     bool program_builder::store(vm::register_index src, vm::register_index address, uint8_t sz, int64_t offset) {
-      if (sz > sizeof(vm::address_t))
-        return false; // Too large.
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code                = vm::op_code::store_offset;
       str.store_offset.src    = src;
@@ -1331,8 +868,7 @@ namespace adder {
     }
 
     bool program_builder::store_to_constant_address(vm::register_index src, vm::register_value dst, uint8_t sz) {
-      if (sz > sizeof(vm::address_t))
-        return false; // Too large.
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code             = vm::op_code::store_addr;
       str.store_addr.src   = src;
@@ -1343,6 +879,7 @@ namespace adder {
     }
 
     bool program_builder::store_constant_to_constant_address(vm::register_value src, vm::register_value dst, uint8_t sz) {
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code                  = vm::op_code::store_value_addr;
       str.store_value_addr.src  = src;
@@ -1353,6 +890,7 @@ namespace adder {
     }
 
     bool program_builder::store_constant(vm::register_value src, vm::register_index dst, uint8_t sz) {
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code             = vm::op_code::store_value;
       str.store_value.src  = src;
@@ -1363,6 +901,7 @@ namespace adder {
     }
 
     bool program_builder::store_constant(vm::register_value src, vm::register_index dst, uint8_t sz, int64_t offset) {
+      assert(sz <= sizeof(vm::register_value));
       vm::instruction str;
       str.code                      = vm::op_code::store_value_offset;
       str.store_value_offset.src    = src;
@@ -1379,11 +918,11 @@ namespace adder {
         return false;
       }
 
-      if (!dst.type_index.has_value()) {
+      if (is_undefined(dst.type_info)) {
         return false;
       }
 
-      const size_t sz = meta.get_type_size(dst.type_index.value());
+      const size_t sz = get_size(dst.type_info);
       assert(sz <= sizeof(vm::register_value) && "value type does not fit in a register");
       if (dst.indirect_register_index.has_value()) {
         store_constant(src, dst.indirect_register_index.value(), (uint8_t)sz, dst.address_offset);
@@ -1395,11 +934,11 @@ namespace adder {
       }
 
       if (dst.symbol_index.has_value()) {
-        auto & symbol = meta.symbols[dst.symbol_index.value()];
+        auto & symbol = dst.symbol_index->get();
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
         store_constant_to_constant_address(src, dst.address_offset, (uint8_t)sz);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(store_value_addr.addr));
+        add_relocation(dst.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(store_value_addr.addr));
         return true;
       }
 
@@ -1413,11 +952,11 @@ namespace adder {
         return false;
       }
 
-      if (!dst.type_index.has_value()) {
+      if (is_undefined(dst.type_info)) {
         return false;
       }
 
-      const size_t sz = meta.get_type_size(dst.type_index.value());
+      const size_t sz = get_size(dst.type_info);
       assert(sz <= sizeof(vm::register_value) && "value type does not fit in a register");
       if (dst.indirect_register_index.has_value()) {
         store(src, dst.indirect_register_index.value(), (uint8_t)sz, dst.address_offset);
@@ -1429,11 +968,11 @@ namespace adder {
       }
 
       if (dst.symbol_index.has_value()) {
-        auto & symbol = meta.symbols[dst.symbol_index.value()];
+        auto & symbol = dst.symbol_index->get();
         assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
         assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
         store_to_constant_address(src, dst.address_offset, (uint8_t)sz);
-        add_relocation(relocation_linkage::internal, symbol.full_identifier, AD_IOFFSET(store_addr.addr));
+        add_relocation(dst.symbol_index->meta, symbol.full_identifier, AD_IOFFSET(store_addr.addr));
         return true;
       }
 
@@ -1456,7 +995,7 @@ namespace adder {
     //   }
     // 
     //   if (dst.symbol_index.has_value()) {
-    //     auto & symbol = meta.symbols[dst.symbol_index.value()];
+    //     auto & symbol = meta->symbols[dst.symbol_index.value()];
     //     assert(!symbol.has_local_storage() && "load_address_of is unable to locate symbols with local storage");
     //     assert((symbol.flags & symbol_flags::extern_) == symbol_flags::none && "Extern not implemented (needs additional indirection)");
     //     store_to_constant_address(src, dst.address_offset, (uint8_t)sz);
@@ -1649,9 +1188,10 @@ namespace adder {
       std::vector<uint64_t> functionOffset;
       functionOffset.resize(functions.size());
 
-      for (auto& symbol : meta.symbols) {
+      for (auto& ref : meta->symbol_references) {
+        auto &     symbol   = ref.get();
+        const bool isImport = ref.meta != meta.get();
         const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
-        const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
         if (symbol.has_local_storage() || symbol.is_parameter() || isInline) {
           continue;
         }
@@ -1661,8 +1201,11 @@ namespace adder {
         for (char c : symbol.full_identifier)
           symbolData.push_back(c);
         symbolData.push_back('\0');
+        for (char c : ref.meta->module_name)
+          symbolData.push_back(c);
+        symbolData.push_back('\0');
 
-        if (meta.is_function(symbol.type) && symbol.function_index.has_value()) {
+        if (symbol.type.is_function() && symbol.function_index.has_value()) {
           // Stub is generated for functions with extern linkage.
           // Relocation linkage handles address resolution
           auto& func = functions[symbol.function_index.value()];
@@ -1673,13 +1216,13 @@ namespace adder {
             func.instructions.begin(),
             func.instructions.end()
           );
-        }
-        else {
+        } else {
+          const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
           if (isExtern) {
             item.data_address = 0;
           }
           else {
-            size_t bytes = meta.get_type_size(symbol.type);
+            size_t bytes = symbol.type.get_size();
             // TODO: alignas(bytes)
             item.data_address = symbolData.size();
             symbolData.resize(symbolData.size() + bytes, 0);
@@ -1689,10 +1232,10 @@ namespace adder {
         symbolTable.push_back(item);
       }
 
-      static const auto write_relocations = [&]() { // 
+      const auto write_relocations = [&]() { // 
         std::map<relocation_linkage, std::map<std::string_view, std::vector<size_t>>> reloc_table;
         for (auto& reloc : relocations) {
-          const auto& func = meta.symbols[functions[reloc.function_id].symbol];
+          const auto& func = functions[reloc.function_id].symbol.get();
           reloc_table[reloc.linkage][reloc.symbol].push_back(symbolAddress[func.full_identifier] + reloc.offset);
         }
 
@@ -1735,20 +1278,23 @@ namespace adder {
       header.code_size    = compiledCode.size() * sizeof(vm::instruction);
 
       int64_t nextEntry = 0;
-      for (auto & symbol : meta.symbols) {
+      for (auto & ref : meta->symbol_references) {
+        auto &     symbol   = ref.get();
+        const bool isImport = ref.meta != meta.get();
         const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
         if (symbol.has_local_storage() || symbol.is_parameter() || isInline) {
           continue;
         }
 
         symbolTable[nextEntry].name_address += header.symbol_data_offset;
-        if (meta.is_function(symbol.type)) {
-          symbolTable[nextEntry].data_address += header.code_offset;
-        }
-        else {
-          const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
-          if (!isExtern) {
-            symbolTable[nextEntry].data_address += header.symbol_data_offset;
+        if (!isImport) {
+          if (symbol.type.is_function() && symbol.function_index.has_value()) {
+            symbolTable[nextEntry].data_address += header.code_offset;
+          } else {
+            const bool isExtern = (symbol.flags & symbol_flags::extern_) == symbol_flags::extern_;
+            if (!isExtern) {
+              symbolTable[nextEntry].data_address += header.symbol_data_offset;
+            }
           }
         }
         symbolAddress[symbol.full_identifier] += symbolTable[nextEntry].data_address;
@@ -1773,76 +1319,6 @@ namespace adder {
       bytes::insert(executable, compiledCode.begin(), compiledCode.end());
 
       return executable;
-    }
-
-    std::optional<std::string> get_type_name(ast const& ast, size_t statement) {
-      if (ast.is<expr::type_name>(statement)) {
-        return std::string(ast.get<expr::type_name>(statement).name);
-      }
-
-      if (ast.is<expr::type_modifier>(statement)) {
-        auto & modifier = ast.get<expr::type_modifier>(statement);
-        if (!(modifier.const_ || modifier.reference))
-          return get_type_name(ast, modifier.modified);
-        std::string ret = "[";
-        if (modifier.const_)
-          ret += "const";
-        if (modifier.reference)
-          ret += "ref";
-        ret += "]";
-        auto nested = get_type_name(ast, modifier.modified);
-        if (!nested.has_value())
-          return std::nullopt;
-        return ret + nested.value();
-      }
-
-      if (ast.is<expr::type_fn>(statement)) {
-        auto& fn = ast.get<expr::type_fn>(statement);
-        std::string ret = "(";
-        for (size_t i = 0; i < fn.argument_list.size(); ++i) {
-          auto arg = get_type_name(ast, fn.argument_list[i]);
-          if (!arg.has_value())
-            return std::nullopt;
-          ret += arg.value();
-          if (i != fn.argument_list.size() - 1)
-            ret += ",";
-        }
-
-        auto returnName = get_type_name(ast, fn.return_type);
-        if (!returnName.has_value())
-          return std::nullopt;
-
-        switch (fn.func_type) {
-        case functor_type::free:
-          return ret + ")=>" + returnName.value();
-        case functor_type::member:
-          return "mem " + ret + ")=>" + returnName.value();
-        case functor_type::initializer:
-          return "init " + ret + ")=>" + returnName.value();
-        case functor_type::operator_:
-          return "op " + ret + ")=>" + returnName.value();
-        }
-      }
-
-      return std::nullopt;
-    }
-
-    std::optional<std::string> get_symbol_name(ast const & ast, size_t statement, std::string_view const & identifier) {
-      auto typeName = get_type_name(ast, statement);
-      if (!typeName.has_value())
-        return std::nullopt;
-
-      return get_symbol_name(typeName.value(), identifier);
-    }
-
-    std::string get_symbol_name(std::string_view const & typeName, std::string_view const & identifier) {
-      return (std::string)adder::format(
-        "%.*s:%.*s",
-        typeName.length(),
-        typeName.data(),
-        identifier.length(),
-        identifier.data()
-      );
     }
   }
 }

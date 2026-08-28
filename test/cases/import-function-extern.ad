@@ -1,0 +1,8 @@
+
+from "import-test/lib" import sum_sequence;
+
+let test_result: int64 = 0;
+
+fn main() => void {
+  test_result = sum_sequence(0, 10);
+}

@@ -1,0 +1,8 @@
+
+from "import-test/lib" import mySharedFunction;
+
+let test_result: int64 = 0;
+
+fn main() => void {
+  test_result = mySharedFunction();
+}

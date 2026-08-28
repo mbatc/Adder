@@ -1,3 +1,4 @@
+#pragma once
 
 namespace adder {
   enum class relocation_linkage : uint8_t {

@@ -59,9 +59,43 @@
     <DisplayString Condition="code == adder::vm::op_code::compare_f64">comparef r{(int)compare.dst} r{(int)compare.lhs} r{(int)compare.rhs}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::call">call {call.addr}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::call_indirect">call_indirect r{(int)call_indirect.addr}</DisplayString>
-    <DisplayString Condition="code == adder::vm::op_code::call_native">call_native {call_native.callback,na}</DisplayString>
+    <DisplayString Condition="code == adder::vm::op_code::call_native">call_native {call_native.native_method_index,na}</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::ret">ret</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::exit">exit</DisplayString>
     <DisplayString Condition="code == adder::vm::op_code::noop">no-op</DisplayString>
+  </Type>
+  <Type Name="adder::compiler::type_reference">
+    <DisplayString>{(*meta->types)[index].identifier}</DisplayString>
+  </Type>
+  <Type Name="adder::compiler::symbol_reference">
+    <DisplayString>{meta->symbols[index].full_identifier}</DisplayString>
+  </Type>
+  <Type Name="adder::program_view_impl&lt;*&gt;">
+    <DisplayString>{*(header_t*)ptr}</DisplayString>
+    <Expand>
+      <Item Name="Header">*(header_t*)ptr</Item>
+      <Synthetic Name="[Symbols]">
+        <Expand>
+          <ArrayItems>
+            <Size>((header_t*)ptr)->symbol_count</Size>
+            <ValuePointer>(symbol_entry_t*)(ptr + ((header_t*)ptr)->symbol_table_offset)</ValuePointer>
+          </ArrayItems>
+        </Expand>
+      </Synthetic>
+      <Synthetic Name="[Instructions]">
+        <Expand>
+          <ArrayItems>
+            <Size>((header_t*)ptr)->code_size / sizeof(adder::vm::instruction)</Size>
+            <ValuePointer>(adder::vm::instruction*)(ptr + ((header_t*)ptr)->code_offset)</ValuePointer>
+          </ArrayItems>
+        </Expand>
+      </Synthetic>
+    </Expand>
+  </Type>
+  <Type Name="adder::program_symbol_table_entry">
+    <Expand>
+      <Item Name="Name">(char const*)name_address,na</Item>
+      <Item Name="Data">(void*)data_address</Item>
+    </Expand>
   </Type>
 </AutoVisualizer>

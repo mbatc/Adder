@@ -1,0 +1,7 @@
+
+// TODO: better import paths. Search from module location first
+from "lib" import mySharedValue;
+
+fn setSharedValue(val: int64) => void {
+  mySharedValue = val;
+}

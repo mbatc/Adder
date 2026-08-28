@@ -1,0 +1,14 @@
+entry: ()=>void:main
+
+symbol:
+  name: ()=>void:main
+  exists: true
+  
+symbol:
+  name: int64:mySharedValue
+  exists: true
+
+symbol:
+  name: int64:test_result
+  exists: true
+  value: 1234

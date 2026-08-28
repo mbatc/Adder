@@ -3,6 +3,10 @@
 #include <vector>
 #include <list>
 #include <string>
+#include <unordered_map>
+#include <memory>
+
+#include "program.h"
 
 namespace adder {
   template<bool Const>
@@ -12,6 +16,10 @@ namespace adder {
   using program_view       = program_view_impl<false>;
   using const_program_view = program_view_impl<true>;
 
+  namespace compiler {
+    struct context;
+  }
+
   namespace vm {
     using register_value = uint64_t;
     using register_index = uint8_t;
@@ -20,10 +28,16 @@ namespace adder {
     struct call_context;
     struct machine;
 
-    uint8_t* call_context_read_arg(call_context * ctx, size_t sz);
-    machine* call_context_get_machine(call_context * ctx);
-
+    uint8_t * call_context_read_arg(call_context * ctx, size_t sz);
+    machine * call_context_get_machine(call_context * ctx);
+    void    * call_context_get_user_data(call_context * ctx);
+    
     using native_method_t = void (*)(call_context *);
+
+    struct native_method_binding {
+      native_method_t callback;
+      void *          user_data;
+    };
 
     enum class op_code : uint8_t {
       exit,               ///< Load a value from a memory address
@@ -38,6 +52,10 @@ namespace adder {
       store_value_addr,   ///< Store a constant value to a constant address
       store_value_offset, ///< Store a constant value to an address (stored in a register) with some offset
       set,                ///< Set the value of a register
+      itof32,             ///< Convert the value in src from an integer to a float. Store the result in dst.
+      itof64,             ///< Convert the value in src from an integer to a float. Store the result in dst.
+      f32toi,             ///< Convert the value in src from a float to an integer. Store the result in dst.
+      f64toi,             ///< Convert the value in src from a float to an integer. Store the result in dst.
       add_i64,            ///< Add two registers as integers
       add_i64_constant,   ///< Add two integers lhs is a register, rhs is a constant
       add_f64,            ///< Add two registers as floats
@@ -145,6 +163,11 @@ namespace adder {
       register_index dst;
     };
 
+    struct op_code_xtox_args {
+      register_index dst;
+      register_index src;
+    };
+
     struct op_code_binary_op_args {
       register_index dst;
       register_index lhs;
@@ -249,7 +272,7 @@ namespace adder {
     };
 
     template<> struct op_code_args<op_code::call_native> {
-      native_method_t callback;
+      address_t native_method_index; ///< Callback bound via the extern_method_lookup.
     };
 
     template<> struct op_code_args<op_code::ret> {};
@@ -273,6 +296,7 @@ namespace adder {
         op_code_args<op_code::store_value_offset> store_value_offset;
         op_code_args<op_code::store_value_addr> store_value_addr;
         op_code_args<op_code::set> set;
+        op_code_xtox_args xtox;
         op_code_binary_op_args add;
         op_code_args<op_code::add_i64_constant> add_constant;
         op_code_binary_op_args sub;
@@ -334,7 +358,7 @@ namespace adder {
     inline static constexpr size_t register_count = (size_t)register_names::count;
 
     struct machine {
-      machine(allocator *allocator)
+      machine(allocator * allocator)
         : heap_allocator(allocator) {
         const size_t initialStackSize = 4 * 1024 * 1024; // 4mb
         stack.base = (uint8_t*)heap_allocator->allocate(initialStackSize);
@@ -349,7 +373,8 @@ namespace adder {
         register_value value;
         uint64_t       u64;
         int64_t        i64;
-        double         d64;
+        double         f64;
+        float          f32;
         void*          ptr;
         uint8_t*       data;
       } registers[register_count];
@@ -367,12 +392,38 @@ namespace adder {
 
       void * user_data = nullptr;
 
-      address_t (*lookup_extern_symbol)(machine * vm, char const * symbol) = nullptr;
+      native_method_binding (*lookup_extern_symbol)(machine * vm, char const * symbol) = nullptr;
+
+      std::string (*resolve_module_name)(adder::vm::machine * vm, const char * source_module_name, char const * import_name);
+      std::string (*load_module_source)(machine * vm, char const * module_name);
+
+      address_t load_extern_symbol(char const * symbol) {
+        auto it = std::find_if(
+          registered_extern_method_names.begin(),
+          registered_extern_method_names.end(),
+          [symbol](const std::string & o) { return o == symbol; }
+        );
+        if (it != registered_extern_method_names.end())
+          return it - registered_extern_method_names.begin();
+
+        native_method_binding binding = lookup_extern_symbol(this, symbol);
+        registered_extern_method_names.push_back(symbol);
+        registered_extern_methods.push_back(binding);
+        return registered_extern_methods.size() - 1;
+      }
+
+      std::shared_ptr<compiler::context> compiler;
+
+      std::unordered_map<std::string, const_program_view> loaded_modules;
+
+      std::vector<std::string>           registered_extern_method_names;
+      std::vector<native_method_binding> registered_extern_methods;
     };
 
     void relocate_program(machine * vm, program_view const & program);
 
-    const_program_view load_program(machine * vm, program_view const & program, bool relocated = true);
+    const_program_view load_module(machine * vm, std::string const & module_name);
+    const_program_view load_program(machine * vm, std::string const & module_name, program_view const & program, bool relocated = true);
 
     void* compile_call_handle(machine* vm, program_symbol_table_entry const & symbol);
     void* compile_call_handle(machine* vm, address_t const & routineAddress);
@@ -387,6 +438,7 @@ namespace adder {
     /// Pop a call parameter.
     /// It is up to the caller to pop the correct number of bytes and to destruct the parameters.
     void* call_pop_parameter(machine* vm, size_t bytes);
+
     void call(machine* vm, void * handle);
   }
 

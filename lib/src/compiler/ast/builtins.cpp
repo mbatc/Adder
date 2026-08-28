@@ -12,19 +12,49 @@ namespace adder {
           return false;
         }
 
-        std::optional<size_t> selfType = program->meta.remove_reference(program->get_value_type(self.value()));
-        std::optional<size_t> argType  = program->meta.remove_reference(program->get_value_type(arg.value()));
-        if (!(program->meta.is_integer(selfType)
-          && program->meta.is_integer(argType)))
+        std::optional<type_reference> selfType = program->get_value_type(self.value()).remove_reference();
+        std::optional<type_reference> argType  = program->get_value_type(arg.value()).remove_reference();
+        if (!(is_integer(selfType) && is_integer(argType)))
           return false;
 
-        const uint8_t sz = (uint8_t)program->meta.get_type_size(selfType.value());
+        const uint8_t      sz = (uint8_t)selfType->get_size();
         vm::register_index addr = program->load_value_of(self.value()); // self is a reference, so load the address it points to.
         if (arg.value().constant.has_value()) {
           program->store_constant(arg.value().constant.value(), addr, sz);
         }
         else {
           vm::register_index value = program->load_value_of(arg.value());
+          program->store(value, addr, sz);
+          program->release_register(value);
+        }
+        program->release_register(addr);
+        return true;
+      }
+
+      bool init_int_flt(program_builder * program) {
+        auto self = program->find_value_by_identifier("self");
+        auto arg  = program->find_value_by_identifier("a");
+        if (!self.has_value() || !arg.has_value()) {
+          return false;
+        }
+
+        std::optional<type_reference> selfType = program->get_value_type(self.value()).remove_reference();
+        std::optional<type_reference> argType  = program->get_value_type(arg.value()).remove_reference();
+
+        if (!(is_integer(selfType) && is_float(argType)))
+          return false;
+
+        const uint8_t      sz        = (uint8_t)selfType->get_size();
+        const uint8_t      floatSize = (uint8_t)argType->get_size();
+        vm::register_index addr =
+          program->load_value_of(self.value()); // self is a reference, so load the address it points to.
+        if (arg.value().constant.has_value()) {
+          double const * pAsFloat = (double const *)&arg.value().constant.value();
+          program->store_constant((int64_t)*pAsFloat, addr, sz);
+        }
+        else {
+          vm::register_index value = program->load_value_of(arg.value());
+          program->ftoi(value, value, floatSize);
           program->store(value, addr, sz);
           program->release_register(value);
         }
@@ -40,19 +70,19 @@ namespace adder {
         }
 
         auto const ret = program->get_return_value();
-        std::optional<size_t> retType = program->meta.remove_reference(program->get_value_type(ret));
-        std::optional<size_t> lhsType = program->meta.remove_reference(program->get_value_type(a.value()));
-        std::optional<size_t> rhsType  = program->meta.remove_reference(program->get_value_type(b.value()));
-        if (!(program->meta.is_integer(retType)
-          && program->meta.is_integer(lhsType)
-          && program->meta.is_integer(rhsType)))
+        std::optional<type_reference> retType = remove_reference(program->get_value_type(ret));
+        std::optional<type_reference> lhsType = remove_reference(program->get_value_type(a.value()));
+        std::optional<type_reference> rhsType = remove_reference(program->get_value_type(b.value()));
+        if (!(is_integer(retType)
+          && is_integer(lhsType)
+          && is_integer(rhsType)))
           return false;
 
         vm::register_index lhs  = program->load_value_of(a.value()); // Load address of ref
         vm::register_index rhs  = program->load_value_of(b.value()); // Load value of rhs
         vm::register_index addr = program->load_address_of(ret);     // Load a
 
-        const uint8_t sz = (uint8_t)program->meta.get_type_size(lhsType.value());
+        const uint8_t sz = (uint8_t)get_size(lhsType);
 
         program->store(rhs, lhs, sz);
         program->store(lhs, addr, sizeof(vm::address_t)); // Init reference
@@ -73,7 +103,7 @@ namespace adder {
         auto const ret = program->get_return_value();
         // Could abstract 'register_index' with 'register/instruction_operand' 
         // This might store a register index + optional offset along with if it is indirect or not.
-        size_t const sz = program->meta.get_type_size(a->type_index.value());
+        size_t const sz = get_size(a->type_info);
         vm::register_index const lhs  = program->load_value_of(a.value());
         vm::register_index const rhs  = program->load_value_of(b.value());
         vm::register_index const addr = program->load_address_of(ret);
@@ -122,12 +152,12 @@ namespace adder {
           return false;
         }
         auto const ret = program->get_return_value();
-        std::optional<size_t> retType = program->meta.remove_reference(program->get_value_type(ret));
-        std::optional<size_t> lhsType = program->meta.remove_reference(program->get_value_type(a.value()));
-        std::optional<size_t> rhsType  = program->meta.remove_reference(program->get_value_type(b.value()));
-        if (!(program->meta.is_bool(retType)
-          && program->meta.is_integer(lhsType)
-          && program->meta.is_integer(rhsType)))
+        std::optional<type_reference> retType = remove_reference(program->get_value_type(ret));
+        std::optional<type_reference> lhsType = remove_reference(program->get_value_type(a.value()));
+        std::optional<type_reference> rhsType  = remove_reference(program->get_value_type(b.value()));
+        if (!(is_bool(retType)
+          && is_integer(lhsType)
+          && is_integer(rhsType)))
           return false;
 
         vm::register_index lhs     = program->load_value_of(a.value());
@@ -139,7 +169,7 @@ namespace adder {
         program->bitwise_and_constant(result, cmpBits);
         program->set_non_zero(result, invert ? 0 : 1, invert ? 1 : 0);
 
-        const uint8_t sz = (uint8_t)program->meta.get_type_size(retType.value());
+        const uint8_t sz = (uint8_t)get_size(retType);
         program->store(result, retAddr, sz);
 
         program->release_register(result);
@@ -162,7 +192,7 @@ namespace adder {
       }
 
       bool lt_int_int(program_builder * program) {
-        return cmp_int_int(program, vm::cmp_lt_bit, false);      
+        return cmp_int_int(program, vm::cmp_lt_bit, false);
       }
 
       bool le_int_int(program_builder * program) {
@@ -170,7 +200,204 @@ namespace adder {
       }
       
       bool ge_int_int(program_builder * program) {
-        return cmp_int_int(program, vm::cmp_lt_bit, true);      
+        return cmp_int_int(program, vm::cmp_lt_bit, true);
+      }
+
+      bool init_flt_flt(program_builder * program) {
+        auto self = program->find_value_by_identifier("self");
+        auto arg  = program->find_value_by_identifier("a");
+        if (!self.has_value() || !arg.has_value()) {
+          return false;
+        }
+
+        std::optional<type_reference> selfType = remove_reference(program->get_value_type(self.value()));
+        std::optional<type_reference> argType  = remove_reference(program->get_value_type(arg.value()));
+        if (!(is_float(selfType)
+          && is_float(argType)))
+          return false;
+
+        const uint8_t sz = (uint8_t)get_size(selfType);
+        vm::register_index addr = program->load_value_of(self.value()); // self is a reference, so load the address it points to.
+        if (arg.value().constant.has_value()) {
+          program->store_constant(arg.value().constant.value(), addr, sz);
+        }
+        else {
+          vm::register_index value = program->load_value_of(arg.value());
+          program->store(value, addr, sz);
+          program->release_register(value);
+        }
+        program->release_register(addr);
+        return true;
+      }
+
+      bool init_flt_int(program_builder * program) {
+        auto self = program->find_value_by_identifier("self");
+        auto arg  = program->find_value_by_identifier("a");
+        if (!self.has_value() || !arg.has_value()) {
+          return false;
+        }
+
+        std::optional<type_reference> selfType = remove_reference(program->get_value_type(self.value()));
+        std::optional<type_reference> argType  = remove_reference(program->get_value_type(arg.value()));
+        if (!(is_float(selfType)
+          && is_integer(argType)))
+          return false;
+
+        const uint8_t floatSize = (uint8_t)get_size(selfType);
+        vm::register_index addr = program->load_value_of(self.value()); // self is a reference, so load the address it points to.
+        if (arg.value().constant.has_value()) {
+          double const * pAsFloat = (double const *)&arg.value().constant.value();
+          program->store_constant((int64_t)*pAsFloat, addr, floatSize);
+        }
+        else {
+          vm::register_index value = program->load_value_of(arg.value());
+          program->itof(value, value, floatSize);
+          program->store(value, addr, floatSize);
+          program->release_register(value);
+        }
+        program->release_register(addr);
+        return true;
+      }
+
+      bool flt_assign_flt(program_builder * program) {
+        auto const a = program->find_value_by_identifier("a");
+        auto const b = program->find_value_by_identifier("b");
+        if (!a.has_value() || !b.has_value()) {
+          return false;
+        }
+
+        auto const ret = program->get_return_value();
+        std::optional<type_reference> retType = remove_reference(program->get_value_type(ret));
+        std::optional<type_reference> lhsType = remove_reference(program->get_value_type(a.value()));
+        std::optional<type_reference> rhsType = remove_reference(program->get_value_type(b.value()));
+        if (!(is_float(retType)
+          && is_float(lhsType)
+          && is_float(rhsType)))
+          return false;
+
+        vm::register_index lhs  = program->load_value_of(a.value()); // Load address of ref
+        vm::register_index rhs  = program->load_value_of(b.value()); // Load value of rhs
+        vm::register_index addr = program->load_address_of(ret);     // Load a
+
+        const uint8_t sz = (uint8_t)get_size(lhsType);
+
+        program->store(rhs, lhs, sz);
+        program->store(lhs, addr, sizeof(vm::address_t)); // Init reference
+
+        program->release_register(addr);
+        program->release_register(rhs);
+        program->release_register(lhs);
+        return true;
+      }
+
+      bool cmp_flt_flt(program_builder* program, uint8_t cmpBits, bool invert) {
+        auto const a = program->find_value_by_identifier("a");
+        auto const b = program->find_value_by_identifier("b");
+        if (!a.has_value() || !b.has_value()) {
+          return false;
+        }
+        auto const ret = program->get_return_value();
+        std::optional<type_reference> retType  = remove_reference(program->get_value_type(ret));
+        std::optional<type_reference> lhsType = remove_reference(program->get_value_type(a.value()));
+        std::optional<type_reference> rhsType  = remove_reference(program->get_value_type(b.value()));
+        if (!(is_bool(retType)
+          && is_float(lhsType)
+          && is_float(rhsType)))
+          return false;
+
+        vm::register_index lhs     = program->load_value_of(a.value());
+        vm::register_index rhs     = program->load_value_of(b.value());
+        vm::register_index retAddr = program->load_address_of(ret);
+        vm::register_index result  = program->pin_register();
+
+        program->comparef(result, lhs, rhs);
+        program->bitwise_and_constant(result, cmpBits);
+        program->set_non_zero(result, invert ? 0 : 1, invert ? 1 : 0);
+
+        const uint8_t sz = (uint8_t)get_size(retType);
+        program->store(result, retAddr, sz);
+
+        program->release_register(result);
+        program->release_register(retAddr);
+        program->release_register(rhs);
+        program->release_register(lhs);
+        return true;
+      }
+
+      bool eq_flt_flt(program_builder * program) {
+        return cmp_flt_flt(program, vm::cmp_eq_bit, false);
+      }
+
+      bool ne_flt_flt(program_builder * program) {
+        return cmp_flt_flt(program, vm::cmp_eq_bit, true);
+      }
+
+      bool gt_flt_flt(program_builder * program) {
+        return cmp_flt_flt(program, vm::cmp_gt_bit, false);
+      }
+
+      bool lt_flt_flt(program_builder * program) {
+        return cmp_flt_flt(program, vm::cmp_lt_bit, false);
+      }
+
+      bool le_flt_flt(program_builder * program) {
+        return cmp_flt_flt(program, vm::cmp_gt_bit, true);
+      }
+
+      bool ge_flt_flt(program_builder * program) {
+        return cmp_flt_flt(program, vm::cmp_lt_bit, true);
+      }
+
+      bool op_flt_flt(program_builder * program, expr::operator_type op) {
+        auto const a = program->find_value_by_identifier("a");
+        auto const b = program->find_value_by_identifier("b");
+        if (!a.has_value() || !b.has_value()) {
+          return false;
+        }
+
+        auto const ret = program->get_return_value();
+        // Could abstract 'register_index' with 'register/instruction_operand' 
+        // This might store a register index + optional offset along with if it is indirect or not.
+        size_t const sz = get_size(a->type_info);
+        vm::register_index const lhs  = program->load_value_of(a.value());
+        vm::register_index const rhs  = program->load_value_of(b.value());
+        vm::register_index const addr = program->load_address_of(ret);
+        switch (op)
+        {
+        case expr::operator_type::add:
+          program->addf(lhs, lhs, rhs);
+          break;
+        case expr::operator_type::minus:
+          program->subf(lhs, lhs, rhs);
+          break;
+        case expr::operator_type::multiply:
+          program->mulf(lhs, lhs, rhs);
+          break;
+        case expr::operator_type::divide:
+          program->divf(lhs, lhs, rhs);
+          break;
+        }
+        program->store(lhs, addr, (uint8_t)sz);
+        program->release_register(addr);
+        program->release_register(rhs);
+        program->release_register(lhs);
+        return true;
+      }
+
+      bool add_flt_flt(program_builder * program) {
+        return op_flt_flt(program, expr::operator_type::add);
+      }
+
+      bool sub_flt_flt(program_builder * program) {
+        return op_flt_flt(program, expr::operator_type::minus);
+      }
+
+      bool mul_flt_flt(program_builder * program) {
+        return op_flt_flt(program, expr::operator_type::multiply);
+      }
+
+      bool div_flt_flt(program_builder * program) {
+        return op_flt_flt(program, expr::operator_type::divide);
       }
 
       bool init_bool_bool(program_builder * program) {
@@ -180,13 +407,13 @@ namespace adder {
           return false;
         }
 
-        std::optional<size_t> selfType = program->meta.remove_reference(program->get_value_type(self.value()));
-        std::optional<size_t> argType  = program->meta.remove_reference(program->get_value_type(arg.value()));
-        if (!(program->meta.is_bool(selfType)
-          && program->meta.is_bool(argType)))
+        std::optional<type_reference> selfType = remove_reference(program->get_value_type(self.value()));
+        std::optional<type_reference> argType  = remove_reference(program->get_value_type(arg.value()));
+        if (!(is_bool(selfType)
+          && is_bool(argType)))
           return false;
 
-        const uint8_t sz = (uint8_t)program->meta.get_type_size(selfType.value());
+        const uint8_t sz = (uint8_t)get_size(selfType);
         vm::register_index addr = program->load_value_of(self.value()); // self is a reference, so load the address it points to.
         if (arg.value().constant.has_value()) {
           program->store_constant(arg.value().constant.value(), addr, sz);
@@ -208,19 +435,19 @@ namespace adder {
         }
 
         auto const ret = program->get_return_value();
-        std::optional<size_t> retType = program->meta.remove_reference(program->get_value_type(ret));
-        std::optional<size_t> lhsType = program->meta.remove_reference(program->get_value_type(a.value()));
-        std::optional<size_t> rhsType  = program->meta.remove_reference(program->get_value_type(b.value()));
-        if (!(program->meta.is_bool(retType)
-          && program->meta.is_bool(lhsType)
-          && program->meta.is_bool(rhsType)))
+        std::optional<type_reference> retType = remove_reference(program->get_value_type(ret));
+        std::optional<type_reference> lhsType = remove_reference(program->get_value_type(a.value()));
+        std::optional<type_reference> rhsType  = remove_reference(program->get_value_type(b.value()));
+        if (!(is_bool(retType)
+          && is_bool(lhsType)
+          && is_bool(rhsType)))
           return false;
 
         vm::register_index lhs  = program->load_value_of(a.value()); // Load address of ref
         vm::register_index rhs  = program->load_value_of(b.value()); // Load value of rhs
         vm::register_index addr = program->load_address_of(ret);     // Load a
 
-        const uint8_t sz = (uint8_t)program->meta.get_type_size(lhsType.value());
+        const uint8_t sz = (uint8_t)get_size(lhsType);
 
         program->store(rhs, lhs, sz);
         program->store(lhs, addr, sizeof(vm::address_t)); // Init reference
@@ -339,8 +566,8 @@ namespace adder {
           declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint32),  builtin::init_int_int),
           declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint16),  builtin::init_int_int),
           declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint8),   builtin::init_int_int),
-          // declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float32), builtin::init_int_float),
-          // declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float64), builtin::init_int_float),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float32), builtin::init_int_flt),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float64), builtin::init_int_flt),
 
           declare_binary_operator(tree, expr::operator_type::assign,   refType, refType, valueType, builtin::int_assign_int),
           declare_binary_operator(tree, expr::operator_type::add,      valueType, builtin::add_int_int),
@@ -357,7 +584,53 @@ namespace adder {
         }
       );
     }
-    
+
+    void declare_float(ast * tree, expr::block * scope, type_primitive primitive) {
+      expr::type_name selfTypeName;
+      selfTypeName.name = get_primitive_type_name(primitive);
+
+      expr::type_modifier selfType;
+      selfType.reference = true;
+      selfType.modified = tree->add(selfTypeName);
+
+      const size_t valueType = tree->add(selfTypeName);
+      const size_t refType   = tree->add(selfType);
+
+      expr::type_name boolTypeName;
+      boolTypeName.name = get_primitive_type_name(type_primitive::bool_);
+      const size_t boolType = tree->add(boolTypeName);
+
+      scope->statements.insert(
+        scope->statements.end(),
+        {
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float32), builtin::init_flt_flt),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::float64), builtin::init_flt_flt),
+
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int64),   builtin::init_flt_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int32),   builtin::init_flt_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int16),   builtin::init_flt_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::int8),    builtin::init_flt_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint64),  builtin::init_flt_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint32),  builtin::init_flt_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint16),  builtin::init_flt_int),
+          declare_initializer(tree, refType, get_primitive_type_name(type_primitive::uint8),   builtin::init_flt_int),
+
+          declare_binary_operator(tree, expr::operator_type::assign,   refType, refType, valueType, builtin::flt_assign_flt),
+          declare_binary_operator(tree, expr::operator_type::add,      valueType, builtin::add_flt_flt),
+          declare_binary_operator(tree, expr::operator_type::minus,    valueType, builtin::sub_flt_flt),
+          declare_binary_operator(tree, expr::operator_type::divide,   valueType, builtin::div_flt_flt),
+          declare_binary_operator(tree, expr::operator_type::multiply, valueType, builtin::mul_flt_flt),
+
+          declare_binary_operator(tree, expr::operator_type::equal, boolType, valueType, valueType, builtin::eq_flt_flt),
+          declare_binary_operator(tree, expr::operator_type::not_equal, boolType, valueType, valueType, builtin::ne_flt_flt),
+          declare_binary_operator(tree, expr::operator_type::greater_equal, boolType, valueType, valueType, builtin::ge_flt_flt),
+          declare_binary_operator(tree, expr::operator_type::less_equal, boolType, valueType, valueType, builtin::le_flt_flt),
+          declare_binary_operator(tree, expr::operator_type::less, boolType, valueType, valueType, builtin::lt_flt_flt),
+          declare_binary_operator(tree, expr::operator_type::greater, boolType, valueType, valueType, builtin::gt_flt_flt),
+        }
+        );
+    }
+
     void declare_boolean(ast* tree, expr::block* scope) {expr::type_name selfTypeName;
       selfTypeName.name = get_primitive_type_name(type_primitive::bool_);
 
@@ -386,25 +659,53 @@ namespace adder {
       );
     }
 
-    void define_builtins(ast* tree, expr::block *scope) {
+    ast builtins_module() {
+      ast tree;
+      expr::block scope;
+
+      // scope.statements.insert(
+      //   scope.statements.end(),
+      //   {
+      //     declare_func(&tree, { functor_type::free, "$module_init", "void", {}, nullptr }),
+      //     declare_func(&tree, { functor_type::free, "$module_destroy", "void", {}, nullptr }),
+      //   }
+      // );
+
+      for (int32_t i = 0; i < (int32_t)type_primitive::count; ++i) {
+        expr::type_declaration decl;
+        decl.desc       = type_primitive{i};
+        decl.identifier = get_primitive_type_name(type_primitive{i});
+        scope.statements.push_back(tree.add(decl));
+      }
+
+      declare_integer(&tree, &scope, type_primitive::int64);
+      declare_integer(&tree, &scope, type_primitive::int32);
+      declare_integer(&tree, &scope, type_primitive::int16);
+      declare_integer(&tree, &scope, type_primitive::int8);
+      declare_integer(&tree, &scope, type_primitive::uint64);
+      declare_integer(&tree, &scope, type_primitive::uint32);
+      declare_integer(&tree, &scope, type_primitive::uint16);
+      declare_integer(&tree, &scope, type_primitive::uint8);
+
+      declare_float(&tree, &scope, type_primitive::float32);
+      declare_float(&tree, &scope, type_primitive::float64);
+
+      declare_boolean(&tree, &scope);
+
+      tree.statements.push_back(std::move(scope));
+
+      return tree;
+    }
+
+    void import_builtins(ast * tree, expr::block * scope) {
       scope->statements.insert(
         scope->statements.end(),
         {
+          tree->add(expr::import_module{ "$builtins" }),
           declare_func(tree, { functor_type::free, "$module_init", "void", {}, nullptr }),
           declare_func(tree, { functor_type::free, "$module_destroy", "void", {}, nullptr }),
         }
       );
-
-      declare_integer(tree, scope, type_primitive::int64);
-      declare_integer(tree, scope, type_primitive::int32);
-      declare_integer(tree, scope, type_primitive::int16);
-      declare_integer(tree, scope, type_primitive::int8);
-      declare_integer(tree, scope, type_primitive::uint64);
-      declare_integer(tree, scope, type_primitive::uint32);
-      declare_integer(tree, scope, type_primitive::uint16);
-      declare_integer(tree, scope, type_primitive::uint8);
-
-      declare_boolean(tree, scope);
     }
   }
 }

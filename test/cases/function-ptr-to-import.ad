@@ -1,0 +1,10 @@
+
+from "import-test/lib" import mySharedFunction;
+
+let myLocalSharedFunctionPtr: [ref]()=>int64 = mySharedFunction;
+
+let test_result: int64 = 0;
+
+fn main() => void {
+  test_result = myLocalSharedFunctionPtr();
+}

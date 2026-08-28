@@ -82,6 +82,7 @@ namespace adder {
       uint8_t * stack_start = nullptr;
       uint8_t * stack       = nullptr;
       machine * vm          = nullptr;
+      void    * user_data   = nullptr;
     };
 
     uint8_t* call_context_read_arg(call_context * ctx, size_t sz){
@@ -91,6 +92,10 @@ namespace adder {
 
     machine* call_context_get_machine(call_context* ctx) {
       return ctx->vm;
+    }
+
+    void * call_context_get_user_data(call_context * ctx) {
+      return ctx->user_data;
     }
 
     size_t instruction_size(op_code /*code*/) {
@@ -113,27 +118,36 @@ namespace adder {
       // auto externSymbols = program.get_extern_symbols();
 
       for (size_t i = 0; i < header.symbol_count; ++i) {
-        if (symbols[i].data_address == 0)
-          continue; // extern, skip (could do with a flag instead of infering this)
-        symbols[i].data_address += base;
         symbols[i].name_address += base;
+        if (symbols[i].data_address != 0) // skip extern (could do with a flag instead of infering this)
+          symbols[i].data_address += base;
       }
 
       for (program_relocation_table_entry * relocation = program.first_relocation_entry(); relocation != nullptr; relocation = program.next_relocation_entry(relocation)) {
+        std::string_view symbol_name = (char const *)symbols[relocation->symbol].name_address;
+        std::string_view module_name = symbol_name.data() + symbol_name.length() + 1;
+
         address_t addr = 0;
         switch (relocation->linkage) {
         case relocation_linkage::internal:
           addr = symbols[relocation->symbol].data_address;
+          assert(addr != 0 && "Failed to find symbol address. TODO: Fail more gracefully.");
           break;
+        case relocation_linkage::import_: {
+          std::optional<const_program_view> imported_module = load_module(vm, std::string(module_name));
+          assert(imported_module.has_value() && "Failed to load imported module. TODO: Fail more gracefully.");
+          auto imported_symbol = imported_module->find_public_symbol(symbol_name);
+          assert(imported_symbol != nullptr && "Failed to find imported symbol. TODO: Fail more gracefully.");
+          addr = symbols[relocation->symbol].data_address = imported_symbol->data_address;
+          break;
+        }
         case relocation_linkage::extern_:
-          addr = vm->lookup_extern_symbol(vm, (char const *)symbols[relocation->symbol].name_address);
+          addr = vm->load_extern_symbol((char const *)symbols[relocation->symbol].name_address);
           break;
         default:
           assert(false && "relocation linkage not supported (or implemented)");
           break;
         }
-
-        assert(addr != 0 && "Failed to find symbol address. TODO: Fail more gracefully.");
 
         uint64_t const* offsets = (uint64_t const*)(relocation + 1);
         for (size_t i = 0; i < relocation->count; ++i) {
@@ -142,21 +156,41 @@ namespace adder {
       }
     }
 
-    const_program_view load_program(vm::machine* vm, program_view const& program, bool relocated) {
+    const_program_view load_module(machine * vm, std::string const & module_name) {
+      auto found = vm->loaded_modules.find(module_name);
+
+      if (found != vm->loaded_modules.end())
+        return found->second;
+
+      std::optional<program> module = compile(vm, module_name);
+      assert(module.has_value() && "Failed to compile module. TODO: Fail more gracefully");
+
+      return load_program(vm, module_name, module->view(), true);
+    }
+
+    const_program_view load_program(vm::machine * vm, std::string const & module_name,
+                                                  program_view const & program,
+                                    bool relocated) {
       // Reserve space for the program
       program_view loaded = { (uint8_t*)vm->heap_allocator->allocate(program.size()), program.size() };
+
       // Write to memory
       memcpy(loaded.data(), program.data(), program.size());
+
+      // Register loaded module
+      vm->loaded_modules[(std::string)module_name] = { loaded.data(), loaded.size() };
+
       // Relocate the program to the loaded base address
       if (relocated) {
         relocate_program(vm, loaded);
       }
 
       void * initializer = adder::vm::compile_call_handle(vm, *loaded.find_public_symbol("()=>void:$module_init"));
+      // assert(false && "This method sets the instruction in the main() method to a no-op for function-ptr-to-import.ad");
       adder::vm::call(vm, initializer);
       adder::vm::free(vm, initializer);
 
-      return { loaded.data(), loaded.size() };
+      return const_program_view{loaded.data(), loaded.size()};
     }
 
     namespace op {
@@ -215,6 +249,22 @@ namespace adder {
         vm->registers[args.dst].value = args.val;
       }
 
+      inline void itof32(machine * vm, op_code_xtox_args const & args) {
+        vm->registers[args.dst].f32 = (float)vm->registers[args.dst].i64;
+      }
+
+      inline void f32toi(machine * vm, op_code_xtox_args const & args) {
+        vm->registers[args.dst].i64 = (int64_t)vm->registers[args.dst].f32;
+      }
+
+      inline void itof64(machine * vm, op_code_xtox_args const & args) {
+        vm->registers[args.dst].f64 = (double)vm->registers[args.dst].i64;
+      }
+
+      inline void f64toi(machine * vm, op_code_xtox_args const & args) {
+        vm->registers[args.dst].i64 = (int64_t)vm->registers[args.dst].f64;
+      }
+
       inline void add_i64(machine * vm, op_code_binary_op_args const & args) {
         const int64_t lhs = vm->registers[args.lhs].i64;
         const int64_t rhs = vm->registers[args.rhs].i64;
@@ -228,9 +278,9 @@ namespace adder {
       }
 
       inline void add_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
-        vm->registers[args.dst].d64 = lhs + rhs;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
+        vm->registers[args.dst].f64 = lhs + rhs;
       }
 
       inline void sub_i64(machine * vm, op_code_binary_op_args const & args) {
@@ -240,9 +290,9 @@ namespace adder {
       }
 
       inline void sub_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
-        vm->registers[args.dst].d64 = lhs - rhs;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
+        vm->registers[args.dst].f64 = lhs - rhs;
       }
 
       inline void mul_i64(machine * vm, op_code_binary_op_args const & args) {
@@ -252,9 +302,9 @@ namespace adder {
       }
 
       inline void mul_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
-        vm->registers[args.dst].d64 = lhs * rhs;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
+        vm->registers[args.dst].f64 = lhs * rhs;
       }
 
       inline void div_i64(machine * vm, op_code_binary_op_args const & args) {
@@ -264,9 +314,9 @@ namespace adder {
       }
 
       inline void div_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
-        vm->registers[args.dst].d64 = lhs / rhs;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
+        vm->registers[args.dst].f64 = lhs / rhs;
       }
 
       inline void alloc_stack(machine * vm, op_code_args<op_code::alloc_stack> const & args) {
@@ -356,8 +406,8 @@ namespace adder {
       }
 
       inline void compare_f64(machine * vm, op_code_binary_op_args const & args) {
-        const double lhs = vm->registers[args.lhs].d64;
-        const double rhs = vm->registers[args.rhs].d64;
+        const double lhs = vm->registers[args.lhs].f64;
+        const double rhs = vm->registers[args.rhs].f64;
 
         uint64_t &dst = vm->registers[args.dst].u64;
         dst = 0;
@@ -387,10 +437,12 @@ namespace adder {
       }
 
       inline void call_native(machine * vm, op_code_args<op_code::call_native> const & args) {
+        auto const & binding = vm->registered_extern_methods[args.native_method_index];
         call_context ctx;
-        ctx.stack = ctx.stack_start = vm->registers[vm::register_names::sp].data;
-        ctx.vm    = vm;
-        args.callback(&ctx);
+        ctx.stack     = ctx.stack_start = vm->registers[vm::register_names::sp].data;
+        ctx.vm        = vm;
+        ctx.user_data = binding.user_data;
+        binding.callback(&ctx);
       }
 
       inline void ret(machine * vm, op_code_args<op_code::ret> const &) {
@@ -412,6 +464,10 @@ namespace adder {
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store_value_addr); op::store_value_addr(vm, inst->store_value_addr); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::store_value_offset); op::store_value_offset(vm, inst->store_value_offset); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::set); op::set(vm, inst->set); },
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::itof32); op::itof32(vm, inst->xtox); },
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::itof64); op::itof64(vm, inst->xtox); },
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::f32toi); op::f32toi(vm, inst->xtox); },
+      [](machine * vm, instruction const * inst) { assert(inst->code == op_code::f64toi); op::f64toi(vm, inst->xtox); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::add_i64); op::add_i64(vm, inst->add); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::add_i64_constant); op::add_i64_constant(vm, inst->add_constant); },
       [](machine * vm, instruction const * inst) { assert(inst->code == op_code::add_f64); op::add_f64(vm, inst->add); },
@@ -516,7 +572,7 @@ namespace adder {
       {
         int i = 0;
         for (auto& reg : vm->registers)
-          std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.d64 << "]" << std::endl;
+          std::cout << register_to_string(i++) << ": [" << reg.u64 << ", " << reg.i64 << ", " << reg.f64 << "]" << std::endl;
 
         std::cout << "\nStack:\n";
         for (uint8_t* p = vm->stack.base; p < vm->registers[vm::register_names::sp].data; ++p)

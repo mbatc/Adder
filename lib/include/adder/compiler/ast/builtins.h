@@ -7,8 +7,9 @@ namespace adder {
     }
 
     struct ast;
-    struct program_builder;
+    
+    ast builtins_module();
 
-    void define_builtins(ast* tree, expr::block *scope);
+    void import_builtins(ast * tree, expr::block * scope);
   }
 }

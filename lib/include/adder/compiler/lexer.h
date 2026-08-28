@@ -25,6 +25,7 @@ namespace adder {
         false_,
         integer,
         decimal,
+        fractional,
 
         // Keywords
         fn,
@@ -43,6 +44,9 @@ namespace adder {
         for_,
 
         return_,
+
+        from,
+        import_,
 
         // Grammar
         colon,
@@ -123,6 +127,10 @@ namespace adder {
         bool eof() const;
 
         std::vector<std::string> const& errors() const;
+
+        std::string && take_source() {
+          return std::move(m_source);
+        }
 
       private:
         bool _next();

@@ -1,0 +1,15 @@
+entry: ()=>void:main
+
+symbol:
+  name: ()=>void:main
+  exists: true
+
+symbol:
+  name: int64:f32_result
+  exists: true
+  value: 1
+  
+symbol:
+  name: int64:f64_result
+  exists: true
+  value: 1
