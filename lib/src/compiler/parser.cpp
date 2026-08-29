@@ -377,21 +377,23 @@ namespace adder {
       }
 
       bool consume_function_parameter_list(ast * tree, std::vector<size_t> * arguments, lexer::token_parser * tokenizer) {
-        while (tokenizer->current().id != lexer::token_id::close_paren) {
+        if (tokenizer->current().id == lexer::token_id::close_paren) {
+          tokenizer->next();
+          return true;
+        }
+
+        while (true) {
           auto paramId = consume_parameter(tree, tokenizer);
           if (!paramId.has_value())
             return false;
 
           arguments->push_back(paramId.value());
 
-          if (tokenizer->current().id == lexer::token_id::close_paren)
+          if (tokenizer->previous().id == lexer::token_id::close_paren)
             break;
-          if (tokenizer->current().id != lexer::token_id::comma)
+          if (tokenizer->previous().id != lexer::token_id::comma)
             return false;
-
-          tokenizer->next();
         }
-        tokenizer->next();
         return true;
       }
 
@@ -613,13 +615,13 @@ namespace adder {
 
         // Initialization statement
         if (tokenizer->current().id == lexer::token_id::assign) {
-          tokenizer->next();
-
           decl.initializer = consume_expression(tree, tokenizer, terminator);
           if (!decl.initializer.has_value())
             return std::nullopt;
         }
-
+        else if (!tokenizer->parse(terminator).ok()) {
+          return std::nullopt;
+        }
         return tree->add(decl);
       }
 
