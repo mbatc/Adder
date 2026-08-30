@@ -1190,7 +1190,6 @@ namespace adder {
 
       for (auto& ref : meta->symbol_references) {
         auto &     symbol   = ref.get();
-        const bool isImport = ref.meta != meta.get();
         const bool isInline = (symbol.flags & symbol_flags::inline_) == symbol_flags::inline_;
         if (symbol.has_local_storage() || symbol.is_parameter() || isInline) {
           continue;

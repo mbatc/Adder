@@ -31,6 +31,13 @@ namespace adder {
 
       template<typename T>
       bool is(size_t id) const { return std::holds_alternative<T>(statements[id]); }
+
+      std::string_view store(std::string_view const & str) {
+        text.push_back((std::string)str);
+        return text.back();
+      }
+
+      std::vector<std::string> text;
     };
   }
 }

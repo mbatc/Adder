@@ -488,8 +488,13 @@ namespace adder {
         case functor_type::free: return ret + ")=>" + returnName.value();
         case functor_type::member: return "mem " + ret + ")=>" + returnName.value();
         case functor_type::initializer: return "init " + ret + ")=>" + returnName.value();
+        case functor_type::destructor: return "destroy" + ret + ")=>" + returnName.value();
         case functor_type::operator_: return "op " + ret + ")=>" + returnName.value();
         }
+      }
+
+      if (ast.is<expr::class_decl>(statement)) {
+        return std::string(ast.get<expr::class_decl>(statement).identifier);
       }
 
       return std::nullopt;

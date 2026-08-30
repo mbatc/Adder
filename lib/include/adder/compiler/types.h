@@ -113,10 +113,16 @@ namespace adder {
     };
 
     struct type_class {
+      struct member {
+        std::string    identifier;
+        symbol_flags   flags;
+        type_reference type;
+        size_t         offset;
+      };
+
+      std::vector<member> members;
+
       size_t size = 0; ///< Size of the class in bytes
-      std::vector<std::string> members;
-      std::vector<std::string> methods;
-      std::vector<std::string> constructors;
     };
 
     struct type_function {

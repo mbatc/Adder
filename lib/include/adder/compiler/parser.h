@@ -57,8 +57,10 @@ namespace adder {
       // std::optional<size_t> add_function_declaration(ast * tree, std::string_view identifier, size_t returnType, std::vector<size_t> &&arguments, size_t bodyId, symbol_flags flags, functor_type funcType);
       // std::optional<size_t> consume_function_declaration(ast* tree, lexer::token_parser* tokenizer, lexer::token_view const& name, symbol_flags flags);
       std::optional<size_t> consume_variable_decl(ast* tree, lexer::token_parser* tokenizer, symbol_flags flags, rules::token_rule const& terminator);
-      std::optional<size_t> consume_init_fn(ast* tree, lexer::token_parser* tokenizer, symbol_flags flags = symbol_flags::none);
-      std::optional<size_t> consume_destroy_fn(ast* tree, lexer::token_parser* tokenizer, symbol_flags flags = symbol_flags::none);
+      std::optional<size_t> consume_init_fn(ast * tree, lexer::token_parser * tokenizer, std::string_view selfType,
+                                            symbol_flags flags = symbol_flags::none);
+      std::optional<size_t> consume_destroy_fn(ast * tree, lexer::token_parser * tokenizer, std::string_view selfType,
+                                               symbol_flags flags = symbol_flags::none);
       std::optional<size_t> consume_class(ast* tree, lexer::token_parser* tokenizer);
       std::optional<size_t> consume_extern(ast* tree, lexer::token_parser* tokenizer);
     }

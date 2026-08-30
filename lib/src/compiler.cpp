@@ -1074,7 +1074,7 @@ namespace adder {
 
       if (meta->tree.is<expr::class_decl>(statementId)) {
         // Parse class definition
-        printf("Error: class decl not implemented");
+        printf("Error: class decl not implemented\n");
         return std::nullopt;
       }
 
@@ -1083,17 +1083,6 @@ namespace adder {
       }
 
       return typeId;
-    }
-
-    bool evaluate_type_names(program_metadata * meta) {
-      for (size_t i = 0; i < meta->tree.statements.size(); ++i) {
-        evaluate_type_index(meta, i);
-      }
-      return true;
-    }
-
-    bool evaluate_types(program_metadata * meta) {
-      return evaluate_type_names(meta);
     }
 
     template<typename T>
@@ -1106,6 +1095,42 @@ namespace adder {
         [&](size_t childId) { result = evaluate_symbols(compiler, meta, childId, ctx);
       });
       return result;
+    }
+
+    bool evaluate_statement_symbols(context * compiler, program_metadata * meta, size_t id,
+                                    expr::class_decl const & decl, symbol_eval_context const & ctx) {
+      unused(compiler, id, decl, ctx);
+
+      type_class cls;
+      cls.members;
+      if (decl.destroy.has_value()) {
+        type_class::member dtor;
+        dtor.identifier = "";
+        dtor.flags      = symbol_flags::function;
+        if (!evaluate_symbols(compiler, meta, decl.destroy.value(), ctx))
+          return false;
+      }
+
+      for (size_t method : decl.methods) {
+        if (!evaluate_symbols(compiler, meta, method, ctx))
+          return false;
+      }
+
+      for (size_t member : decl.members) {
+        if (!evaluate_symbols(compiler, meta, member, ctx))
+          return false;
+      }
+
+      cls.size = 0;
+      // for (type_class::member & member : cls.members) {
+      //   if (member.flags) {
+      // 
+      //   }
+      // }
+
+      auto & statementMeta   = meta->statement_info[id];
+      statementMeta.type_ref = meta->add_type(type{std::string(decl.identifier), cls});
+      return !is_undefined(statementMeta.type_ref);
     }
 
     bool evaluate_statement_symbols(context* compiler, program_metadata* meta, size_t id,
@@ -1319,6 +1344,7 @@ namespace adder {
             symbol.full_identifier.data()
           );
         }
+
         meta->get(symbolRef->index).function_root_scope_id = thisBlockCtx.scope_id;
 
         for (const size_t statement : decl.arguments) {
