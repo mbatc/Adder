@@ -1030,7 +1030,7 @@ namespace adder {
         expr::type_modifier const & modifier = meta->tree.get<expr::type_modifier>(statementId);
         auto modified = evaluate_type_index(meta, modifier.modified);
         if (!modified.has_value()) {
-          printf("Error: class decl not implemented");
+          printf("Error: reference to unknown type\n");
           return std::nullopt;
         }
         type_modifier mod;
@@ -1057,7 +1057,7 @@ namespace adder {
         for (auto const & arg : fn.argument_list) {
           auto argType = evaluate_type_index(meta, arg);
           if (!argType.has_value()) {
-            printf("Error: unknown type argument type");
+            printf("Error: unknown type argument type\n");
             // TODO: Push error. Unable to evaluate argument type at index
             return std::nullopt;
           }
@@ -1101,6 +1101,12 @@ namespace adder {
                                     expr::class_decl const & decl, symbol_eval_context const & ctx) {
       unused(compiler, id, decl, ctx);
 
+      type_reference typeRef = meta->add_type(type{std::string(decl.identifier), type_incomplete{}});
+      if (!is_incomplete(typeRef)) {
+        printf("Class '%.*s' already defined\n", (int)decl.identifier.length(), decl.identifier.data());
+        return false;
+      }
+
       type_class cls;
       cls.members;
       if (decl.destroy.has_value()) {
@@ -1128,9 +1134,12 @@ namespace adder {
       //   }
       // }
 
-      auto & statementMeta   = meta->statement_info[id];
-      statementMeta.type_ref = meta->add_type(type{std::string(decl.identifier), cls});
-      return !is_undefined(statementMeta.type_ref);
+      // Complete the type definition
+      meta->types->at((size_t)typeRef.index).desc = cls;
+
+      auto & statementMeta = meta->statement_info[id];
+      statementMeta.type_ref = typeRef;
+      return !(is_undefined(typeRef) || is_incomplete(typeRef));
     }
 
     bool evaluate_statement_symbols(context* compiler, program_metadata* meta, size_t id,

@@ -85,6 +85,9 @@ namespace adder {
       }
     };
 
+    
+    struct type_incomplete {};
+
     enum class type_primitive {
       unknown = -1,
       void_,
@@ -154,7 +157,7 @@ namespace adder {
     };
 
     struct type {
-      using descriptor = std::variant<type_primitive, type_class, type_function, type_function_decl, type_modifier>;
+      using descriptor = std::variant<type_primitive, type_class, type_function, type_function_decl, type_modifier, type_incomplete>;
       std::string identifier;
       descriptor  desc;
 
@@ -186,6 +189,7 @@ namespace adder {
     size_t           get_size(std::optional<type_reference> const & ref);
 
     bool is_undefined(std::optional<type_reference> const & ref);
+    bool is_incomplete(std::optional<type_reference> const & ref);
 
     std::optional<type_reference> unwrap_type(std::optional<type_reference> const & refs);
     std::optional<type_reference> decay_type(std::optional<type_reference> const & ref);

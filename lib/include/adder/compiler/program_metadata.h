@@ -173,6 +173,7 @@ namespace adder {
       size_t get_type_size(type_function_decl const & desc) const;
       size_t get_type_size(type const & type) const;
       size_t get_type_size(type_id const & typeIndex) const;
+      size_t get_type_size(type_incomplete const & typeIndex) const;
 
       std::optional<symbol_reference> add_symbol(symbol_reference const & s);
       std::optional<symbol_reference> add_symbol(symbol const & s);

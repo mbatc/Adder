@@ -83,6 +83,11 @@ namespace adder {
       return get_type_size(get(typeIndex));
     }
 
+    size_t program_metadata::get_type_size(type_incomplete const & typeIndex) const {
+      unused(typeIndex);
+      return 0;
+    }
+
     size_t program_metadata::get_type_size(type const & type) const {
       return std::visit([this](auto const & o) { return get_type_size(o); }, type.desc);
     }
@@ -488,7 +493,7 @@ namespace adder {
         case functor_type::free: return ret + ")=>" + returnName.value();
         case functor_type::member: return "mem " + ret + ")=>" + returnName.value();
         case functor_type::initializer: return "init " + ret + ")=>" + returnName.value();
-        case functor_type::destructor: return "destroy" + ret + ")=>" + returnName.value();
+        case functor_type::destructor: return "destroy " + ret + ")=>" + returnName.value();
         case functor_type::operator_: return "op " + ret + ")=>" + returnName.value();
         }
       }

@@ -3,7 +3,11 @@
 
 namespace adder {
   namespace compiler {
-    bool is_integer(type_primitive const& primitive) {
+    bool is_incomplete(std::optional<type_reference> const & ref) {
+      return ref.has_value() && ref->is<type_incomplete>();
+    }
+
+    bool is_integer(type_primitive const & primitive) {
       return primitive >= type_primitive::int8
         && primitive <= type_primitive::uint64;
     }
