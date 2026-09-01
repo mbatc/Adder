@@ -121,10 +121,10 @@ namespace adder {
         symbol_flags   flags;
         type_reference type;
         size_t         offset;
+        std::optional<symbol_reference> symbol;
       };
 
       std::vector<member> members;
-
       size_t size = 0; ///< Size of the class in bytes
     };
 
