@@ -152,6 +152,78 @@ namespace adder {
       };
       std::vector<scope> scopes;
 
+      struct ns {
+        ns() = default;
+        ns(type_reference const & type)
+          : name(type.get_identifier())
+          , type(type) {}
+
+        ns(std::string name)
+          : name(std::move(name)) {}
+
+        /// Name of this namespace
+        std::optional<std::string> name;
+        /// Outer namespace
+        std::optional<size_t> outer;
+        /// Inner namespaces
+        std::vector<size_t> inner;
+        /// If nullopt, this namespace is a type definition
+        std::optional<type_reference> type;
+      };
+
+      std::vector<ns>     namespaces = {ns{""}};
+      std::vector<size_t> ns_stack   = {0};
+
+      ns const &global_namespace() const {
+        return namespaces.front();
+      }
+
+      ns & global_namespace() {
+        return namespaces.front();
+      }
+
+      ns const & current_namespace() const {
+        return namespaces[ns_stack.front()];
+      }
+
+      ns & current_namespace() {
+        return namespaces[ns_stack.front()];
+      }
+
+      std::optional<size_t> find_namespace(std::string const & name) const {
+        auto const & candidates = current_namespace().inner;
+        auto it = std::find_if(candidates.begin(), candidates.end(),
+                               [&](size_t idx) { namespaces[idx].name == name; });
+        if (it == candidates.end())
+          return std::nullopt;
+        return *it;
+      }
+
+      size_t begin_namespace(ns ns) {
+        std::optional<size_t> existing = ns.name.has_value() ? find_namespace(ns.name.value()) : std::nullopt;
+        if (existing.has_value()) {
+          return existing.value();
+        }
+
+        ns.outer = ns_stack.back();
+
+        size_t idx = namespaces.size();
+        namespaces.push_back(ns);
+        current_namespace().inner.push_back(idx);
+        ns_stack.push_back(idx);
+        return idx;
+      }
+
+      void end_namespace() {
+        ns_stack.pop_back();
+      }
+
+      std::optional<type_reference> current_type() const {
+        if (namespaces.empty())
+          return std::nullopt;
+        return namespaces.back().type;
+      }
+
       size_t new_scope(size_t parent);
       void   for_each_child_scope(size_t root, std::function<void(size_t)> const & cb);
 

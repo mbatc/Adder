@@ -21,6 +21,7 @@ namespace adder {
       vm::machine *                                                      vm = nullptr;
 
       type_library                                                       types;
+
       std::map<std::string, std::shared_ptr<compiler::program_metadata>> imports;
 
       std::shared_ptr<compiler::program_metadata> get_module_metadata(std::string const & source_module_name,
@@ -31,7 +32,7 @@ namespace adder {
                                                                    std::string const & source);
       std::shared_ptr<compiler::program_metadata> compile_metadata(std::string const & module_name, compiler::ast && ast,
                                                                    std::string && source = {});
-      
+
       std::optional<program> compile(vm::machine * vm, std::string const & module_name) {
         if (vm->compiler == nullptr) {
           vm->compiler     = std::make_shared<compiler::context>();

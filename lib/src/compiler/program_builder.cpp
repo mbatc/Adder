@@ -1231,7 +1231,7 @@ namespace adder {
         symbolTable.push_back(item);
       }
 
-      const auto write_relocations = [&]() { // 
+      const auto write_relocations = [&]() {
         std::map<relocation_linkage, std::map<std::string_view, std::vector<size_t>>> reloc_table;
         for (auto& reloc : relocations) {
           const auto& func = functions[reloc.function_id].symbol.get();

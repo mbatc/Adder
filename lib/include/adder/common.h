@@ -69,7 +69,12 @@ namespace adder {
   }
 
   template<class... Ts>
-  struct overloads : Ts... { using Ts::operator()...; };
+  struct overloads : Ts... {
+    using Ts::operator()...;
+  };
+
+  template<class... Ts>
+  overloads(Ts...) -> overloads<Ts...>;
 }
 
 template<typename T, std::enable_if_t<adder::enable_bitwise_ops_v<T>>* = 0>

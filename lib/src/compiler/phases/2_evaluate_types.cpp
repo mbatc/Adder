@@ -69,6 +69,8 @@ namespace adder {
         return false;
       }
 
+      meta->begin_namespace(program_metadata::ns{typeRef});
+
       type_class cls;
       cls.members;
       if (decl.destroy.has_value()) {
@@ -89,7 +91,8 @@ namespace adder {
           return false;
       }
 
-      cls.size = 0;
+      meta->end_namespace();
+
       // for (type_class::member & member : cls.members) {
       //   if (member.flags) {
       //
@@ -448,73 +451,6 @@ namespace adder {
         }
       }
       return true;
-    }
-    
-    /// Evaluate the type index of a ast statement that refers to a type
-    std::optional<type_reference> evaluate_type_index(program_metadata * meta, size_t statementId) {
-      std::optional<size_t> ret;
-      auto& typeId = meta->statement_info[statementId].type_ref;
-      if (typeId.has_value()) {
-        return typeId;
-      }
-
-      if (meta->tree.is<expr::type_modifier>(statementId)) {
-        expr::type_modifier const & modifier = meta->tree.get<expr::type_modifier>(statementId);
-        auto modified = evaluate_type_index(meta, modifier.modified);
-        if (!modified.has_value()) {
-          printf("Error: reference to unknown type\n");
-          return std::nullopt;
-        }
-        type_modifier mod;
-        mod.base = modified.value();
-        mod.const_ = modifier.const_;
-        mod.reference = modifier.reference;
-
-        type t;
-        t.desc = mod;
-        t.identifier = get_type_name(meta->tree, statementId).value();
-        typeId = meta->add_type(t);
-      }
-
-      if (meta->tree.is<expr::type_fn>(statementId)) {
-        expr::type_fn const & fn = meta->tree.get<expr::type_fn>(statementId);
-
-        auto returnType = evaluate_type_index(meta, fn.return_type);
-        if (!returnType.has_value()) {
-          return std::nullopt;
-        }
-
-        type_function desc;
-        desc.return_type = returnType.value();
-        for (auto const & arg : fn.argument_list) {
-          auto argType = evaluate_type_index(meta, arg);
-          if (!argType.has_value()) {
-            printf("Error: unknown type argument type\n");
-            // TODO: Push error. Unable to evaluate argument type at index
-            return std::nullopt;
-          }
-          desc.arguments.push_back(argType.value());
-        }
-        desc.func_type = fn.func_type;
-
-        type t;
-        t.desc = desc;
-        t.identifier = get_type_name(meta->tree, statementId).value();
-
-        typeId = meta->add_type(t);
-      }
-
-      if (meta->tree.is<expr::class_decl>(statementId)) {
-        // Parse class definition
-        printf("Error: class decl not implemented\n");
-        return std::nullopt;
-      }
-
-      if (!typeId.has_value()) {
-        typeId = meta->get_type_reference(statementId);
-      }
-
-      return typeId;
     }
   } // namespace compiler
 } // namespace adder
