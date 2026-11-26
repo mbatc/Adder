@@ -860,12 +860,12 @@ namespace adder {
       while (!tokenizer->eof()) {
         std::optional<size_t> nextStatement;
         switch (tokenizer->current().id) {
-        case lexer::token_id::fn:       nextStatement = parser::consume_fn(&ast, tokenizer, functor_type::free); break;
-        case lexer::token_id::const_:   nextStatement = parser::consume_const(&ast, tokenizer); break;
-        case lexer::token_id::let:      nextStatement = parser::consume_let(&ast, tokenizer); break;
-        case lexer::token_id::class_:   nextStatement = parser::consume_class(&ast, tokenizer); break;
-        case lexer::token_id::extern_:  nextStatement = parser::consume_extern(&ast, tokenizer); break;
-        case lexer::token_id::from:     nextStatement = parser::consume_from(&ast, tokenizer); break;
+        case lexer::token_id::fn:      nextStatement = parser::consume_fn(&ast, tokenizer, functor_type::free); break;
+        case lexer::token_id::const_:  nextStatement = parser::consume_const(&ast, tokenizer); break;
+        case lexer::token_id::let:     nextStatement = parser::consume_let(&ast, tokenizer); break;
+        case lexer::token_id::class_:  nextStatement = parser::consume_class(&ast, tokenizer); break;
+        case lexer::token_id::extern_: nextStatement = parser::consume_extern(&ast, tokenizer); break;
+        case lexer::token_id::from:    nextStatement = parser::consume_from(&ast, tokenizer); break;
         default:
           break;
         }

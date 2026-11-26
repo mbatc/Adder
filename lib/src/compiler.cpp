@@ -1,22 +1,24 @@
 #include "compiler.h"
-#include "common.h"
 #include "vm.h"
-#include "program.h"
+#include "compiler/context.h"
 
-#include "compiler/lexer.h"
-#include "compiler/ast.h"
-#include "compiler/parser.h"
-#include "compiler/ast/expressions.h"
-#include "compiler/program_builder.h"
-
-#include <memory>
-#include <map>
-#include <variant>
-#include <optional>
-#include <functional>
-#include <algorithm>
 
 namespace adder {
-  namespace compiler {
-  } // namespace compiler
+  std::optional<program> compile(vm::machine * vm, std::string const & module_name) {
+    if (vm->compiler == nullptr) {
+      vm->compiler     = std::make_shared<compiler::context>();
+      vm->compiler->vm = vm;
+    }
+
+    return phase3_generate_code(vm->compiler->get_module_metadata(module_name));
+  }
+
+  std::optional<program> compile(vm::machine * vm, std::string const & module_name, std::string const & source) {
+    if (vm->compiler == nullptr) {
+      vm->compiler     = std::make_shared<compiler::context>();
+      vm->compiler->vm = vm;
+    }
+
+    return phase3_generate_code(vm->compiler->compile_metadata(module_name, source));
+  }
 } // namespace adder

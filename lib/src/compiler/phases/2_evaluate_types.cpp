@@ -1,4 +1,5 @@
 #include "../context.h"
+#include <assert.h>
 
 namespace adder {
   namespace compiler {
@@ -8,6 +9,8 @@ namespace adder {
       bool                  is_call                = false;
       std::optional<size_t> call_parameter_list;
     };
+
+    bool evaluate_symbols(context * compiler, program_metadata * meta, size_t id, symbol_eval_context const & ctx);
 
     type_reference eval_decltype(program_metadata * meta, size_t statementId);
 
@@ -73,6 +76,11 @@ namespace adder {
 
       type_class cls;
       cls.members;
+      for (size_t member : decl.members) {
+        if (!evaluate_symbols(compiler, meta, member, ctx))
+          return false;
+      }
+
       if (decl.destroy.has_value()) {
         type_class::member dtor;
         dtor.identifier = "";
@@ -83,11 +91,6 @@ namespace adder {
 
       for (size_t method : decl.methods) {
         if (!evaluate_symbols(compiler, meta, method, ctx))
-          return false;
-      }
-
-      for (size_t member : decl.members) {
-        if (!evaluate_symbols(compiler, meta, member, ctx))
           return false;
       }
 

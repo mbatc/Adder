@@ -10,7 +10,7 @@ namespace adder {
     bool find_type_names(context * compiler, ast const & tree, program_metadata * meta, T const & decl, size_t statementId) {
       unused(decl);
 
-      visit_sub_expressions(tree, statementId, [&](size_t child) { find_types(compiler, tree, meta, child); });
+      visit_sub_expressions(tree, statementId, [&](size_t child) { find_type_names(compiler, tree, meta, child); });
 
       auto & typeId = meta->statement_info[statementId].type_ref;
       typeId        = meta->get_type_reference(statementId);
@@ -34,6 +34,8 @@ namespace adder {
     }
 
     bool find_type_names(context * compiler, program_metadata * meta, size_t id, expr::import_symbol const & import_stmt) {
+      adder::unused(id);
+
       std::string                       name                 = (std::string)import_stmt.module_name;
       std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(meta->module_name, name);
 
@@ -46,6 +48,8 @@ namespace adder {
     }
 
     bool find_type_names(context * compiler, program_metadata * meta, size_t id, expr::import_module const & import_stmt) {
+      adder::unused(id);
+
       std::string                       name                 = (std::string)import_stmt.module_name;
       std::shared_ptr<program_metadata> imported_module_meta = compiler->get_module_metadata(meta->module_name, name);
       for (size_t i = 0; i < imported_module_meta->types->size(); ++i) {
@@ -55,7 +59,7 @@ namespace adder {
     }
 
     bool find_type_names(context * compiler, ast const & tree, program_metadata * meta, size_t statementId) {
-      std::visit([&](auto const & exp) { return find_type_names(compiler, tree, meta, exp, statementId); },
+      return  std::visit([&](auto const & exp) { return find_type_names(compiler, tree, meta, exp, statementId); },
                  tree.statements[statementId]);
     }
 
@@ -211,12 +215,12 @@ namespace adder {
     }
 
     bool complete_type_definitions(context * compiler, ast const & tree, program_metadata * meta, size_t statementId) {
-      std::visit([&](auto const & exp) { return find_type_names(compiler, tree, meta, exp, statementId); },
+      return std::visit([&](auto const & exp) { return find_type_names(compiler, tree, meta, exp, statementId); },
                  tree.statements[statementId]);
     }
 
     bool evaluate_type_layout(type_reference const & ref) {
-      constexpr size_t incomplete_size = -1;
+      constexpr size_t incomplete_size = (size_t)-1;
 
       if (ref.get_size() == incomplete_size) {
         printf("Error: Type definition has cyclic dependency.\n");
@@ -253,7 +257,7 @@ namespace adder {
 
                             return ref.get_size() != 0;
                           },
-                          [&](auto & desc) { return true; },
+                          [&](auto &) { return true; },
                         },
                         type.desc
       );

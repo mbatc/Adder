@@ -31,70 +31,7 @@ namespace adder {
         return value == rhs.value && first_conversion_index == rhs.first_conversion_index;
       }
     };
-
-    enum class symbol_id : size_t {
-      none = -1,
-    };
     
-    struct symbol {
-      std::string name;
-      std::string full_identifier;
-      type_reference type = type_reference::undefined();
-
-      /// Flags for the symbol
-      symbol_flags flags = symbol_flags::none;
-      /// Stack frame offset for local variables
-      // std::optional<uint64_t> stack_offset;
-      /// Static address for static/global.
-      /// Cannot be resolved until program data area has been compiled.
-      std::optional<uint64_t> global_address;
-      /// Statement that produced this symbol.
-      /// size_t statement_id = 0;
-      /// Scope that declared this symbol.
-      size_t scope_id = 0;
-      /// ID if the statement that declared this symbol
-      std::optional<size_t> declaration_id;
-      /// Function declaration root scope id.
-      std::optional<size_t> function_root_scope_id;
-      /// Function declaration associated with this symbol.
-      std::optional<size_t> function_index;
-
-      bool is_parameter() const {
-        return (flags & symbol_flags::fn_parameter) != symbol_flags::none;
-      }
-      bool is_static() const {
-        return (flags & symbol_flags::static_) != symbol_flags::none;
-      }
-      bool is_function() const {
-        return (flags & symbol_flags::function) != symbol_flags::none;
-      }
-      bool is_global() const {
-        return scope_id == 0;
-      };
-      bool has_local_storage() const {
-        return !is_global() && !is_static();
-      }
-    };
-
-    struct symbol_reference {
-      program_metadata const * meta;
-      symbol_id                index;
-
-      bool operator==(symbol_reference const & rhs) const
-      {
-        return meta == rhs.meta && index == rhs.index;
-      }
-      
-      bool operator!=(symbol_reference const & rhs) const
-      {
-        return !operator==(rhs);
-      }
-
-      symbol const & get() const;
-      size_t         get_size() const;
-      type_reference get_type() const;
-    };
-
     using type_library = std::vector<type>;
 
     struct program_metadata {
@@ -193,7 +130,7 @@ namespace adder {
       std::optional<size_t> find_namespace(std::string const & name) const {
         auto const & candidates = current_namespace().inner;
         auto it = std::find_if(candidates.begin(), candidates.end(),
-                               [&](size_t idx) { namespaces[idx].name == name; });
+                               [&](size_t idx) { return namespaces[idx].name == name; });
         if (it == candidates.end())
           return std::nullopt;
         return *it;

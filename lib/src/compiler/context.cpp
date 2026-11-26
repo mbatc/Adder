@@ -4,6 +4,7 @@
 #include "compiler/parser.h"
 #include "compiler/ast/expressions.h"
 #include "compiler/program_builder.h"
+#include "compiler.h"
 
 namespace adder {
   namespace compiler {
@@ -64,23 +65,5 @@ namespace adder {
 
       return meta;
     }
-    
-    std::optional<program> context::compile(vm::machine * vm, std::string const & module_name) {
-      if (vm->compiler == nullptr) {
-        vm->compiler     = std::make_shared<compiler::context>();
-        vm->compiler->vm = vm;
-      }
-
-      return phase3_generate_code(vm->compiler->get_module_metadata(module_name));
-    }
-
-    std::optional<program> context::compile(vm::machine * vm, std::string const & module_name, std::string const & source) {
-      if (vm->compiler == nullptr) {
-        vm->compiler = std::make_shared<compiler::context>();
-        vm->compiler->vm = vm;
-      }
-    
-      return phase3_generate_code(vm->compiler->compile_metadata(module_name, source));
-    }
-  }
+  } // namespace compiler
 }

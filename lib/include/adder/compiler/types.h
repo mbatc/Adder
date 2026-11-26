@@ -10,23 +10,6 @@ namespace adder {
   // Compiler implementation
   namespace compiler {
     struct program_metadata;
-    enum class symbol_flags {
-      none         = 0,
-      const_       = 1 << 0, ///< Symbol can not be mutated.
-      extern_      = 1 << 1, ///< External to the program. Symbol is located by the host.
-      import_      = 1 << 3, ///< Symbol imported from another module.
-      fn_parameter = 1 << 4, ///< This variable is a function parameter
-      static_      = 1 << 5, ///< This symbol has static storage
-      inline_      = 1 << 6, ///< This symbol can be inlined where possible
-      function     = 1 << 7, ///< This symbol is a function definition
-    };
-  }
-
-  template<>
-  struct enable_bitwise_ops<compiler::symbol_flags> : std::true_type {};
-
-  namespace compiler {
-    struct program_metadata;
     struct type;
 
     enum class type_primitive;
@@ -80,12 +63,90 @@ namespace adder {
       }
 
       template<typename T>
-      T const* try_get_as() const {
+      T const * try_get_as() const {
         return is<T>() ? &as<T>() : nullptr;
       }
     };
 
-    
+    enum class symbol_id : size_t {
+      none = -1,
+    };
+
+    enum class symbol_flags {
+      none         = 0,
+      const_       = 1 << 0, ///< Symbol can not be mutated.
+      extern_      = 1 << 1, ///< External to the program. Symbol is located by the host.
+      import_      = 1 << 3, ///< Symbol imported from another module.
+      fn_parameter = 1 << 4, ///< This variable is a function parameter
+      static_      = 1 << 5, ///< This symbol has static storage
+      inline_      = 1 << 6, ///< This symbol can be inlined where possible
+      function     = 1 << 7, ///< This symbol is a function definition
+    };
+  }
+
+  template<>
+  struct enable_bitwise_ops<compiler::symbol_flags> : std::true_type {};
+
+  namespace compiler {
+    struct symbol {
+      std::string    name;
+      std::string    full_identifier;
+      type_reference type = type_reference::undefined();
+
+      /// Flags for the symbol
+      symbol_flags flags = symbol_flags::none;
+      /// Stack frame offset for local variables
+      // std::optional<uint64_t> stack_offset;
+      /// Static address for static/global.
+      /// Cannot be resolved until program data area has been compiled.
+      std::optional<uint64_t> global_address;
+      /// Statement that produced this symbol.
+      /// size_t statement_id = 0;
+      /// Scope that declared this symbol.
+      size_t scope_id = 0;
+      /// ID if the statement that declared this symbol
+      std::optional<size_t> declaration_id;
+      /// Function declaration root scope id.
+      std::optional<size_t> function_root_scope_id;
+      /// Function declaration associated with this symbol.
+      std::optional<size_t> function_index;
+
+      bool is_parameter() const {
+        return (flags & symbol_flags::fn_parameter) != symbol_flags::none;
+      }
+      bool is_static() const {
+        return (flags & symbol_flags::static_) != symbol_flags::none;
+      }
+      bool is_function() const {
+        return (flags & symbol_flags::function) != symbol_flags::none;
+      }
+      bool is_global() const {
+        return scope_id == 0;
+      };
+      bool has_local_storage() const {
+        return !is_global() && !is_static();
+      }
+    };
+
+    struct symbol_reference {
+      program_metadata const * meta;
+      symbol_id                index;
+
+      bool operator==(symbol_reference const & rhs) const {
+        return meta == rhs.meta && index == rhs.index;
+      }
+
+      bool operator!=(symbol_reference const & rhs) const {
+        return !operator==(rhs);
+      }
+
+      symbol const & get() const;
+      size_t         get_size() const;
+      type_reference get_type() const;
+    };
+  }
+
+  namespace compiler {
     struct type_incomplete {};
 
     enum class type_primitive {

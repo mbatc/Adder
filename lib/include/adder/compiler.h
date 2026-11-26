@@ -18,8 +18,4 @@ namespace adder {
 
   std::optional<program> compile(vm::machine * vm, std::string const & module_name);
   std::optional<program> compile(vm::machine * vm, std::string const & module_name, std::string const & source);
-
-  namespace compiler {
-    struct context;
-  }
 }
